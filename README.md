@@ -21,6 +21,8 @@ Generate Forza Horizon 6 Vinyl Group layers from PNG/JPG/BMP images. The desktop
 
 > **If the result looks blurry:** raise `Random samples` first. Values above **200000** usually make a major quality difference; higher values are clearer but take much longer to generate.
 
+>  **Import is too slow:** The new version (>v1.4.0) has updated the reading algorithm and increased the timeout limit to two minutes. If the process times out before finishing, please submit an issue and attach your log file.
+
 | What it does | Details |
 | --- | --- |
 | Generate JSON | Convert images into geometry JSON with the bundled GPU/OpenCL generator. |
