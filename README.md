@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <code>v1.5.0</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code>
+  <code>v1.5.1</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code>
 </p>
 
 Generate Forza Horizon 6 Vinyl Group layers from PNG/JPG/BMP images. The desktop app handles generation, preview, and import in one place; normal users do not need to type memory addresses.
@@ -25,6 +25,8 @@ Generate Forza Horizon 6 Vinyl Group layers from PNG/JPG/BMP images. The desktop
 > **Generation speed update:** v1.5.0 bundles upstream GPU generator `canary-26052102`, which adds the work-group evaluation algorithm from upstream PR #4 to speed up GPU candidate evaluation.
 
 > **Update check:** v1.5.0 checks for new versions on startup. Failed checks show a small `!` in the top-right; newer versions show changelog notes and an update-page button.
+
+> **Startup fix:** v1.5.1 repairs project `.venv` folders that were created without `pip`, and shows a clearer message if the release ZIP was not fully extracted.
 
 >  **Import is too slow:** The new version (v1.4.1+) tries both the v1.3 and v1.4 FH6 template locators, then falls back to RTTI scanning. Auto-location can take up to 5 minutes; keep FH6 in Vinyl Group Editor and attach an exported detailed log if it still fails.
 
@@ -177,6 +179,12 @@ The app locates and verifies the current FH6 layer table before writing. If the 
 - Transparent PNG backgrounds are not imported as visible backgrounds.
 
 ## Changelog
+
+### v1.5.1 / 2026-05-22
+
+- Updated the app version to `v1.5.1`; release packages now use `forza-painter-fh6-v1.5.1.zip`.
+- Fixed startup dependency installation when a project `.venv` exists but its Python does not have `pip`; the bootstrapper now runs `ensurepip --upgrade` before installing requirements.
+- Improved startup-script diagnostics when required release files are missing, with a clear message to fully extract the release ZIP first.
 
 ### v1.5.0 / 2026-05-22
 

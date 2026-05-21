@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <code>v1.5.0</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code>
+  <code>v1.5.1</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code>
 </p>
 
 把 PNG/JPG/BMP 图片转换成 Forza Horizon 6 的 Vinyl Group 图层。软件内完成生成、预览和导入，普通用户不需要手动填写内存地址。
@@ -25,6 +25,8 @@
 > **生成速度更新：** v1.5.0 内置上游 GPU 生成器 `canary-26052102`，引入上游 PR #4 的 work-group evaluation 算法，用于加速 GPU 候选图形评估。
 
 > **自动更新检查：** v1.5.0 启动时会检查新版本。检查失败会在右上角显示小 `!`；发现新版本会显示更新内容和更新页面按钮。
+
+> **启动修复：** v1.5.1 会自动修复已创建但缺少 `pip` 的项目 `.venv`，并在发布包没有完整解压时给出更明确的提示。
 
 > **导入过慢：** v1.4.1 起会依次尝试 v1.3 和 v1.4 两套 FH6 模板定位逻辑，并在必要时使用 RTTI fallback。自动定位最长可能需要 5 分钟；请保持 FH6 停留在 Vinyl Group Editor，不要切换菜单，若仍失败请导出详细日志并提交 issue。
 
@@ -155,6 +157,12 @@ check_environment.bat
 - 如果导入后画面很糊，通常是导入了较低层数 checkpoint，或者生成时 `Output layers` 设置太低。
 
 ## 更新日志
+
+### v1.5.1 / 2026-05-22
+
+- 版本更新到 `v1.5.1`，发布包名称同步为 `forza-painter-fh6-v1.5.1.zip`。
+- 修复项目 `.venv` 已存在但其中 Python 缺少 `pip` 时依赖安装失败的问题；启动器现在会先执行 `ensurepip --upgrade` 再安装依赖。
+- 改进启动脚本诊断：如果发布包关键文件缺失，会明确提示用户先完整解压 release ZIP。
 
 ### v1.5.0 / 2026-05-22
 

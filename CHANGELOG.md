@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.5.1 / 2026-05-22
+
+- Fixed startup dependency installation when a project `.venv` exists but its Python does not have `pip`; the bootstrapper now runs `ensurepip --upgrade` before installing requirements.
+- Improved startup-script diagnostics when required release files are missing, with a clear message to fully extract the release ZIP first.
+
 ## v1.5.0 / 2026-05-22
 
 - Added a startup update check against the GitHub `main` branch version file.

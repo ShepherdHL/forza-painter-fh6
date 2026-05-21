@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <code>v1.5.0</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code>
+  <code>v1.5.1</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code>
 </p>
 
 PNG/JPG/BMP 이미지를 Forza Horizon 6 비닐 그룹 레이어용 geometry JSON으로 변환합니다. 데스크톱 앱에서 JSON 생성, 미리보기, FH6 가져오기를 한 번에 처리할 수 있으며 일반 사용자는 메모리 주소를 직접 입력하지 않아도 됩니다.
@@ -25,6 +25,8 @@ PNG/JPG/BMP 이미지를 Forza Horizon 6 비닐 그룹 레이어용 geometry JSO
 > **생성 속도 업데이트:** v1.5.0은 upstream GPU 생성기 `canary-26052102`를 포함하며, upstream PR #4의 work-group evaluation 알고리즘으로 GPU 후보 평가 속도를 개선합니다.
 
 > **업데이트 확인:** v1.5.0은 시작 시 새 버전을 확인합니다. 확인에 실패하면 오른쪽 위에 작은 `!`가 표시되고, 새 버전이 있으면 변경 내역과 업데이트 페이지 버튼이 표시됩니다.
+
+> **시작 문제 수정:** v1.5.1은 `pip` 없이 만들어진 프로젝트 `.venv`를 자동으로 복구하며, 릴리스 ZIP을 완전히 압축 해제하지 않은 경우 더 명확한 안내를 표시합니다.
 
 > **가져오기가 너무 느리면:** v1.4.1부터는 v1.3 및 v1.4 FH6 템플릿 찾기 방식을 모두 시도한 뒤 필요하면 RTTI fallback을 사용합니다. 자동 찾기는 최대 5분 정도 걸릴 수 있으므로 FH6를 Vinyl Group Editor에 그대로 두고 메뉴를 전환하지 마세요. 그래도 실패하면 자세한 로그를 내보내 이슈에 첨부해 주세요.
 
