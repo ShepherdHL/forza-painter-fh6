@@ -27,6 +27,8 @@ if ($LASTEXITCODE -ne 0) {
 
 & $Python -m pip install -r (Join-Path $Root "requirements.txt")
 
+& powershell -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\fetch_librehardwaremonitor.ps1")
+
 if (Test-Path $BuildRoot) {
     Remove-Item -LiteralPath $BuildRoot -Recurse -Force
 }
@@ -45,7 +47,9 @@ $common = @(
     "--hidden-import", "numpy",
     "--hidden-import", "PIL",
     "--hidden-import", "PIL.Image",
-    "--hidden-import", "PIL.ImageDraw"
+    "--hidden-import", "PIL.ImageDraw",
+    "--hidden-import", "clr",
+    "--collect-all", "pythonnet"
 )
 
 $appArgs = $common + @(
@@ -55,6 +59,7 @@ $appArgs = $common + @(
     "--add-data", "$(Join-Path $Root 'bin');bin",
     "--add-data", "$(Join-Path $Root 'assets');assets",
     "--add-data", "$(Join-Path $Root 'docs');docs",
+    "--add-data", "$(Join-Path $Root 'bin\librehardwaremonitor');librehardwaremonitor",
     (Join-Path $Root "src\app.py")
 )
 & $Python -m PyInstaller @appArgs

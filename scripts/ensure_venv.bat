@@ -8,7 +8,7 @@ set "VENV_DIR=%ROOT%\.venv"
 set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
 
 if exist "%VENV_PYTHON%" (
-    "%VENV_PYTHON%" -c "import psutil, win32api" >nul 2>nul
+    "%VENV_PYTHON%" -c "import psutil, win32api, clr" >nul 2>nul
     if not errorlevel 1 (
         echo Project virtual environment is ready: %VENV_DIR%
         exit /b 0
@@ -45,6 +45,8 @@ if errorlevel 1 goto Failed
 
 "%VENV_PYTHON%" -m pip install -r requirements.txt
 if errorlevel 1 goto Failed
+
+powershell -ExecutionPolicy Bypass -File "%ROOT%\scripts\fetch_librehardwaremonitor.ps1" >nul 2>nul
 
 "%VENV_PYTHON%" -c "import sys; raise SystemExit(0 if sys.version_info < (3, 13) else 1)" >nul 2>nul
 if errorlevel 1 (

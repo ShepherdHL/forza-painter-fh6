@@ -1,0 +1,8 @@
+# Optional: read katakana / Japanese from reference images (OCR).
+# Also install Tesseract OCR and Japanese language data:
+#   https://github.com/tesseract-ocr/tesseract
+#   (Windows installer: include "Japanese" language pack)
+pytesseract>=0.3.10
+
+# Heavier alternative with better complex-layout accuracy (optional):
+# easyocr>=1.7.0

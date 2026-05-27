@@ -15,12 +15,12 @@
 </p>
 
 <p align="center">
-  <code>v1.6.0</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>One-file EXE</code>
+  <code>v1.6.6</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>One-file EXE</code>
 </p>
 
 Convert PNG/JPG/BMP images into Forza Horizon 6 Vinyl Group layers. The app handles generation, preview, and import in one desktop window; normal users do not need Python, `.venv`, batch files, or manual memory addresses.
 
-> **Download the EXE:** get `forza-painter-fh6-v1.6.0.exe` from [Releases](https://github.com/bvzrays/forza-painter-fh6/releases) and run it directly.
+> **Download the EXE:** get `forza-painter-fh6-v1.6.6.exe` from [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) and run it directly.
 
 > **If the result looks blurry:** raise `Random samples` first. Values above **200000** usually make a major quality difference; higher values are clearer but take much longer to generate.
 
@@ -29,18 +29,21 @@ Convert PNG/JPG/BMP images into Forza Horizon 6 Vinyl Group layers. The app hand
 | What it does | Details |
 | --- | --- |
 | Generate JSON | Convert images into geometry JSON with the bundled GPU/OpenCL generator. |
-| Preview output | Show source and generated geometry previews inside the app. |
-| Import to FH6 | Import JSON into the currently open FH6 Vinyl Group Editor. |
+| Image Preview | Compare preprocess filters (luma, bilateral, posterize, cel shading, etc.) before generating. |
+| Text vinyl | Type Mandarin/CJK with GB2312 picker and system fonts, or trace a reference image; see `docs/TEXT_VINYL.md`. |
+| Import Final JSON | Import generated geometry JSON into FH6 (run browser + best-final picker). |
+| Import Handmade JSON | Import FH6 type-code / handmade JSON (squares, circles, triangles, etc.). |
+| Export Game JSON | Export the open FH6 vinyl group to handmade JSON for editing or sharing. |
 | Safe FH6 workflow | Auto-locate and verify the editable layer table before writing. |
 | Update check | Check for new versions on startup and show changelog notes when available. |
 
 ## Quick Start
 
-1. Download `forza-painter-fh6-v1.6.0.exe` from [Releases](https://github.com/bvzrays/forza-painter-fh6/releases).
+1. Download `forza-painter-fh6-v1.6.6.exe` from [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases).
 2. Put the EXE in a normal writable folder, for example `Desktop\forza-painter-fh6`.
 3. Double-click the EXE. For FH6 import, run it as administrator if Windows blocks process access.
 4. In FH6, open `Create Vinyl Group` / `Vinyl Group Editor`, load a sphere template, then `Ungroup` it.
-5. In the app, generate JSON, open the `Import` page, enter the exact template layer count, then import.
+5. In the app, generate JSON, open **Import Final JSON**, **enter the exact template layer count**, then import.
 
 Do not download GitHub's automatic `Source code` ZIP unless you are developing the project. Normal users only need the `.exe`.
 
@@ -73,10 +76,11 @@ Do not download GitHub's automatic `Source code` ZIP unless you are developing t
 
 1. Open the `Generate JSON` page.
 2. Click `Add images` and choose PNG/JPG/BMP images.
-3. Select a quality preset.
-4. Optional: enable `Use custom settings` to change output layers, resolution, random samples, and mutated samples.
-5. Click the fixed bottom `Start generating` button.
-6. Wait for the preview and logs to update.
+3. Optional: on **Image Preview**, compare preprocess filters and pick one for generation.
+4. Select a quality preset and optional **Preprocess Filter** (luma bands, bilateral, posterize, cel shading, etc.).
+5. Optional: enable `Use custom settings` to change output layers, resolution, random samples, and mutated samples.
+6. Click the fixed bottom `Start generating` button.
+7. Wait for the preview and logs to update.
 
 Generated files are saved beside the source image, for example `image.500.json`, `image.1000.json`, and `image.3000.json`.
 
@@ -90,15 +94,38 @@ One image can generate multiple checkpoint JSON files. Prefer the highest-layer 
 | slow | 2500 | 220000 | Final quality; starts using the 200k+ quality range |
 | super slow | 3000 | 350000 | Best clarity, very slow |
 
+## Text vinyl
+
+Use the **Text vinyl** tab when in-game lettering cannot show your script (Mandarin, katakana, other CJK). 
+Text Vinyl's are identified from fonts stored on your machine (ex. Settings>Personalization>Fonts). 
+Pick an installed font or insert characters directly from the GB2312 library. 
+If your text is derived from an image, you can also trace text from reference images. 
+
+Optional OCR: `pip install -r requirements-text-ocr.txt` — see `docs/TEXT_VINYL.md`.
+
 ## Import JSON
+
+### Import Final JSON (generated geometry)
 
 1. Start FH6 and keep `Vinyl Group Editor` open.
 2. Load or create a template made from many simple sphere layers.
 3. `Ungroup` the template and remember the exact in-game layer count.
-4. In the app, open `Import`, click `Refresh`, and select `forzahorizon6.exe`.
-5. Enter the exact template layer count.
-6. Add the generated `.json`, or click `Use generated JSON`.
-7. Leave advanced address fields empty and click `Import JSON`.
+4. Open **Import Final JSON**, click `Refresh`, and select `forzahorizon6.exe`.
+5. Enter the exact template layer count (**required**).
+6. Pick a generated run folder or add `.json` files / **Use generated outputs**.
+7. Click **Import final JSON into FH6** (leave advanced address fields empty unless support asks you to use them).
+
+### Import Handmade JSON (type-code shapes)
+
+1. Use the same game connection and template layer count as above.
+2. Open **Import Handmade JSON**, add handmade/type-code `.json`, and review supported vs unsupported shapes in the preview.
+3. Import, then **save and reload the vinyl group in FH6** so shapes display correctly.
+4. Optional: trim group layer count after import; allow experimental shape codes only if you know the JSON source.
+
+### Export Game JSON
+
+1. With FH6 in Vinyl Group Editor and the vinyl group you want to copy open, open **Export Game JSON**.
+2. Click **Export open FH6 group to JSON** (files go to `runtime/typecode-export/` beside the app).
 
 FH needs 4 extra boundary layers to save the cover and apply bounds correctly. Example: a 1000-layer JSON should use at least a 1004-layer template; a 3000-layer template can import about 2996 drawable shapes.
 
@@ -133,13 +160,90 @@ These folders can be deleted when the app is closed if you want to reset local r
 
 ## Resources
 
-- Import walkthrough video: https://www.bilibili.com/video/BV1hG5Z6nENZ
-- Bundled GPU generator source/reference: https://github.com/zjl88858/forza-painter-geometrize-gpu
+- Import walkthrough video: `https://www.bilibili.com/video/BV1hG5Z6nENZ`
+- Bundled GPU generator source/reference: `https://github.com/zjl88858/forza-painter-geometrize-gpu`
 - Full changelog: [CHANGELOG.md](CHANGELOG.md)
+
+## FAQ
+
+*(Adapted from the_adawg's)*
+
+### What exactly does this tool do?
+
+If you've ever seen any iteration of [TRON](https://youtu.be/6Nn7J1Eb87E?si=m6VR8BdN_jAZZMgo), it's a lot like that, but now you get to watch it happen to an image in real time. For most users, that seems to be every anime or cartoon character ever created.
+
+This program takes any image and breaks it apart into primitive shapes used in the Forza Horizon vinyl editor: squares, rectangles, circles, or (ideally) whichever shapes work best for the image you're importing.
+
+You can choose the level of detail from six presets, or write your own. Each preset ranges from low detail / fast processing to high detail / long processing.
+
+This version uses your graphics card (GPU) to process the image into shapes. If you're generating high detail, it's recommended to close the game during generation so you don't overheat your machine. A warning system is integrated as well—check the output log every so often during generation. Unless your machine is over a decade old, you'll hopefully never see a warning.
+
+### Will this get me banned?
+
+**Disclaimer:** I take no responsibility for your use of this software.
+
+You may be reported by players if you share vinyls that are extremely detailed. Some players feel that making vinyl groups this way is unfair because they learned the tool without an easy starting point.
+
+*(Note: Many players will not report you. Hand-made vinyls typically use far fewer layers and are more efficient—they may simply outclass automated designs instead.)*
+
+That opinion is valid, and with enough time, practice, and talent you can recreate very complex images by hand. I simply don't share the view that you should have to.
+
+Forza Painter reads and writes directly to Forza Horizon 6's memory using Windows system APIs—the same low-level approach used by tools like Cheat Engine. It only modifies cosmetic vinyl/livery editor data. It does not change player speed, position, credits, car vouchers, race time, stats, or similar gameplay values.
+
+Because it accesses game memory while the game is running, there is a non-zero risk that anti-cheat or account systems could flag it. **Use this tool at your own risk.**
+
+### Will this get me in trouble?
+
+That depends on what you upload with this tool. Generally, if you follow the game's Terms of Service, you should be fine. The important rules are about the content you create, not necessarily the tool itself.
+
+Forza Horizon is intended for all ages. Keep it professional.
+
+## Acknowledgements
+
+This project is a derivative of the Forza Painter workflow and retains upstream MIT license notices.
+
+| Person / project | Link | Contribution |
+| --- | --- | --- |
+| the_adawg (AE) | [forza-painter/forza-painter](https://github.com/forza-painter/forza-painter) | Original Forza Painter project: MIT-licensed FH import workflow, memory-writing/import foundation, and geometry-to-vinyl approach. |
+| Sam Twidale | [samcodes.co.uk](https://samcodes.co.uk/) | geometrize-lib; original geometry approximation work credited by upstream licenses. |
+| Michael Fogleman | [fogleman/primitive](https://github.com/fogleman/primitive) | Primitive library; original primitive-based image approximation credited by upstream licenses. |
+| Omar Cornut | [ocornut/imgui](https://github.com/ocornut/imgui) | Dear ImGui; GUI framework used by the original forza-painter. |
+| DxBang | [Bang's Forza Color Converter](https://bang.systems/forza-colors/) | Forza H/S/B color conversion used on the Colors tab. |
+| bvzrays | [bvzrays/forza-painter-fh6](https://github.com/bvzrays/forza-painter-fh6) | FH6-focused desktop fork: UI, importer/locator behavior, app packaging, and workflow ideas for Forza Horizon 6. |
+| Kloudy (heyitshestia) | [kloudys-fh6-painter](https://github.com/heyitshestia/kloudys-fh6-painter) | FH6 painter fork: launcher workflow, style presets, Luma Prep, Edge Repair, finalized-run browser, updater flow, release packaging, and handmade/universal importer work. |
+| zjl88858 | [forza-painter-geometrize-gpu](https://github.com/zjl88858/forza-painter-geometrize-gpu) | GPU/OpenCL geometrize generator lineage used by the bundled generator workflow. |
+| LibreHardwareMonitor | [LibreHardwareMonitor/LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) | Hardware monitoring backend for the Resource Monitor tab. |
+| H3XDaemon | [H3XDaemon](https://github.com/H3XDaemon) | Contributor to this repository. |
+| MaccLochlainn | [MaccLochlainn](https://github.com/MaccLochlainn) | Contributor to this repository. |
+| ree9622 | [ree9622](https://github.com/ree9622) | Korean localization contributor in upstream history. |
+
+See the full [contributor graph](https://github.com/ShepherdHL/forza-painter-fh6/graphs/contributors) for all commits to this repository.
 
 ## Changelog
 
 Only versioned release entries are kept here. See [CHANGELOG.md](CHANGELOG.md) for the app update prompt changelog.
+
+### v1.6.6 / 2026-05-26
+
+- Updated the app version to `v1.6.6`; release packages now use `forza-painter-fh6-v1.6.6.exe`.
+- Fixed `luma_band` preprocessing for RGB/BGR handling and made preprocessed-image writes atomic.
+- Packaged OpenCV and NumPy into the one-file EXE so `luma_band` preprocessing works in release builds.
+- Import now requires the FH6 template layer count before starting.
+- Refactored core modules with typed exceptions and shared utility helpers.
+
+### v1.6.5 / 2026-05-25
+
+- Updated the app version to `v1.6.5`; release packages now use `forza-painter-fh6-v1.6.5.exe`.
+- Updated the bundled GPU generator to upstream `v1.2-Canary-20260525`.
+- Bundled presets now set `forceOpaqueShapes = false` by default.
+- Reduced main-app overhead during generation by using a sanitized generator environment and slower file polling.
+
+### v1.6.1 / 2026-05-24
+
+- Updated the app version to `v1.6.1`; release packages now use `forza-painter-fh6-v1.6.1.exe`.
+- Disabled `luma_band` preprocessing by default in bundled presets.
+- Import no longer reuses stale FH6 session data from `webui-data`; it re-locates the current template before writing.
+- JSON previews now use one stable renderer path to avoid ellipse preview distortion differences between packaged EXE environments.
 
 ### v1.6.0 / 2026-05-24
 
@@ -148,7 +252,6 @@ Only versioned release entries are kept here. See [CHANGELOG.md](CHANGELOG.md) f
 - Added upstream `errorGridSize` preset support.
 - Integrated the upstream transparent-area overhang prevention algorithm adjustment.
 - Significantly improved generation quality for the large ellipse at the bottom of transparent images.
-- Disabled `luma_band` preprocessing by default in bundled presets.
 
 ### v1.5.4 / 2026-05-23
 

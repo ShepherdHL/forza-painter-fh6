@@ -1,5 +1,56 @@
 # Changelog
 
+## Unreleased
+
+### Core / upstream merge
+
+- Merged upstream v1.6.5–v1.6.6 core fixes while keeping fork features (text vinyl, colors tab, resource monitor, security policy).
+- Added `utils.py` with shared helpers, typed exceptions, and lazy OpenCV/Pillow loaders.
+- Fixed `luma_band` preprocessing to use BGR→LAB (OpenCV-native) and atomic file writes.
+- Generator runs use a sanitized environment; polling intervals match upstream to reduce UI overhead.
+- Preprocessed generation inputs are tracked via `input_image` so JSON/previews are discovered correctly.
+- Import requires template layer count before starting; added Traditional Chinese (`zh-tw`) UI option.
+- Bundled presets set `forceOpaqueShapes = false`; heaviest preset uses `previewEvery = 100`.
+- Updated bundled GPU generator to upstream `v1.2-Canary-20260525`; frozen `Color`/`Shape` dataclasses and `ShapeType` enum.
+
+### Generation & preprocess
+
+- **Image Preview** tab: compare preprocess filters and estimated layer cost before generating.
+- **Preprocess filter** dropdown on Generate: Original, Luma Bands, Bilateral, Posterize, CLAHE, Mild Blur, Soft Cel Shading, Heavy Ink Cel Shading.
+- Source/result compare panels on Generate when a filter is active.
+- `src/preprocess/` package (`filters.py`, `luma.py`, `complexity.py`, `common.py`).
+
+### FH6 import / export (Kloudy-style workflow)
+
+- Three dedicated tabs: **Import Final JSON**, **Import Handmade JSON**, **Export Game JSON**.
+- **Import Final JSON**: generated geometry JSON, run-folder browser, best-safe-final selection, preview, import.
+- **Import Handmade JSON**: FH6 type-code / handmade JSON with supported/unsupported shape counts and preview.
+- **Export Game JSON**: export open vinyl group to type-code JSON (`runtime/typecode-export/`).
+- New helpers: `fh6_import_typecode_json.py`, `fh6_export_typecode_json.py`, `fh6_trim_group_count.py`, `fh6_typecode_json.py`.
+- Auto-route type-code vs geometry JSON; optional trim group layer count after handmade import.
+
+### UI & other
+
+- Resource monitor: CPU/GPU load, clock, and temperature bar with green/yellow/red temp colors (80°C / 90°C), persistent heat warnings, and log messages when thresholds are crossed.
+- Text vinyl: selectable trace shape modes (rectangles, squares, ellipses, circles, triangles, mixed) with FH6 template guidance in the UI and `--shape-mode` CLI flag.
+- Text vinyl: Korean (Hangul) coverage checks, improved glyph detection, [KR] fonts ranked first when Hangul is typed, and Malgun Gothic fallbacks on Windows.
+- Text vinyl: script sub-tabs (Universal/Latin, Japanese, Korean, Chinese) with separate text and font selections per tab, plus a font search bar on each tab.
+- UI locked to dark mode for consistent, readable text and inputs; appearance picker removed until a fuller UI overhaul. Dark palette contrast improved (inputs, labels, log font).
+- Workspace split: Generate JSON and import tabs on the left; Text vinyl, Colors, Tools, and Tutorial on the right (resizable divider).
+- Default single tab bar (less clutter); optional **Split workspace** in the header restores two-column tabs (applies immediately; saved in `ui_layout.json`).
+- Colors tab: click saves the color to a swatch history; hover only previews on the swatch.
+- Colors tab: sample pixels from Generate-tab images (prev/next cycle), with Hex/RGB/HSL/HSB and Forza H/S/B matching [Bang's Forza Color Converter](https://dxbang.github.io/forza-colors/).
+- Appearance themes (System/Light/Sakura/Elite) deferred: only dark is active in the desktop app.
+- Resizable panel dividers: drag to resize the log vs main workspace, Generate/Import previews, and Text vinyl reference section. Layout saved to `runtime/settings/ui_layout.json`.
+- `requirements-preview.txt`: Pillow for filter and handmade JSON previews in dev/venv setups.
+
+## v1.6.1 / 2026-05-24
+
+- Updated the app version to `v1.6.1`; release packages now use `forza-painter-fh6-v1.6.1.exe`.
+- Disabled `luma_band` preprocessing by default in bundled presets.
+- Import no longer reuses stale FH6 session data from `webui-data`; it re-locates the current template before writing.
+- JSON previews now use one stable renderer path to avoid ellipse preview distortion differences between packaged EXE environments.
+
 ## v1.6.0 / 2026-05-24
 
 - Updated the app version to `v1.6.0`; release packages now use `forza-painter-fh6-v1.6.0.exe`.
@@ -7,7 +58,6 @@
 - Added upstream `errorGridSize` preset support.
 - Integrated the upstream transparent-area overhang prevention algorithm adjustment.
 - Significantly improved generation quality for the large ellipse at the bottom of transparent images.
-- Disabled `luma_band` preprocessing by default in bundled presets.
 
 ## v1.5.4 / 2026-05-23
 

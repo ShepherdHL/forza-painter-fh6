@@ -7,6 +7,7 @@
 
 import sys
 import argparse
+import importlib
 import ctypes, sys
 import psutil
 import ctypes
@@ -14,44 +15,84 @@ import struct
 import subprocess
 #from geometrize.geometrize import geometrize_image
 #from geometrize.internal_classes import ThreadManager
-from native import *
-from internal_classes import *
+from native import (
+    ProcessMemoryError,
+    dereference_pointer,
+    get_base_address,
+    is_64bit,
+    read_int,
+    read_long,
+    read_process_memory,
+    release_process,
+    scan_block,
+    write_process_memory,
+)
+from internal_classes import Color, Shape
 from game_profiles import iter_profiles, PROFILES
 from geometry_json import RECTANGLE, ROTATED_ELLIPSE, load_normalized_geometry
+from security_policy import (
+    memory_addresses_allowed,
+    validate_geometry_path,
+    validate_template_layer_count,
+    validate_user_address,
+)
 import colorsys
 import os
 
+from utils import load_cv2, parse_int
+
 FH6_DISCOVERED_TABLE_POINTER_DELTA = 0x1E
-_CV2_CACHE = None
-_CV2_ERROR = None
-
-
-def parse_int(value):
-    if value is None or value == "":
-        return None
-    return int(str(value), 0)
 
 
 def is_admin():
     try:
-        return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except OSError:
         return False
 
-def load_cv2():
-    global _CV2_CACHE, _CV2_ERROR
-    if _CV2_CACHE is not None:
-        return _CV2_CACHE
-    if _CV2_ERROR is not None:
-        return None
+
+def _validate_layer_table_before_write(pid, profile, table_address, layer_count):
+    from fh6_probe import validate_table_layer_coverage
+
+    ok, checked, valid_entries = validate_table_layer_coverage(
+        pid, profile, table_address, layer_count
+    )
+    if not ok:
+        print(
+            "Safety check failed: layer table at 0x{:x} did not pass validation "
+            "({}/{} strict layers, scanned {}). Import aborted.".format(
+                table_address, valid_entries, layer_count, checked
+            )
+        )
+        return False
+    print(
+        "Layer table safety check passed: {}/{} validated entries.".format(
+            valid_entries, layer_count
+        )
+    )
+    return True
+
+
+def _resolve_manual_addresses(pid, profile, game_key, layer_count_address, layer_table_address, layer_count_value):
+    if layer_count_address is None and layer_table_address is None:
+        return None, None, None
+    if not memory_addresses_allowed():
+        print(
+            "Manual memory addresses are disabled for safety. "
+            "Use auto-locate in the app, or set FORZA_PAINTER_ALLOW_MANUAL_ADDRESSES=1 "
+            "only if you understand the risk."
+        )
+        return None, None, None
     try:
-        import cv2
-        import numpy as np
-        _CV2_CACHE = (cv2, np)
-        return _CV2_CACHE
-    except BaseException as exc:
-        _CV2_ERROR = exc
-        return None
+        layer_count_address = validate_user_address(layer_count_address, "layer count address")
+        if layer_table_address is not None:
+            layer_table_address = validate_user_address(layer_table_address, "layer table address")
+        if layer_count_value is not None:
+            layer_count_value = validate_template_layer_count(layer_count_value)
+    except ValueError as exc:
+        print("Invalid manual address: {}".format(exc))
+        return None, None, None
+    return layer_count_address, layer_table_address, layer_count_value
 
 def show_image(image):
     print("External preview windows are disabled. Use the desktop app preview panel instead.")
@@ -167,9 +208,12 @@ def diagnose_livery(pid, profile):
 def draw_memory_shape(pid: int, profile, shape: Shape, index: int, cLiveryLayerTable: int, liveryCount: int):
     if index >= liveryCount:
         return True
-    current_layer_address = dereference_pointer(pid, cLiveryLayerTable + (index * 0x8))
-    pos_data = struct.pack('f', shape.x) + struct.pack('f', -shape.y)
     try:
+        current_layer_address = dereference_pointer(pid, cLiveryLayerTable + (index * 0x8))
+        if current_layer_address == 0:
+            raise ProcessMemoryError("layer pointer is null")
+        validate_user_address(current_layer_address, "layer object address")
+        pos_data = struct.pack('f', shape.x) + struct.pack('f', -shape.y)
         write_process_memory(pid, current_layer_address + profile.layer_position_offset, pos_data)
         scale_divisor = 63 if shape.type_id == 16 else 127
         scale_data = struct.pack('f', shape.w / scale_divisor) + struct.pack('f', shape.h / scale_divisor)
@@ -186,10 +230,11 @@ def draw_memory_shape(pid: int, profile, shape: Shape, index: int, cLiveryLayerT
             write_process_memory(pid, current_layer_address + profile.layer_shape_id_offset, shape_id_data)
         mask_flag = struct.pack('B', 1 if shape.is_mask else 0)
         write_process_memory(pid, current_layer_address + profile.layer_mask_offset, mask_flag)
-    except:
+    except (ProcessMemoryError, OSError, ValueError) as exc:
         if index > 0:
-            print("Detected grouped vinyl in slot " + str(index+1))
-        print("ERROR: You probably forgot to ungroup one of your vinyls.")
+            print("Detected grouped vinyl in slot " + str(index + 1))
+        print("ERROR: Layer write failed: {}".format(exc))
+        print("You probably forgot to ungroup one of your vinyls.")
         print("Also ensure you are in the Vinyl Group Editor, not applying the vinyl or a livery to the car.")
         return False
     return True
@@ -205,7 +250,8 @@ def load_geometry(
     layer_count_value=None,
 ):
     try:
-        data = load_normalized_geometry(path)
+        safe_path = validate_geometry_path(path)
+        data = load_normalized_geometry(safe_path)
     except Exception as exc:
         print("Not a valid generated geometry .json file: {}".format(exc))
         return
@@ -272,24 +318,56 @@ def load_geometry(
     if pid == -1:
         return
 
-    if layer_count_address:
-        if layer_count_value:
-            current_livery_count = int(layer_count_value)
-            print("Manual layer count address 0x{0:x}; using template layer count {1}".format(layer_count_address, current_livery_count))
-        elif game_key == "fh6":
-            raw_count = read_process_memory(pid, layer_count_address, 2)
-            current_livery_count = int.from_bytes(raw_count, byteorder=sys.byteorder) if len(raw_count) == 2 else 0
-            print("Manual FH6 layer count address 0x{0:x} -> {1}".format(layer_count_address, current_livery_count))
-        else:
-            current_livery_count = read_int(pid, layer_count_address)
-            print("Manual layer count address 0x{0:x} -> {1}".format(layer_count_address, current_livery_count))
-        if not layer_table_address:
-            table_pointer_field = layer_count_address + FH6_DISCOVERED_TABLE_POINTER_DELTA
-            layer_table_address = dereference_pointer(pid, table_pointer_field)
-            print("Manual table pointer field 0x{0:x} -> 0x{1:x}".format(table_pointer_field, layer_table_address))
-        cLiveryLayerTable = layer_table_address
+    manual_count, manual_table, manual_count_value = _resolve_manual_addresses(
+        pid,
+        profile,
+        game_key,
+        layer_count_address,
+        layer_table_address,
+        layer_count_value,
+    )
+    if (layer_count_address or layer_table_address) and manual_count is None:
+        return
+
+    if manual_count:
+        try:
+            layer_count_address = manual_count
+            layer_table_address = manual_table
+            if manual_count_value:
+                current_livery_count = int(manual_count_value)
+                print(
+                    "Manual layer count address 0x{0:x}; using template layer count {1}".format(
+                        layer_count_address, current_livery_count
+                    )
+                )
+            elif game_key == "fh6":
+                raw_count = read_process_memory(pid, layer_count_address, 2, strict=True)
+                current_livery_count = int.from_bytes(raw_count, byteorder=sys.byteorder)
+                print(
+                    "Manual FH6 layer count address 0x{0:x} -> {1}".format(
+                        layer_count_address, current_livery_count
+                    )
+                )
+            else:
+                current_livery_count = read_int(pid, layer_count_address)
+                print(
+                    "Manual layer count address 0x{0:x} -> {1}".format(
+                        layer_count_address, current_livery_count
+                    )
+                )
+            if not layer_table_address:
+                table_pointer_field = layer_count_address + FH6_DISCOVERED_TABLE_POINTER_DELTA
+                layer_table_address = dereference_pointer(pid, table_pointer_field)
+                print(
+                    "Manual table pointer field 0x{0:x} -> 0x{1:x}".format(
+                        table_pointer_field, layer_table_address
+                    )
+                )
+            cLiveryLayerTable = validate_user_address(layer_table_address, "layer table address")
+        except (ProcessMemoryError, ValueError) as exc:
+            print("Unable to resolve manual layer addresses: {}".format(exc))
+            return
     else:
-        # Calculate the pointer chain to the cLiveryLayerTable
         cLivery = calculate_CLivery(pid, profile)
         if cLivery == -1:
             return
@@ -303,12 +381,14 @@ def load_geometry(
         current_livery_count = read_int(pid, cLiveryGroup + profile.livery_count_offset)
         cLiveryLayerTable = dereference_pointer(pid, cLiveryGroup + profile.layer_table_offset)
 
-    # If we have less than 100 shapes, user has likely made a mistake
-    if current_livery_count < 100:
-        print("READ THE INSTRUCTIONS")
-        print("You must load a vinyl group (ALL SPHERES) with your desired shape count (minimum 100) first!")
-        print("500, 1000, 1500, 2000 or 3000 is recommended")
-        print("Make sure to ungroup the vinyl before starting 1also!")
+    try:
+        current_livery_count = validate_template_layer_count(current_livery_count)
+        cLiveryLayerTable = validate_user_address(cLiveryLayerTable, "layer table address")
+    except ValueError as exc:
+        print("Invalid layer table state: {}".format(exc))
+        return
+
+    if not _validate_layer_table_before_write(pid, profile, cLiveryLayerTable, current_livery_count):
         return
 
     if cLiveryLayerTable == 0:
@@ -390,15 +470,20 @@ def main(args):
     if parsed.diagnose:
         pid, profile = get_pid(parsed.game, parsed.pid)
         if pid != -1:
-            diagnose_livery(pid, profile)
+            try:
+                diagnose_livery(pid, profile)
+            finally:
+                release_process(pid)
         return
     if not parsed.geometry_path:
         print("You must drag in a generated geometry .json file!")
         return
     path = parsed.geometry_path
 
-    if not os.path.isfile(path):
-        print("{} is not a valid file path!".format(path))
+    try:
+        validate_geometry_path(path)
+    except ValueError as exc:
+        print("{}".format(exc))
         return
     ext = path.split('.')[-1].lower()
     #accepted_image_formats = ["jpg", "jpeg", "png", "bmp"]
@@ -408,15 +493,18 @@ def main(args):
         print("An image file, or an generated .json geometry file.")
         return
     if is_geometry:
-        load_geometry(
-            path,
-            parsed.game,
-            not parsed.no_preview,
-            parsed.pid,
-            parsed.layer_count_address,
-            parsed.layer_table_address,
-            parsed.layer_count_value,
-        )
+        try:
+            load_geometry(
+                path,
+                parsed.game,
+                not parsed.no_preview,
+                parsed.pid,
+                parsed.layer_count_address,
+                parsed.layer_table_address,
+                parsed.layer_count_value,
+            )
+        finally:
+            release_process(parsed.pid)
     # else:
     #     geometrize_image(path)
 

@@ -1,4 +1,6 @@
 import argparse
+import ctypes
+import importlib
 import io
 import json
 import math
@@ -14,68 +16,356 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+import traceback
+import tempfile
+import faulthandler
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from tkinter import BOTH, END, LEFT, RIGHT, X, Button, Canvas, Checkbutton, Entry, Frame, Label, Listbox, PhotoImage, StringVar, Text, Tk, Toplevel, filedialog, messagebox, ttk
+from tkinter import BOTH, BOTTOM, END, HORIZONTAL, LEFT, RIGHT, TOP, TclError, VERTICAL, X, Y, Button, Canvas, Checkbutton, Entry, Frame, Label, Listbox, PhotoImage, StringVar, Text, Tk, Toplevel, filedialog, messagebox, ttk
 
 import psutil
 
-from app_paths import ROOT, SOURCE_DIR
+from acknowledgements import get_acknowledgements
+from app_paths import ROOT
+from app_config import (
+    APP_DIR,
+    PROBE_DIR,
+    SESSION_PATH,
+    TYPECODE_EXPORT_DIR,
+    TYPECODE_IMPORT_DIR,
+    MEMORY_SNAPSHOT_LIMIT_MB,
+    PREVIEW_MAX,
+    GENERATE_COMPARE_SOURCE_MIN,
+    GENERATE_COMPARE_RESULT_MIN,
+    DETAILED_LOG_OUTPUT_LIMIT,
+    DETAILED_LOG_MEMORY_LIMIT,
+    FH6_AUTO_LOCATE_MAX_SECONDS,
+    FH6_AUTO_LOCATE_TIMEOUT_SECONDS,
+    UPDATE_CHANGELOG_URL,
+    UPDATE_RELEASE_URL,
+    UPDATE_CHECK_TIMEOUT_SECONDS,
+    RESOURCE_MONITOR_DESCRIPTION,
+)
 from game_profiles import PROFILES
 from geometry_json import RECTANGLE, ROTATED_ELLIPSE, load_normalized_geometry
-from generator_backend import GENERATOR_EXE, USER_SETTINGS_DIR, best_geometry_jsons, build_generator_command, generated_jsons, generated_preview_files, generator_preview_path, load_settings, preprocess_input_image, write_custom_settings, write_user_settings_preset
+from fh6_typecode_json import (
+    is_typecode_geometry_json,
+    load_typecode_shapes,
+    typecode_shape_count,
+    typecode_shape_summary,
+)
+from generator_backend import (
+    GENERATOR_EXE,
+    GENERATOR_JSON_SCAN_SECONDS,
+    GENERATOR_POLL_SLEEP_SECONDS,
+    GENERATOR_PREVIEW_SCAN_SECONDS,
+    USER_SETTINGS_DIR,
+    best_geometry_jsons,
+    best_safe_final_json,
+    build_generator_command,
+    build_generator_env,
+    checkpoints_for_image,
+    discover_generated_run_folders,
+    generated_jsons,
+    json_candidates_for_run_folder,
+    is_luma_variant_path,
+    json_from_preprocess_pipeline,
+    json_from_luma_pipeline,
+    setting_preprocess_mode,
+    setting_uses_luma_prep,
+    generated_preview_files,
+    generator_preview_path,
+    geometry_shape_count,
+    load_settings,
+    preprocess_input_image,
+    write_custom_settings,
+    write_user_settings_preset,
+)
+from utils import load_cv2, load_pillow
+from preprocess.common import PREVIEW_EXPORT_ROOT
+from preprocess.filters import (
+    PREPROCESS_FILTERS,
+    PREPROCESS_MODE_IDS,
+    PREPROCESS_NONE,
+    build_preview_payload,
+    filter_spec,
+    normalize_preprocess_mode,
+    preprocessed_image_exists,
+    preprocessed_image_path,
+    preprocess_mode_for_path,
+)
+from security_policy import (
+    GITHUB_RELEASES_API,
+    redact_sensitive_log_text,
+    updates_enabled,
+    validate_fetch_url,
+    validate_fh6_session,
+    parse_safe_hex_address,
+)
+from mandarin_chars import filter_mandarin_library, gb2312_hanzi_chars, mandarin_character_library
+from mandarin_chars import text_contains_hangul
+from text_fonts import (
+    SCRIPT_CHINESE,
+    TEXT_SCRIPT_IDS,
+    coverage_message_key,
+    discover_fonts_for_script,
+    filter_font_labels,
+    format_missing_chars,
+    recommend_font_label_for_text,
+    validate_text_coverage,
+)
+from text_geometry import (
+    build_geometry_from_text,
+    build_geometry_from_text_image,
+    estimate_layer_count,
+    normalize_text_shape_mode,
+    template_hint_for_shape_mode,
+    text_shape_mode_choices,
+    write_geometry_json,
+)
+from text_ocr import ocr_available, read_combined_text, try_easyocr_lines
+from forza_colors import describe_color
+from ui_layout import (
+    DEFAULT_PANE_RATIOS,
+    apply_pane_ratio,
+    load_ui_layout,
+    pane_ratio,
+    save_ui_layout,
+)
+from ui_chrome import DonutGauge, header_rule, hud_badge
+from ui_themes import (
+    APP_THEME_ID,
+    palette_to_color_globals,
+    resolve_palette,
+    save_theme_id,
+)
+from resource_monitor import (
+    ResourceMonitorBackend,
+    ResourceSnapshot,
+    evaluate_heat_state,
+    format_clock_mhz,
+    format_load,
+    format_temp_c,
+    load_settings as load_resource_monitor_settings,
+    temp_color_role,
+)
+from i18n import LANGUAGES, eta_suffix, tr as tr_text
+from i18n_text import apply_text_patches
 from version import APP_DISPLAY_NAME, __version__, app_title
 
 
-APP_DIR = SOURCE_DIR
-PROBE_DIR = ROOT / "webui-data" / "probes"
-SESSION_PATH = PROBE_DIR / "current-fh6-session.json"
-MEMORY_SNAPSHOT_LIMIT_MB = 2048
-PREVIEW_MAX = 520
-DETAILED_LOG_OUTPUT_LIMIT = 50000
-DETAILED_LOG_MEMORY_LIMIT = 120000
-FH6_AUTO_LOCATE_MAX_SECONDS = 300
-FH6_AUTO_LOCATE_TIMEOUT_SECONDS = 360
-UPDATE_VERSION_URL = "https://raw.githubusercontent.com/bvzrays/forza-painter-fh6/main/src/version.py"
-UPDATE_CHANGELOG_URL = "https://raw.githubusercontent.com/bvzrays/forza-painter-fh6/main/CHANGELOG.md"
-UPDATE_RELEASE_URL = "https://github.com/bvzrays/forza-painter-fh6/releases/latest"
-UPDATE_CHECK_TIMEOUT_SECONDS = 8
-COLOR_BG = "#0d1117"
-COLOR_PANEL = "#151b23"
-COLOR_PANEL_ALT = "#1c2430"
-COLOR_INPUT = "#0b1017"
-COLOR_TEXT = "#e6edf3"
-COLOR_MUTED = "#9aa7b4"
-COLOR_ACCENT = "#58a6ff"
-COLOR_ACCENT_DARK = "#1f6feb"
-COLOR_WARN = "#f2cc60"
-COLOR_BORDER = "#303d4f"
-COLOR_BUTTON = "#263241"
-COLOR_BUTTON_ACTIVE = "#334456"
-_CV2_CACHE = None
-_CV2_ERROR = None
-_PIL_CACHE = None
-_PIL_ERROR = None
+def _startup_crash_report_paths() -> list[Path]:
+    # Write somewhere the user can find even for one-file EXEs.
+    # - beside the EXE (ROOT)
+    # - inside runtime/logs (if creatable)
+    # - %TEMP%
+    paths: list[Path] = []
+    try:
+        paths.append(ROOT / "forza-painter-startup-crash.txt")
+        paths.append(ROOT / "runtime" / "logs" / "forza-painter-startup-crash.txt")
+    except Exception:
+        pass
+    try:
+        paths.append(Path(tempfile.gettempdir()) / "forza-painter-startup-crash.txt")
+    except Exception:
+        pass
+    # De-dup while preserving order
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for p in paths:
+        key = str(p).lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(p)
+    return unique
 
-LANGUAGES = {
-    "English": "en",
-    "中文": "zh",
-    "한국어": "ko",
-}
+
+def _write_startup_crash_report(exc: BaseException) -> Path | None:
+    report = "\n".join(
+        [
+            f"{APP_DISPLAY_NAME} startup crash report",
+            f"Version: {__version__}",
+            f"Timestamp: {datetime.utcnow().isoformat()}Z",
+            f"Frozen: {bool(getattr(sys, 'frozen', False))}",
+            f"Executable: {getattr(sys, 'executable', '')}",
+            f"Python: {sys.version}",
+            "",
+            "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+        ]
+    )
+    for path in _startup_crash_report_paths():
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(report, encoding="utf-8", errors="replace")
+            return path
+        except Exception:
+            continue
+    return None
+def _install_color_globals(palette) -> None:
+    import sys
+
+    module = sys.modules[__name__]
+    for name, value in palette_to_color_globals(palette).items():
+        setattr(module, name, value)
+
+
+_install_color_globals(resolve_palette(APP_THEME_ID))
+UI_INPUT_FONT = ("Segoe UI", 10)
+UI_LOG_FONT = ("Consolas", 10)
 
 
 TEXT = {
     "en": {
         "title": app_title(),
         "subtitle": "Generate geometry JSON and import it into Forza Horizon vinyl editor.",
+        "header_kicker": "FORZA PAINTER / FH6",
+        "header_audit": "Generation suite",
         "language": "Language",
+        "appearance": "Appearance",
+        "layout_resize_hint": "Drag dividers to resize panels. Sizes are remembered.",
+        "theme_system": "System",
+        "theme_dark": "Dark",
+        "theme_light": "Light",
+        "theme_sakura": "Sakura",
+        "theme_elite": "Elite",
         "process": "Game process",
         "refresh": "Refresh",
         "generate_tab": "Generate JSON",
-        "import_tab": "Import",
+        "text_tab": "Text vinyl",
+        "text_tab_hint": "Choose a script tab, enter text, pick a font (use search to filter), then generate. Trace reference images from the section below.",
+        "text_script_universal": "Universal (Latin)",
+        "text_script_japanese": "Japanese",
+        "text_script_korean": "Korean",
+        "text_script_chinese": "Chinese",
+        "text_script_hint_universal": "Latin letters, numbers, and Western punctuation. Use a [LATIN] font such as Segoe UI or Arial.",
+        "text_script_hint_japanese": "Hiragana, katakana, and kanji. Use a [JP] or [CJK] font such as Meiryo or Yu Gothic.",
+        "text_script_hint_korean": "Hangul syllables. Use a [KR] font such as Malgun Gothic.",
+        "text_script_hint_chinese": "Simplified or traditional hanzi. Use an [SC]/[TC] font; insert characters from the GB2312 library below.",
+        "text_input": "Text (Unicode)",
+        "text_font": "Font",
+        "text_font_search": "Search fonts",
+        "text_options": "Generation options",
+        "text_font_browse": "Browse font file",
+        "text_font_refresh": "Refresh fonts",
+        "text_font_size": "Font size",
+        "text_cell_size": "Trace cell size",
+        "text_shape_mode": "Trace shape mode",
+        "text_shape_mode_hint": "Rectangles/squares use rectangle layers; ellipses/circles/triangles/mixed use sphere layers in FH6.",
+        "text_template_hint": "FH6 template: {hint}",
+        "text_cell_hint": "Larger cell = fewer vinyl layers, less fine detail.",
+        "text_color": "Color (R,G,B,A)",
+        "text_coverage_ok": "All CJK characters are supported by the selected font.",
+        "text_coverage_ok_korean": "Korean and other CJK characters are supported by the selected font.",
+        "text_coverage_missing": "Missing {count} glyph(s) in selected font: {chars}",
+        "text_coverage_missing_korean": "Korean needs a [KR] font (e.g. Malgun Gothic). Missing {count} glyph(s): {chars}",
+        "text_coverage_suggest_kr": "Korean detected — select a [KR] font such as {font}.",
+        "text_char_library": "Mandarin character library (GB2312 hanzi)",
+        "text_char_search": "Search character",
+        "text_char_insert": "Insert selected",
+        "text_char_count": "{count} characters available",
+        "text_reference_image": "Reference image",
+        "text_browse_image": "Browse",
+        "text_generate_typed": "Generate from text",
+        "text_trace_image": "Trace from image",
+        "text_run_ocr": "Read text from image (OCR)",
+        "text_invert": "Invert colors before trace",
+        "text_generating": "Building text vinyl JSON...",
+        "text_done": "Text JSON ready ({layers} layers): {path}",
+        "text_failed": "Text vinyl generation failed",
+        "import_final_tab": "Import Final JSON",
+        "import_final_tab_hint": "Import finalized geometry JSON from this app (rectangles and rotated ellipses). Pick a generated run folder or add JSON files directly, then import into your ungrouped FH6 template.",
+        "import_final_runs": "Generated runs",
+        "import_final_refresh_runs": "Refresh runs",
+        "import_final_run_files": "JSON in selected run",
+        "import_final_use_best": "Use best safe final (highest layer count in run)",
+        "import_final_pick_best": "Select best final",
+        "import_final_import": "Import final JSON into FH6",
+        "import_handmade_tab": "Import Handmade JSON",
+        "handmade_tab": "Handmade JSON",
+        "handmade_tab_hint": "Import user-made FH6 JSON that contains real FH6 shape type codes (not generated rectangles/ellipses). After import, save and reload the vinyl group in FH6 to refresh display.",
+        "export_game_tab": "Export Game JSON",
+        "export_game_tab_hint": "Export the open vinyl group from FH6 to a handmade/type-code JSON file. Use the same game connection and template layer count as import.",
+        "export_game_json": "Export open FH6 group to JSON",
+        "export_open_folder": "Open export folder",
+        "handmade_choose_json": "Choose handmade JSON",
+        "handmade_import": "Import handmade JSON into FH6",
+        "handmade_export": "Export open FH6 group to JSON",
+        "handmade_status_none": "Select a handmade JSON to inspect supported shapes.",
+        "handmade_status_counts": "Shapes: total {total} · supported {supported} · unsupported {unsupported}",
+        "preview_tab": "Image Preview",
+        "preview_tab_hint": "Compare preprocessing filters and approximate layer cost before generating. Layer counts are estimates only — lower often means fewer shapes. Click a card to select the filter used on the Generate tab.",
+        "preview_choose_image": "Choose image",
+        "preview_use_generate_image": "Use selected Generate image",
+        "preview_apply_generate": "Open Generate tab",
+        "preview_open_folder": "Open preview cache",
+        "preview_processing": "Building filter previews: {path}",
+        "preview_failed": "Filter preview failed: {error}",
+        "preview_output_folder": "Preview cache: {path}",
+        "preview_estimate": "~{count} layers (est.)",
+        "preview_estimate_unknown": "Estimate unavailable",
+        "preview_select_filter": "Click a filter card to select it for generation.",
+        "filter_none": "Original",
+        "filter_none_hint": "Uses your image as-is with no preprocessing. Best baseline for photos, soft gradients, hair, and skin when you do not want extra simplification.",
+        "filter_luma": "Luma Bands",
+        "filter_luma_hint": "Applies edge-aware luminance banding to flatten similar tones into cleaner steps. Best for logos, decals, anime flat fills, and hard color blocks.",
+        "filter_bilateral": "Bilateral Smooth",
+        "filter_bilateral_hint": "Smooths noise and texture while keeping edges relatively sharp. Best for photos, portraits, skin, and hair.",
+        "filter_posterize": "Posterize",
+        "filter_posterize_hint": "Reduces the number of distinct color steps in the image. Best for stylized art, posters, and limited-palette designs.",
+        "filter_clahe": "CLAHE Contrast",
+        "filter_clahe_hint": "Boosts local contrast so dark or washed-out areas read more clearly. Best for underexposed, foggy, or low-contrast references.",
+        "filter_smooth": "Mild Blur",
+        "filter_smooth_hint": "Applies a light Gaussian blur to soften fine detail and compression artifacts. Best for noisy screenshots and busy JPEG sources. Seems silly, but you may like the results.",
+        "filter_cel_soft": "Soft Cel Shading",
+        "filter_cel_soft_hint": "Comic/cel style with gentler outlines and smoother fills. Good first pass for anime and stylized art.",
+        "filter_cel_heavy": "Heavy Ink Cel Shading",
+        "filter_cel_heavy_hint": "Stronger black ink lines and flatter shading for bold comic/Borderlands-like results. Can be harsh on photos.",
+        "preprocess_filter": "Preprocess Filter",
+        "preprocess_filter_hint": "Choose how the image is simplified before the GPU generator runs. Compare options on the Image Preview tab; lower estimates often mean fewer shapes.",
+        "generate_source_original": "Original",
+        "generate_source_filtered": "With filter",
+        "generate_result_plain": "No filter",
+        "generate_result_filtered": "With {filter}",
+        "json_tag_bilateral": "[Bilateral]",
+        "json_tag_posterize": "[Posterize]",
+        "json_tag_clahe": "[CLAHE]",
+        "json_tag_smooth": "[Smooth]",
+        "json_tag_cel_soft": "[Cel Soft]",
+        "json_tag_cel_heavy": "[Cel Ink]",
+        "luma_before": "Before",
+        "luma_after": "After Luma Band Pass",
+        "luma_before_hint": "Choose an image to preview the source here.",
+        "luma_after_hint": "The luma-banded result will appear here.",
+        "luma_output_folder": "Output folder: {path}",
+        "luma_processing": "Processing: {path}",
+        "luma_saved": "Saved luma-band image: {path}",
+        "luma_failed": "Luma Band Pass failed: {error}",
         "tools_tab": "FH6 Tools",
         "tutorial_tab": "Tutorial",
+        "acknowledgements_tab": "Acknowledgements",
+        "colors_tab": "Colors",
+        "colors_values": "Color values",
+        "colors_tab_hint": "Pick colors from images added on Generate JSON (left). Click the image to sample; use Shift+mouse wheel to change sample size. Forza H/S/B matches Bang's converter.",
+        "colors_prev_image": "Previous image",
+        "colors_next_image": "Next image",
+        "colors_no_images": "Add images on the Generate JSON tab to sample colors here.",
+        "colors_image_label": "Image {current} of {total}: {name}",
+        "colors_pixel_size": "Sample size (px)",
+        "colors_click_hint": "Click the image to pick a color.",
+        "colors_hex": "Hex",
+        "colors_rgb": "RGB",
+        "colors_hsl": "HSL",
+        "colors_hsb": "HSB",
+        "colors_forza": "Forza H / S / B",
+        "colors_copy_hex": "Copy hex",
+        "colors_copy_forza": "Copy Forza H,S,B",
+        "colors_open_bang": "Open Bang's converter",
+        "colors_copied": "Copied to clipboard.",
+        "colors_saved": "Saved color {hex}",
+        "colors_saved_history": "Saved colors (click to recall)",
+        "monitor_tab": "Resource Monitor",
+        "monitor_why_title": "Why is this here?",
         "images": "Images",
         "add_images": "Add images",
         "remove_image": "Remove selected image",
@@ -89,19 +379,48 @@ TEXT = {
         "custom_mutated": "Mutated samples",
         "custom_save_at": "Save checkpoints",
         "preprocess_mode": "Preprocess mode",
+        "luma_prep": "Luma Prep — cleaner flat regions, can soften tiny detail",
+        "luma_prep_hint": "Best for logos, decals, and hard color bands. Leave off for soft gradients, hair, skin, and detailed character art.",
+        "generate_compare_source": "Source prep",
+        "generate_compare_result": "Generated result compare",
+        "generate_without_luma": "Without Luma Prep",
+        "generate_with_luma": "With Luma Prep",
+        "generate_layers_count": "{count} layers",
+        "generate_no_checkpoint": "No checkpoint yet",
+        "luma_status_none": "Select an image to see whether Luma Prep applies and which JSON checkpoints exist.",
+        "luma_status_next_on": "Next generate: {filter}.",
+        "luma_status_next_off": "Next generate: original image (no filter).",
+        "luma_status_file_ready": "Preprocessed file: ready ({name}).",
+        "luma_status_file_missing": "Preprocessed file: not created yet (use Image Preview or Generate).",
+        "luma_status_checkpoints": "Checkpoints — no filter: {plain} · with filter: {filtered}.",
+        "luma_status_last_run_on": "Last completed run used {filter}.",
+        "luma_status_last_run_off": "Last completed run used no filter.",
+        "luma_status_last_run_unknown": "No completed generate run recorded yet for this image.",
+        "luma_image_tag_ready": "luma file ready",
+        "luma_image_tag_missing": "no luma file",
+        "json_tag_luma": "[Luma]",
+        "json_tag_plain": "[Plain]",
+        "generate_log_pipeline_filter": "Generating with {filter} (input: {path})",
+        "generate_log_pipeline_plain": "Generating with no filter (original image)",
+        "generate_log_output_filter": "Generated JSON ({filter}): {path}",
+        "generate_log_output_plain": "Generated JSON (no filter): {path}",
+        "generate_select_image": "Select an image to compare prep and results.",
         "save_custom_preset": "Save as preset",
         "custom_panel_title": "Custom settings",
         "custom_panel_hint": "The selected preset fills these values. Enable custom settings if you want to edit them before generating.",
-        "generate_step_image": "Step 1 - Choose images",
+        "generate_step_image": "Step 1 - Choose Images",
         "generate_step_image_hint": "Add PNG/JPG/BMP images. Generated JSON is saved beside each source image.",
-        "generate_step_quality": "Step 2 - Choose quality",
+        "generate_step_image_credit": "If the image you are featuring was not made by you, credit the original artist wherever possible.",
+        "preview_image_added_to_generate": "Added to Generate image list: {name}",
+        "preview_image_already_on_generate": "Already on Generate image list: {name}",
+        "generate_step_quality": "Step 2 - Choose Quality",
         "generate_step_quality_hint": "Fast profiles are quicker. Slow profiles use more GPU time and usually look cleaner.",
         "generate_step_run": "Step 3 - Generate",
         "generate_step_run_hint": "Click once and wait. Progress appears in Logs; generated JSON is added to the Import page automatically.",
         "scroll_hint": "Add image, choose a preset, then adjust custom settings if needed.",
         "start_generate": "Generate with current settings",
-        "stop_generate": "Stop current generation",
-        "open_output": "Open output folder",
+        "stop_generate": "Stop Current Generation",
+        "open_output": "Open Output Folder",
         "preview": "Preview",
         "preview_hint": "Select an image or JSON to preview it here.",
         "preview_unavailable": "Preview is unavailable. Install optional preview dependencies, or continue without preview.",
@@ -127,12 +446,26 @@ TEXT = {
         "game_profile": "Game profile",
         "pid": "PID",
         "layer_count": "Template layer count",
+        "layer_count_required": "Template layer count is required. Enter the exact layer count shown in-game.",
+        "layer_import_info": "Selected JSON: — | Enter in-game template layer count above",
         "easy_import": "Easy import",
         "easy_import_hint": "For FH6, leave addresses empty. The app will reuse a live session or auto-locate before import.",
         "manual_count": "Layer count address",
         "manual_table": "Layer table address",
         "auto_locate": "Auto-locate FH6",
         "import_json": "Import JSON",
+        "handmade_section": "Handmade / universal JSON (FH6)",
+        "handmade_section_hint": "For JSON with real FH6 shape type codes (not only generated rectangles/ellipses). Export reads the open vinyl group; import writes save-safe layer fields. Save and reload the vinyl group in FH6 after import.",
+        "export_typecode_json": "Export open group to JSON",
+        "typecode_trim_after_import": "Trim vinyl group to imported layer count after import",
+        "typecode_allow_unknown": "Allow experimental shape codes (advanced)",
+        "typecode_export_done": "Exported {count} layer(s) to {path}",
+        "typecode_export_failed": "Export failed: {error}",
+        "typecode_import_mode": "Using handmade/universal importer for {name}",
+        "typecode_import_done": "Handmade import finished: {name}",
+        "typecode_trim_done": "Trimmed vinyl group count to {count}",
+        "typecode_trim_failed": "Trim failed: {error}",
+        "typecode_missing_group": "Could not resolve FH6 group address for trim/export. Re-run auto-locate.",
         "diagnose": "Diagnose",
         "save_snapshot": "Save count snapshot",
         "compare_snapshot": "Compare snapshot",
@@ -140,7 +473,7 @@ TEXT = {
         "current_count": "Current layer count",
         "inspect_table": "Inspect table",
         "table_address": "Candidate table",
-        "admin_note": "Import needs administrator permission. Start this app as administrator if OpenProcess fails.",
+        "admin_note": "This build requests administrator rights on startup for FH6 memory access.",
         "no_game": "No supported game process detected",
         "ready": "Ready",
         "running": "Running",
@@ -176,6 +509,15 @@ TEXT = {
         "runtime_folder": "Runtime/cache folder",
         "open_runtime_folder": "Open runtime folder",
         "runtime_location": "Runtime/cache files are stored beside the app: {runtime}. FH6 probe cache: {probe}.",
+        "resource_monitor_title": "Resource monitor",
+        "resource_cpu": "CPU",
+        "resource_gpu": "GPU",
+        "resource_temp_nominal": "Temperature readings nominal.",
+        "resource_unavailable": "Unavailable",
+        "resource_heat_warning_banner": "/// WARNING! Significant Heat Detected! ///",
+        "resource_heat_critical_banner": "/// TEMPERATURE CRITICAL. STOP THE PROGRAM. ///",
+        "resource_heat_log_warning": "/// WARNING! Significant Heat Detected! /// (peak {temp}°C)",
+        "resource_heat_log_critical": "/// TEMPERATURE CRITICAL. STOP THE PROGRAM. /// (peak {temp}°C)",
         "tutorial": """Beginner workflow
 
 1. Download the one-file EXE from GitHub Releases and run it directly. Normal users do not need Python, .venv, or batch files.
@@ -202,13 +544,153 @@ Notes
     "zh": {
         "title": app_title(),
         "subtitle": "生成 geometry JSON，并导入到 Forza Horizon 的 Vinyl Group 编辑器。",
+        "header_kicker": "FORZA PAINTER / FH6",
+        "header_audit": "生成控制台",
         "language": "语言",
+        "appearance": "外观",
+        "layout_resize_hint": "拖动分隔条可调整面板大小，设置会自动保存。",
+        "theme_system": "跟随系统",
+        "theme_dark": "深色",
+        "theme_light": "浅色",
+        "theme_sakura": "樱花",
+        "theme_elite": "精英（橙色 HUD）",
         "process": "游戏进程",
         "refresh": "刷新",
         "generate_tab": "生成 JSON",
-        "import_tab": "导入",
+        "text_tab": "文字贴膜",
+        "text_tab_hint": "选择文字体系标签页，输入文字并选择字体（可用搜索筛选），然后生成。",
+        "text_script_universal": "通用（拉丁）",
+        "text_script_japanese": "日文",
+        "text_script_korean": "韩文",
+        "text_script_chinese": "中文",
+        "text_script_hint_universal": "拉丁字母与西方标点。请选用 [LATIN] 字体，如 Segoe UI、Arial。",
+        "text_script_hint_japanese": "假名与汉字。请选用 [JP] 或 [CJK] 字体，如 Meiryo。",
+        "text_script_hint_korean": "韩文音节。请选用 [KR] 字体，如 Malgun Gothic。",
+        "text_script_hint_chinese": "简繁汉字。请选用 [SC]/[TC] 字体；可从下方 GB2312 字库插入。",
+        "text_input": "文字（Unicode）",
+        "text_font": "字体",
+        "text_font_search": "搜索字体",
+        "text_options": "生成选项",
+        "text_font_browse": "浏览字体文件",
+        "text_font_refresh": "刷新字体列表",
+        "text_font_size": "字号",
+        "text_cell_size": "栅格大小",
+        "text_shape_mode": "描摹形状",
+        "text_shape_mode_hint": "矩形/方块用矩形图层；椭圆/圆/三角/混合建议用球形模板。",
+        "text_template_hint": "FH6 模板：{hint}",
+        "text_cell_hint": "栅格越大，图层越少，细节越少。",
+        "text_color": "颜色 (R,G,B,A)",
+        "text_coverage_ok": "当前字体支持输入中的所有 CJK 字符。",
+        "text_coverage_ok_korean": "当前字体支持输入中的韩文及其他 CJK 字符。",
+        "text_coverage_missing": "当前字体缺少 {count} 个字形：{chars}",
+        "text_coverage_missing_korean": "韩文请选用 [KR] 字体（如 Malgun Gothic）。缺少 {count} 个字形：{chars}",
+        "text_coverage_suggest_kr": "检测到韩文 — 请选择 [KR] 字体，例如 {font}。",
+        "text_char_library": "简体字库（GB2312）",
+        "text_char_search": "搜索汉字",
+        "text_char_insert": "插入选中字",
+        "text_char_count": "可用 {count} 个字符",
+        "text_reference_image": "参考图片",
+        "text_browse_image": "浏览",
+        "text_generate_typed": "从文字生成",
+        "text_trace_image": "从图片描摹",
+        "text_run_ocr": "从图片识别文字 (OCR)",
+        "text_invert": "描摹前反色",
+        "text_generating": "正在生成文字 JSON...",
+        "text_done": "文字 JSON 已就绪（{layers} 层）：{path}",
+        "text_failed": "文字贴膜生成失败",
+        "import_final_tab": "导入 Final JSON",
+        "import_final_tab_hint": "导入本应用生成的最终几何 JSON（矩形与旋转椭圆）。选择生成运行文件夹或直接添加 JSON，然后导入到未分组的 FH6 模板。",
+        "import_final_runs": "生成运行",
+        "import_final_refresh_runs": "刷新运行列表",
+        "import_final_run_files": "所选运行中的 JSON",
+        "import_final_use_best": "使用最佳安全 final（运行内最高图层数）",
+        "import_final_pick_best": "选择最佳 final",
+        "import_final_import": "将 Final JSON 导入 FH6",
+        "import_handmade_tab": "导入手工 JSON",
+        "handmade_tab": "手工 JSON",
+        "handmade_tab_hint": "导入包含真实 FH6 形状类型码的用户 JSON（非生成的矩形/椭圆）。导入后请在 FH6 中保存并重新加载贴膜组。",
+        "export_game_tab": "导出游戏 JSON",
+        "export_game_tab_hint": "将 FH6 中当前打开的贴膜组导出为手工/类型码 JSON。使用与导入相同的游戏连接和模板图层数。",
+        "export_game_json": "将打开的 FH6 组导出为 JSON",
+        "export_open_folder": "打开导出文件夹",
+        "handmade_choose_json": "选择手工 JSON",
+        "handmade_import": "将手工 JSON 导入 FH6",
+        "handmade_export": "导出当前 FH6 组为 JSON",
+        "handmade_status_none": "选择手工 JSON 后可查看支持的形状数量。",
+        "handmade_status_counts": "形状：总计 {total} · 支持 {supported} · 不支持 {unsupported}",
+        "preview_tab": "图像预览",
+        "preview_tab_hint": "生成前对比预处理滤镜与预估层数。层数为估算值，越低通常形状越少。点击卡片后在「生成」页使用。",
+        "preview_choose_image": "选择图片",
+        "preview_use_generate_image": "使用「生成」页所选图片",
+        "preview_apply_generate": "打开「生成」页",
+        "preview_open_folder": "打开预览缓存",
+        "preview_processing": "正在生成滤镜预览：{path}",
+        "preview_failed": "滤镜预览失败：{error}",
+        "preview_output_folder": "预览缓存：{path}",
+        "preview_estimate": "约 {count} 层（预估）",
+        "preview_estimate_unknown": "无法预估",
+        "preview_select_filter": "点击滤镜卡片以用于生成。",
+        "filter_none": "原图",
+        "filter_none_hint": "不预处理，直接使用原图。适合照片、柔和渐变、头发和皮肤等不希望额外简化的素材。",
+        "filter_luma": "亮度分带",
+        "filter_luma_hint": "边缘感知的亮度分带，将相近色调压成更干净的阶梯。适合 Logo、贴花、动漫平涂和硬色块。",
+        "filter_bilateral": "双边平滑",
+        "filter_bilateral_hint": "在保留边缘的同时平滑噪点与纹理。适合照片、人像、皮肤和头发。",
+        "filter_posterize": "色调分离",
+        "filter_posterize_hint": "减少图像中的独立色阶数量。适合风格化插画、海报和有限色板设计。",
+        "filter_clahe": "CLAHE 对比度",
+        "filter_clahe_hint": "增强局部对比度，让偏暗或平淡的区域更清晰。适合曝光不足、雾面或低对比度参考图。",
+        "filter_smooth": "轻度模糊",
+        "filter_smooth_hint": "轻微高斯模糊，柔化细节与 JPEG 压缩痕迹。适合噪点多的截图和杂乱 JPEG 素材。",
+        "filter_cel_soft": "柔和赛璐璐",
+        "filter_cel_soft_hint": "漫画/赛璐璐风格，线条较柔和、明暗更平滑。适合动漫和风格化插画。",
+        "filter_cel_heavy": "重墨赛璐璐",
+        "filter_cel_heavy_hint": "更强的黑色墨线与更扁平的明暗，呈现更浓的漫画/Borderlands 风格。照片可能偏硬。",
+        "preprocess_filter": "预处理滤镜",
+        "preprocess_filter_hint": "选择 GPU 生成器运行前如何简化图像。可在图像预览页对比；预估层数越低通常形状越少。",
+        "generate_source_original": "原图",
+        "generate_source_filtered": "滤镜后",
+        "generate_result_plain": "无滤镜",
+        "generate_result_filtered": "使用 {filter}",
+        "json_tag_bilateral": "[双边]",
+        "json_tag_posterize": "[色调分离]",
+        "json_tag_clahe": "[CLAHE]",
+        "json_tag_smooth": "[模糊]",
+        "json_tag_cel_soft": "[柔和赛璐璐]",
+        "json_tag_cel_heavy": "[重墨赛璐璐]",
+        "luma_before": "原图",
+        "luma_after": "亮度分带后",
+        "luma_before_hint": "选择图片后在此预览原图。",
+        "luma_after_hint": "亮度分带结果将显示在此。",
+        "luma_output_folder": "输出目录：{path}",
+        "luma_processing": "正在处理：{path}",
+        "luma_saved": "已保存亮度分带图片：{path}",
+        "luma_failed": "亮度分带失败：{error}",
         "tools_tab": "FH6 工具",
         "tutorial_tab": "教程",
+        "acknowledgements_tab": "致谢",
+        "colors_tab": "取色",
+        "colors_values": "颜色数值",
+        "colors_tab_hint": "从左侧「生成 JSON」页已添加的图片中取色。点击图片采样；Shift+滚轮调整采样区域大小。Forza H/S/B 与 Bang 转换器一致。",
+        "colors_prev_image": "上一张",
+        "colors_next_image": "下一张",
+        "colors_no_images": "请先在「生成 JSON」页添加图片。",
+        "colors_image_label": "第 {current}/{total} 张：{name}",
+        "colors_pixel_size": "采样大小（像素）",
+        "colors_click_hint": "点击图片取色。",
+        "colors_hex": "Hex",
+        "colors_rgb": "RGB",
+        "colors_hsl": "HSL",
+        "colors_hsb": "HSB",
+        "colors_forza": "Forza H / S / B",
+        "colors_copy_hex": "复制 Hex",
+        "colors_copy_forza": "复制 Forza",
+        "colors_open_bang": "打开 Bang 转换器",
+        "colors_copied": "已复制到剪贴板。",
+        "colors_saved": "已保存颜色 {hex}",
+        "colors_saved_history": "已保存的颜色（点击可恢复）",
+        "monitor_tab": "资源监控",
+        "monitor_why_title": "为什么有这个？",
         "images": "图片",
         "add_images": "添加图片",
         "remove_image": "移除选中图片",
@@ -222,11 +704,42 @@ Notes
         "custom_mutated": "变异样本",
         "custom_save_at": "保存节点",
         "preprocess_mode": "预处理模式",
+        "luma_prep": "亮度分带（Luma Prep）— 平涂区域更清晰，可能柔化细节",
+        "luma_prep_hint": "适合 Logo、贴花和平涂色块。渐变、头发、皮肤和精细角色建议关闭。",
+        "generate_compare_source": "源图预处理",
+        "generate_compare_result": "生成结果对比",
+        "generate_without_luma": "未启用 Luma Prep",
+        "generate_with_luma": "启用 Luma Prep",
+        "generate_layers_count": "{count} 层",
+        "generate_no_checkpoint": "尚无 checkpoint",
+        "luma_status_none": "选择图片后可查看是否使用 Luma Prep，以及对应的 JSON checkpoint。",
+        "luma_status_next_on": "下次生成：已启用 Luma Prep（使用亮度分带源图）。",
+        "luma_status_next_off": "下次生成：未启用 Luma Prep（使用原图）。",
+        "luma_status_file_ready": "亮度分带文件：已就绪（{name}）。",
+        "luma_status_file_missing": "亮度分带文件：尚未生成（启用 Luma Prep 或首次以 Luma Prep 生成后会出现）。",
+        "luma_status_checkpoints": "Checkpoint — 普通：{plain} · Luma：{luma}。",
+        "luma_status_last_run_on": "该图片最近一次生成使用了 Luma Prep。",
+        "luma_status_last_run_off": "该图片最近一次生成未使用 Luma Prep。",
+        "luma_status_last_run_unknown": "尚未记录该图片的完成生成记录。",
+        "luma_column_next": " ← 下次",
+        "luma_column_last": "（上次）",
+        "luma_image_tag_ready": "已有 luma 文件",
+        "luma_image_tag_missing": "无 luma 文件",
+        "json_tag_luma": "[Luma]",
+        "json_tag_plain": "[普通]",
+        "generate_log_pipeline_luma": "正在使用 Luma Prep 生成（输入：{path}）",
+        "generate_log_pipeline_plain": "正在不使用 Luma Prep 生成（原图）",
+        "generate_log_output_luma": "已生成 JSON（Luma Prep）：{path}",
+        "generate_log_output_plain": "已生成 JSON（未用 Luma Prep）：{path}",
+        "generate_select_image": "选择图片以对比预处理与生成结果。",
         "save_custom_preset": "保存为预设",
         "custom_panel_title": "自定义参数",
         "custom_panel_hint": "上方预设会自动填入这些参数；勾选使用自定义参数后可直接修改。",
         "generate_step_image": "第 1 步 - 选择图片",
         "generate_step_image_hint": "添加 PNG/JPG/BMP 图片。生成的 JSON 会保存在原图片旁边。",
+        "generate_step_image_credit": "若展示的图片或艺术作品非本人创作，请尽可能注明原作者。",
+        "preview_image_added_to_generate": "已加入生成图片列表：{name}",
+        "preview_image_already_on_generate": "已在生成图片列表中：{name}",
         "generate_step_quality": "第 2 步 - 选择品质",
         "generate_step_quality_hint": "快速配置耗时短；慢速配置会占用更多 GPU 时间，通常画面更干净。",
         "generate_step_run": "第 3 步 - 开始生成",
@@ -260,12 +773,25 @@ Notes
         "game_profile": "游戏 profile",
         "pid": "PID",
         "layer_count": "模板层数",
+        "layer_count_required": "请填写模板层数。输入游戏中显示的精确层数。",
         "easy_import": "简化导入",
         "easy_import_hint": "FH6 通常不需要手填地址。留空即可复用当前 session，或在导入前自动定位。",
         "manual_count": "层数地址",
         "manual_table": "图层表地址",
         "auto_locate": "自动定位 FH6",
         "import_json": "导入 JSON",
+        "handmade_section": "手工 / 通用 JSON（FH6）",
+        "handmade_section_hint": "用于包含真实 FH6 形状类型码的 JSON（不仅是生成的矩形/椭圆）。导出会读取当前打开的贴膜组；导入仅写入可安全保存的图层字段。导入后请在 FH6 中保存并重新加载贴膜组。",
+        "export_typecode_json": "导出当前组为 JSON",
+        "typecode_trim_after_import": "导入后将贴膜组层数裁剪为实际导入层数",
+        "typecode_allow_unknown": "允许实验性形状码（高级）",
+        "typecode_export_done": "已导出 {count} 层到 {path}",
+        "typecode_export_failed": "导出失败：{error}",
+        "typecode_import_mode": "对手工/通用 JSON 使用导入器：{name}",
+        "typecode_import_done": "手工导入完成：{name}",
+        "typecode_trim_done": "已将贴膜组层数裁剪为 {count}",
+        "typecode_trim_failed": "裁剪失败：{error}",
+        "typecode_missing_group": "无法解析 FH6 组地址，无法导出/裁剪。请重新自动定位。",
         "diagnose": "诊断",
         "save_snapshot": "保存层数快照",
         "compare_snapshot": "对比快照",
@@ -309,6 +835,15 @@ Notes
         "runtime_folder": "运行/缓存目录",
         "open_runtime_folder": "打开运行缓存目录",
         "runtime_location": "运行缓存文件会保存在软件旁边：{runtime}。FH6 定位缓存：{probe}。",
+        "resource_monitor_title": "资源监控",
+        "resource_cpu": "CPU",
+        "resource_gpu": "GPU",
+        "resource_temp_nominal": "温度读数正常。",
+        "resource_unavailable": "不可用",
+        "resource_heat_warning_banner": "/// 警告！检测到明显高温！ ///",
+        "resource_heat_critical_banner": "/// 温度危险。请停止程序。 ///",
+        "resource_heat_log_warning": "/// 警告！检测到明显高温！ ///（峰值 {temp}°C）",
+        "resource_heat_log_critical": "/// 温度危险。请停止程序。 ///（峰值 {temp}°C）",
         "tutorial": """小白流程
 
 1. 从 GitHub Releases 下载单文件 EXE，直接运行。普通用户不需要 Python、.venv 或 bat 文件。
@@ -335,13 +870,105 @@ Notes
     "ko": {
         "title": app_title(),
         "subtitle": "geometry JSON을 생성하고 Forza Horizon 비닐 그룹 편집기로 가져옵니다.",
+        "header_kicker": "FORZA PAINTER / FH6",
+        "header_audit": "생성 스위트",
         "language": "언어",
         "process": "게임 프로세스",
         "refresh": "새로고침",
         "generate_tab": "JSON 생성",
-        "import_tab": "가져오기",
+        "import_final_tab": "Final JSON 가져오기",
+        "import_final_tab_hint": "이 앱에서 생성한 최종 geometry JSON(사각형·회전 타원)을 가져옵니다. 생성 실행 폴더를 고르거나 JSON을 직접 추가한 뒤 그룹 해제된 FH6 템플릿에 가져옵니다.",
+        "import_final_runs": "생성 실행",
+        "import_final_refresh_runs": "실행 목록 새로고침",
+        "import_final_run_files": "선택한 실행의 JSON",
+        "import_final_use_best": "최적 safe final 사용(실행 내 최대 레이어)",
+        "import_final_pick_best": "최적 final 선택",
+        "import_final_import": "Final JSON을 FH6에 가져오기",
+        "import_handmade_tab": "수작업 JSON 가져오기",
+        "handmade_tab": "수작업 JSON",
+        "handmade_tab_hint": "실제 FH6 도형 타입 코드가 있는 사용자 JSON을 가져옵니다(생성 사각형/타원 아님). 가져온 뒤 FH6에서 비닐 그룹을 저장하고 다시 불러오세요.",
+        "export_game_tab": "게임 JSON보내기",
+        "export_game_tab_hint": "FH6에서 열린 비닐 그룹을 수작업/타입코드 JSON으로보냅니다. 가져오기와 동일한 게임 연결 및 템플릿 레이어 수를 사용하세요.",
+        "export_game_json": "열린 FH6 그룹을 JSON으로보내기",
+        "export_open_folder": "보내기 폴더 열기",
+        "handmade_choose_json": "수작업 JSON 선택",
+        "handmade_import": "수작업 JSON을 FH6로 가져오기",
+        "handmade_export": "열린 FH6 그룹을 JSON으로 보내기",
+        "handmade_status_none": "수작업 JSON을 선택하면 지원되는 도형 수를 확인할 수 있습니다.",
+        "handmade_status_counts": "도형: 전체 {total} · 지원 {supported} · 미지원 {unsupported}",
+        "preview_tab": "이미지 미리보기",
+        "preview_tab_hint": "생성 전에 필터와 예상 레이어를 비교하세요. 레이어 수는 추정치이며, 낮을수록 도형이 적을 수 있습니다. 카드를 클릭한 뒤 생성 탭에서 사용합니다.",
+        "preview_choose_image": "이미지 선택",
+        "preview_use_generate_image": "생성 탭 선택 이미지 사용",
+        "preview_apply_generate": "생성 탭 열기",
+        "preview_open_folder": "미리보기 캐시 열기",
+        "preview_processing": "필터 미리보기 생성 중: {path}",
+        "preview_failed": "필터 미리보기 실패: {error}",
+        "preview_output_folder": "미리보기 캐시: {path}",
+        "preview_estimate": "약 {count} 레이어 (추정)",
+        "preview_estimate_unknown": "추정 불가",
+        "preview_select_filter": "생성에 사용할 필터 카드를 클릭하세요.",
+        "filter_none": "원본",
+        "filter_none_hint": "전처리 없이 원본 이미지를 사용합니다. 사진, 부드러운 그라데이션, 머리카락·피부 등 추가 단순화를 원하지 않을 때 적합합니다.",
+        "filter_luma": "루마 밴드",
+        "filter_luma_hint": "에지를 고려한 루마 밴드로 비슷한 톤을 더 깔끔한 단계로 만듭니다. 로고, 데칼, 애니 평면·단색 영역에 적합합니다.",
+        "filter_bilateral": "양방향 스무딩",
+        "filter_bilateral_hint": "에지는 유지하면서 노이즈와 질감을 부드럽게 합니다. 사진, 인물, 피부, 머리카락에 적합합니다.",
+        "filter_posterize": "포스터라이즈",
+        "filter_posterize_hint": "이미지의 색 단계 수를 줄입니다. 스타일 아트, 포스터, 제한 팔레트 디자인에 적합합니다.",
+        "filter_clahe": "CLAHE 대비",
+        "filter_clahe_hint": "국부 대비를 높여 어둡거나 밋밋한 영역을 더 잘 보이게 합니다. 노출 부족·안개·저대비 원본에 적합합니다.",
+        "filter_smooth": "약한 블러",
+        "filter_smooth_hint": "가벼운 가우시안 블러로 미세 디테일과 JPEG 아티팩트를 완화합니다. 노이즈 많은 스크린샷·JPEG에 적합합니다.",
+        "filter_cel_soft": "소프트 셀 셰이딩",
+        "filter_cel_soft_hint": "윤곽선이 더 부드럽고 채움이 자연스러운 코믹/셀 스타일입니다. 애니·스타일 아트에 잘 맞습니다.",
+        "filter_cel_heavy": "헤비 잉크 셀 셰이딩",
+        "filter_cel_heavy_hint": "검은 잉크 라인과 평면 음영을 강하게 적용해 Borderlands 같은 강한 코믹 느낌을 냅니다.",
+        "preprocess_filter": "전처리 필터",
+        "preprocess_filter_hint": "GPU 생성기 실행 전 이미지를 어떻게 단순화할지 선택합니다. 이미지 미리보기에서 비교하세요. 추정 레이어가 낮을수록 도형이 적을 수 있습니다.",
+        "generate_source_original": "원본",
+        "generate_source_filtered": "필터 적용",
+        "generate_result_plain": "필터 없음",
+        "generate_result_filtered": "{filter} 사용",
+        "json_tag_bilateral": "[양방향]",
+        "json_tag_posterize": "[포스터]",
+        "json_tag_clahe": "[CLAHE]",
+        "json_tag_smooth": "[블러]",
+        "json_tag_cel_soft": "[소프트 셀]",
+        "json_tag_cel_heavy": "[헤비 잉크]",
+        "luma_before": "원본",
+        "luma_after": "루마 밴드 후",
+        "luma_before_hint": "이미지를 선택하면 원본이 여기에 표시됩니다.",
+        "luma_after_hint": "루마 밴드 결과가 여기에 표시됩니다.",
+        "luma_output_folder": "출력 폴더: {path}",
+        "luma_processing": "처리 중: {path}",
+        "luma_saved": "루마 밴드 이미지 저장됨: {path}",
+        "luma_failed": "루마 밴드 실패: {error}",
         "tools_tab": "FH6 도구",
         "tutorial_tab": "튜토리얼",
+        "acknowledgements_tab": "감사의 글",
+        "colors_tab": "색상",
+        "colors_values": "색상 값",
+        "colors_tab_hint": "왼쪽 JSON 생성 탭에 추가한 이미지에서 색을 고릅니다. 이미지를 클릭해 샘플링하고 Shift+휠로 샘플 크기를 조절하세요.",
+        "colors_prev_image": "이전 이미지",
+        "colors_next_image": "다음 이미지",
+        "colors_no_images": "JSON 생성 탭에서 이미지를 먼저 추가하세요.",
+        "colors_image_label": "이미지 {current}/{total}: {name}",
+        "colors_pixel_size": "샘플 크기(px)",
+        "colors_click_hint": "이미지를 클릭해 색을 선택하세요.",
+        "colors_hex": "Hex",
+        "colors_rgb": "RGB",
+        "colors_hsl": "HSL",
+        "colors_hsb": "HSB",
+        "colors_forza": "Forza H / S / B",
+        "colors_copy_hex": "Hex 복사",
+        "colors_copy_forza": "Forza 복사",
+        "colors_open_bang": "Bang 변환기 열기",
+        "colors_copied": "클립보드에 복사했습니다.",
+        "colors_saved": "색상 저장됨 {hex}",
+        "colors_saved_history": "저장된 색상 (클릭하여 불러오기)",
+        "monitor_tab": "리소스 모니터",
+        "monitor_why_title": "왜 있나요?",
         "images": "이미지",
         "add_images": "이미지 추가",
         "remove_image": "선택한 이미지 제거",
@@ -355,11 +982,42 @@ Notes
         "custom_mutated": "변형 샘플",
         "custom_save_at": "체크포인트 저장",
         "preprocess_mode": "전처리 모드",
+        "luma_prep": "루마 프렙 — 평면 영역은 더 깔끔, 미세 디테일은 약해질 수 있음",
+        "luma_prep_hint": "로고·데칼·단색 영역에 적합. 부드러운 gradient, 머리카락, 피부, 캐릭터 디테일은 끄세요.",
+        "generate_compare_source": "소스 전처리",
+        "generate_compare_result": "생성 결과 비교",
+        "generate_without_luma": "루마 프렙 없음",
+        "generate_with_luma": "루마 프렙 사용",
+        "generate_layers_count": "{count} 레이어",
+        "generate_no_checkpoint": "checkpoint 없음",
+        "luma_status_none": "이미지를 선택하면 루마 프렙 적용 여부와 JSON checkpoint를 확인할 수 있습니다.",
+        "luma_status_next_on": "다음 생성: 루마 프렙 켜짐(루마 밴드 소스 사용).",
+        "luma_status_next_off": "다음 생성: 루마 프렙 꺼짐(원본 이미지 사용).",
+        "luma_status_file_ready": "루마 밴드 파일: 준비됨 ({name}).",
+        "luma_status_file_missing": "루마 밴드 파일: 아직 없음(Luma Prep 켜고 생성하면 생성됩니다).",
+        "luma_status_checkpoints": "Checkpoint — 일반: {plain} · Luma: {luma}.",
+        "luma_status_last_run_on": "이 이미지의 마지막 완료 생성은 루마 프렙을 사용했습니다.",
+        "luma_status_last_run_off": "이 이미지의 마지막 완료 생성은 루마 프렙을 사용하지 않았습니다.",
+        "luma_status_last_run_unknown": "이 이미지에 대한 완료된 생성 기록이 없습니다.",
+        "luma_column_next": " ← 다음",
+        "luma_column_last": "(마지막)",
+        "luma_image_tag_ready": "luma 파일 있음",
+        "luma_image_tag_missing": "luma 파일 없음",
+        "json_tag_luma": "[Luma]",
+        "json_tag_plain": "[일반]",
+        "generate_log_pipeline_luma": "루마 프렙으로 생성 중(입력: {path})",
+        "generate_log_pipeline_plain": "루마 프렙 없이 생성 중(원본 이미지)",
+        "generate_log_output_luma": "JSON 생성됨(루마 프렙): {path}",
+        "generate_log_output_plain": "JSON 생성됨(루마 프렙 없음): {path}",
+        "generate_select_image": "이미지를 선택하면 전처리와 결과를 비교할 수 있습니다.",
         "save_custom_preset": "프리셋으로 저장",
         "custom_panel_title": "사용자 설정",
         "custom_panel_hint": "선택한 프리셋 값이 자동으로 채워집니다. 생성 전에 값을 바꾸려면 사용자 설정을 켜세요.",
         "generate_step_image": "1단계 - 이미지 선택",
         "generate_step_image_hint": "PNG/JPG/BMP 이미지를 추가하세요. 생성된 JSON은 원본 이미지 옆에 저장됩니다.",
+        "generate_step_image_credit": "본인이 만들지 않은 이미지나 아트를 사용하는 경우, 가능한 한 원작자를 표기해 주세요.",
+        "preview_image_added_to_generate": "생성 이미지 목록에 추가됨: {name}",
+        "preview_image_already_on_generate": "이미 생성 이미지 목록에 있음: {name}",
         "generate_step_quality": "2단계 - 품질 선택",
         "generate_step_quality_hint": "빠른 프로필은 시간이 적게 걸립니다. 느린 프로필은 GPU 시간을 더 쓰지만 보통 더 깔끔합니다.",
         "generate_step_run": "3단계 - 생성",
@@ -393,12 +1051,25 @@ Notes
         "game_profile": "게임 프로필",
         "pid": "PID",
         "layer_count": "템플릿 레이어 수",
+        "layer_count_required": "템플릿 레이어 수를 입력하세요. 게임에 표시된 정확한 레이어 수를 입력하십시오.",
         "easy_import": "간편 가져오기",
         "easy_import_hint": "FH6에서는 주소를 비워두세요. 앱이 현재 세션을 재사용하거나 가져오기 전에 자동으로 찾습니다.",
         "manual_count": "레이어 수 주소",
         "manual_table": "레이어 테이블 주소",
         "auto_locate": "FH6 자동 찾기",
         "import_json": "JSON 가져오기",
+        "handmade_section": "수작업 / 범용 JSON (FH6)",
+        "handmade_section_hint": "실제 FH6 도형 타입 코드가 있는 JSON용(생성된 사각형/타원만이 아님).보내기는 열린 비닐 그룹을 읽고, 가져오기는 저장 안전 필드만 씁니다. 가져온 뒤 FH6에서 저장 후 다시 불러오세요.",
+        "export_typecode_json": "열린 그룹을 JSON으로 보내기",
+        "typecode_trim_after_import": "가져온 뒤 비닐 그룹 레이어 수를 실제 가져온 수로 자르기",
+        "typecode_allow_unknown": "실험적 도형 코드 허용(고급)",
+        "typecode_export_done": "{count}개 레이어를 {path}에보냈습니다",
+        "typecode_export_failed": "보내기 실패: {error}",
+        "typecode_import_mode": "수작업/범용 가져오기 사용: {name}",
+        "typecode_import_done": "수작업 가져오기 완료: {name}",
+        "typecode_trim_done": "비닐 그룹 레이어 수를 {count}(으)로 잘랐습니다",
+        "typecode_trim_failed": "자르기 실패: {error}",
+        "typecode_missing_group": "자르기/보내기용 FH6 그룹 주소를 찾지 못했습니다. 자동 위치 찾기를 다시 실행하세요.",
         "diagnose": "진단",
         "save_snapshot": "레이어 수 스냅샷 저장",
         "compare_snapshot": "스냅샷 비교",
@@ -442,6 +1113,15 @@ Notes
         "runtime_folder": "런타임/캐시 폴더",
         "open_runtime_folder": "런타임 폴더 열기",
         "runtime_location": "런타임/캐시 파일은 앱 옆에 저장됩니다: {runtime}. FH6 probe cache: {probe}.",
+        "resource_monitor_title": "리소스 모니터",
+        "resource_cpu": "CPU",
+        "resource_gpu": "GPU",
+        "resource_temp_nominal": "온도 측정값 정상.",
+        "resource_unavailable": "사용 불가",
+        "resource_heat_warning_banner": "/// 경고! 심각한 고온이 감지되었습니다! ///",
+        "resource_heat_critical_banner": "/// 온도 위험. 프로그램을 중지하세요. ///",
+        "resource_heat_log_warning": "/// 경고! 심각한 고온이 감지되었습니다! /// (최고 {temp}°C)",
+        "resource_heat_log_critical": "/// 온도 위험. 프로그램을 중지하세요. /// (최고 {temp}°C)",
         "tutorial": """초보자용 작업 순서
 
 1. GitHub Releases에서 단일 EXE를 다운로드해 바로 실행하세요. 일반 사용자는 Python, .venv, bat 파일이 필요 없습니다.
@@ -465,7 +1145,26 @@ Notes
 - 앱이 안전한 템플릿을 찾지 못하면 편집기가 열려 있는지, 템플릿이 ungroup 상태인지, 레이어 수가 정확한지 확인하세요.
 """,
     },
+    "zh-tw": {
+        "title": app_title(),
+        "subtitle": "產生 geometry JSON 並匯入 Forza Horizon 貼紙編輯器。",
+        "language": "語言",
+        "layer_count": "模板圖層數",
+        "layer_count_required": "請填寫模板圖層數。輸入遊戲中顯示的精確圖層數。",
+        "step_template": "第 2 步 - 模板",
+        "step_template_hint": "填寫遊戲裡目前模板顯示的真實圖層數。",
+        "import_json": "匯入 JSON",
+        "ready": "就緒",
+        "running": "執行中",
+        "done": "完成",
+        "failed": "失敗",
+        "stopped": "已停止",
+        "locating": "正在安全定位 FH6 圖層表…請保持 Vinyl Group Editor 開啟，勿切換選單。",
+        "located": "已定位目前 FH6 圖層表。",
+    },
 }
+
+TEXT = apply_text_patches(TEXT, app_title_text=app_title())
 
 
 def ensure_dirs():
@@ -473,7 +1172,7 @@ def ensure_dirs():
 
 
 def tr(lang, key):
-    return TEXT[lang].get(key, TEXT["en"].get(key, key))
+    return tr_text(TEXT, lang, key)
 
 
 def version_key(value):
@@ -492,17 +1191,56 @@ def parse_version_source(source):
     return match.group(1).strip()
 
 
-def fetch_text_url(url, timeout=UPDATE_CHECK_TIMEOUT_SECONDS):
+def is_windows_admin():
+    if os.name != "nt":
+        return True
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except OSError:
+        return False
+
+
+def ensure_elevated_or_exit():
+    if os.name != "nt" or is_windows_admin():
+        return
+    if os.environ.get("FORZA_PAINTER_NO_ELEVATE") == "1":
+        return
+    params = subprocess.list2cmdline(sys.argv)
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 0)
+    raise SystemExit(0)
+
+
+def fetch_text_url(url, timeout=UPDATE_CHECK_TIMEOUT_SECONDS, accept="text/plain,*/*"):
+    validate_fetch_url(url)
     request = urllib.request.Request(
         url,
         headers={
             "User-Agent": f"{APP_DISPLAY_NAME}/{__version__}",
-            "Accept": "text/plain,*/*",
+            "Accept": accept,
         },
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         data = response.read(256 * 1024)
     return data.decode("utf-8", errors="replace")
+
+
+def fetch_latest_release_version(timeout=UPDATE_CHECK_TIMEOUT_SECONDS):
+    validate_fetch_url(GITHUB_RELEASES_API)
+    request = urllib.request.Request(
+        GITHUB_RELEASES_API,
+        headers={
+            "User-Agent": f"{APP_DISPLAY_NAME}/{__version__}",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read(256 * 1024).decode("utf-8", errors="replace"))
+    tag = str(payload.get("tag_name", "")).strip()
+    if tag.lower().startswith("v"):
+        tag = tag[1:]
+    if not tag:
+        raise ValueError("GitHub release response did not include tag_name")
+    return tag
 
 
 def extract_changelog_section(changelog, version):
@@ -539,6 +1277,36 @@ def run_embedded_helper(helper_name, args):
         import main as importer_main
 
         return importer_main.main(["main.py", *args])
+    if helper_name == "fh6_import_typecode_json":
+        import fh6_import_typecode_json
+
+        previous_argv = sys.argv
+        try:
+            sys.argv = ["fh6_import_typecode_json.py", *args]
+            fh6_import_typecode_json.main()
+            return 0
+        finally:
+            sys.argv = previous_argv
+    if helper_name == "fh6_export_typecode_json":
+        import fh6_export_typecode_json
+
+        previous_argv = sys.argv
+        try:
+            sys.argv = ["fh6_export_typecode_json.py", *args]
+            fh6_export_typecode_json.main()
+            return 0
+        finally:
+            sys.argv = previous_argv
+    if helper_name == "fh6_trim_group_count":
+        import fh6_trim_group_count
+
+        previous_argv = sys.argv
+        try:
+            sys.argv = ["fh6_trim_group_count.py", *args]
+            fh6_trim_group_count.main()
+            return 0
+        finally:
+            sys.argv = previous_argv
     raise SystemExit(f"Unknown helper: {helper_name}")
 
 
@@ -595,6 +1363,9 @@ def session_pid_is_live(session, game):
 def session_matches_current_import(session, game, pid, layer_count):
     if not session:
         return False
+    ok, _reason = validate_fh6_session(session)
+    if not ok:
+        return False
     if str(session.get("layer_count", "")) != str(layer_count):
         return False
     if not session_pid_is_live(session, game):
@@ -604,37 +1375,6 @@ def session_matches_current_import(session, game, pid, layer_count):
         return not pid or int(pid) == session_pid
     except (TypeError, ValueError):
         return False
-
-
-def load_cv2():
-    global _CV2_CACHE, _CV2_ERROR
-    if _CV2_CACHE is not None:
-        return _CV2_CACHE
-    if _CV2_ERROR is not None:
-        return None
-    try:
-        import cv2
-        import numpy as np
-        _CV2_CACHE = (cv2, np)
-        return _CV2_CACHE
-    except BaseException as exc:
-        _CV2_ERROR = exc
-        return None
-
-
-def load_pillow():
-    global _PIL_CACHE, _PIL_ERROR
-    if _PIL_CACHE is not None:
-        return _PIL_CACHE
-    if _PIL_ERROR is not None:
-        return None
-    try:
-        from PIL import Image, ImageDraw
-        _PIL_CACHE = (Image, ImageDraw)
-        return _PIL_CACHE
-    except BaseException as exc:
-        _PIL_ERROR = exc
-        return None
 
 
 def preview_size_tuple(max_size=None):
@@ -721,9 +1461,16 @@ def render_source_image(path, max_size=None):
 
 
 def render_geometry_json(path, max_size=None):
+    if is_typecode_geometry_json(path):
+        typecode_preview = _render_typecode_geometry_json_pillow(path, max_size)
+        if typecode_preview:
+            return typecode_preview
+    pillow_preview = render_geometry_json_pillow(path, max_size)
+    if pillow_preview:
+        return pillow_preview
     loaded = load_cv2()
     if not loaded:
-        return render_geometry_json_pillow(path, max_size)
+        return None
     cv2, np = loaded
     try:
         data = load_normalized_geometry(path)
@@ -771,6 +1518,8 @@ def render_geometry_json(path, max_size=None):
 
 
 def render_geometry_json_pillow(path, max_size=None):
+    if is_typecode_geometry_json(path):
+        return _render_typecode_geometry_json_pillow(path, max_size)
     loaded = load_pillow()
     if not loaded:
         return None
@@ -848,6 +1597,105 @@ def draw_preview_ellipse_pillow(image, x, y, w, h, rot_deg, color, scale):
                 pixels[xx, yy] = (r, g, b)
 
 
+def _rotated_rect_points(x, y, w, h, rot_deg, scale):
+    cx = float(x) * scale
+    cy = float(y) * scale
+    hw = max(1.0, float(w) * scale / 2.0)
+    hh = max(1.0, float(h) * scale / 2.0)
+    theta = float(rot_deg) * (math.pi / 180.0)
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
+    corners = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]
+    points = []
+    for dx, dy in corners:
+        px = cx + dx * cos_t - dy * sin_t
+        py = cy + dx * sin_t + dy * cos_t
+        points.append((int(round(px)), int(round(py))))
+    return points
+
+
+def _render_typecode_geometry_json_pillow(path, max_size=None):
+    loaded = load_pillow()
+    if not loaded:
+        return None
+    Image, ImageDraw = loaded
+    try:
+        shapes, skipped = load_typecode_shapes(path, allow_unknown_low_byte=True)
+        if not shapes:
+            return None
+        xs = [float(item["x"]) for item in shapes]
+        ys = [float(item["y"]) for item in shapes]
+        sxs = [max(1.0, float(item["sx"])) for item in shapes]
+        sys_ = [max(1.0, float(item["sy"])) for item in shapes]
+        min_x = min(x - sx / 2.0 for x, sx in zip(xs, sxs))
+        max_x = max(x + sx / 2.0 for x, sx in zip(xs, sxs))
+        min_y = min(y - sy / 2.0 for y, sy in zip(ys, sys_))
+        max_y = max(y + sy / 2.0 for y, sy in zip(ys, sys_))
+        pad = 18.0
+        width = max(1, int(round((max_x - min_x) + pad * 2.0)))
+        height = max(1, int(round((max_y - min_y) + pad * 2.0)))
+        max_w, max_h = preview_size_tuple(max_size)
+        scale = min(max_w / max(1.0, width), max_h / max(1.0, height), 1.0)
+        preview_w = max(1, int(round(width * scale)))
+        preview_h = max(1, int(round(height * scale)))
+        preview = Image.new("RGB", (preview_w, preview_h), (38, 38, 38))
+        draw_bg = ImageDraw.Draw(preview)
+        tile = max(8, int(round(24 * scale)))
+        for y in range(0, preview_h, tile):
+            for x in range(0, preview_w, tile):
+                if ((x // tile) + (y // tile)) % 2 == 0:
+                    draw_bg.rectangle((x, y, min(preview_w, x + tile), min(preview_h, y + tile)), fill=(58, 58, 58))
+        draw = ImageDraw.Draw(preview)
+        for item in shapes:
+            code = int(item.get("type_code", 0))
+            x = (float(item["x"]) - min_x + pad) * scale
+            y = (float(item["y"]) - min_y + pad) * scale
+            sx = max(1.0, float(item["sx"])) * scale
+            sy = max(1.0, float(item["sy"])) * scale
+            rot = float(item.get("rotation", 0.0))
+            color = tuple(int(v) for v in item.get("color", (255, 255, 255, 255))[:3])
+            if code in (1048678, 1048712):
+                draw_preview_ellipse_pillow(preview, x, y, sx / max(scale, 1e-6), sy / max(scale, 1e-6), rot, color, scale)
+            elif code == 1048677:
+                side = min(sx, sy)
+                points = _rotated_rect_points(x / max(scale, 1e-6), y / max(scale, 1e-6), side / max(scale, 1e-6), side / max(scale, 1e-6), rot, scale)
+                draw.polygon(points, fill=color)
+            elif code == 1048679:
+                pts = [(0.0, -sy / 2.0), (sx / 2.0, sy / 2.0), (-sx / 2.0, sy / 2.0)]
+                theta = rot * (math.pi / 180.0)
+                cos_t = math.cos(theta)
+                sin_t = math.sin(theta)
+                tri = []
+                for dx, dy in pts:
+                    px = x + dx * cos_t - dy * sin_t
+                    py = y + dx * sin_t + dy * cos_t
+                    tri.append((int(round(px)), int(round(py))))
+                draw.polygon(tri, fill=color)
+            elif code == 1048688:
+                # Circle border: draw filled then cut center with background.
+                bbox = (int(round(x - sx / 2.0)), int(round(y - sy / 2.0)), int(round(x + sx / 2.0)), int(round(y + sy / 2.0)))
+                draw.ellipse(bbox, fill=color)
+                inner_scale = 0.72
+                inner = (
+                    int(round(x - (sx * inner_scale) / 2.0)),
+                    int(round(y - (sy * inner_scale) / 2.0)),
+                    int(round(x + (sx * inner_scale) / 2.0)),
+                    int(round(y + (sy * inner_scale) / 2.0)),
+                )
+                draw.ellipse(inner, fill=(38, 38, 38))
+            else:
+                points = _rotated_rect_points(x / max(scale, 1e-6), y / max(scale, 1e-6), sx / max(scale, 1e-6), sy / max(scale, 1e-6), rot, scale)
+                draw.polygon(points, fill=color)
+        if skipped:
+            # Light badge in corner when some shapes are unsupported by importer.
+            badge = f"unsupported: {len(skipped)}"
+            draw.rectangle((6, 6, 6 + 8 * len(badge), 24), fill=(20, 20, 20))
+            draw.text((10, 9), badge, fill=(220, 120, 120))
+        return pil_to_photo(preview)
+    except Exception:
+        return None
+
+
 class App:
     def __init__(self, initial_images):
         ensure_dirs()
@@ -874,6 +1722,13 @@ class App:
         self.closed = False
         self.settings = load_settings()
         self.images = [Path(path) for path in initial_images if Path(path).exists()]
+        self._last_generation_preprocess: dict[str, str] = {}
+        self._preview_filter_cards: dict[str, dict] = {}
+        self._preview_filter_payload: dict[str, dict] = {}
+        self._preview_source_path: Path | None = None
+        self._preview_render_jobs: dict[str, str | None] = {}
+        self._preview_compute_running = False
+        self._preprocess_mode_labels: dict[str, str] = {}
         self.json_files = []
         self.outputs = []
         self.processes = []
@@ -885,6 +1740,8 @@ class App:
         self.custom_mutated_samples = StringVar()
         self.custom_save_at = StringVar()
         self.custom_preprocess_mode = StringVar(value="none")
+        self.preprocess_mode = StringVar(value=PREPROCESS_NONE)
+        self.custom_preprocess_mode.trace_add("write", self._sync_preprocess_from_custom)
         self.translated = []
         self.detailed_log_lock = threading.Lock()
         self.detailed_log_lines = deque()
@@ -900,13 +1757,57 @@ class App:
         self.selected_game = StringVar(value="fh6")
         self.selected_pid = StringVar()
         self.layer_count = StringVar()
+        self.layer_count_info = StringVar(value=tr(self.lang, "layer_import_info"))
         self.snapshot_count = StringVar()
         self.current_count = StringVar()
         self.count_address = StringVar()
         self.table_address = StringVar()
+        self.typecode_trim_after_import = StringVar(value="1")
+        self.typecode_allow_unknown = StringVar(value="0")
+        self.use_best_safe_final = StringVar(value="1")
         self.inspect_table_value = StringVar()
+        self.text_char_search = StringVar()
+        self.text_panels = {
+            script: {
+                "input": StringVar(),
+                "font_choice": StringVar(),
+                "font_path": StringVar(),
+                "font_search": StringVar(),
+                "discovered": (),
+                "font_by_label": {},
+                "widgets": {},
+            }
+            for script in TEXT_SCRIPT_IDS
+        }
+        self._text_coverage_job = None
+        self.text_font_size = StringVar(value="120")
+        self.text_cell_size = StringVar(value="4")
+        self.text_shape_mode = StringVar(value="rectangles")
+        self.text_color = StringVar(value="255,255,255,255")
+        self.text_image_path = StringVar()
+        self.text_invert = StringVar(value="0")
         self.runtime_folder = StringVar(value=str(ROOT))
         self.advanced_visible = False
+        self.theme_id = StringVar(value=APP_THEME_ID)
+        self.palette = resolve_palette()
+        _install_color_globals(self.palette)
+        self._layout_panes = {}
+        self._ui_layout = load_ui_layout(ROOT)
+        self._layout_save_job = None
+        self._layout_restore_jobs: list[str] = []
+        self._generate_compare_jobs: dict[str, str] = {}
+        self.color_image_index = 0
+        self.color_pixel_size = StringVar(value="1")
+        self._color_saved_history: list[str] = []
+        self._color_pil_image = None
+        self._color_photo = None
+        self._color_canvas_scale = 1.0
+        self._color_canvas_offset = (0, 0)
+        self._color_canvas_size = (1, 1)
+        self._resource_monitor_settings = load_resource_monitor_settings(ROOT)
+        self._resource_monitor_backend = None
+        self._resource_heat_state = "normal"
+        self._resource_monitor_snapshot = None
         self._build()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.refresh_processes()
@@ -918,6 +1819,7 @@ class App:
         self._render_lists()
         self.log_line(tr(self.lang, "runtime_location").format(runtime=ROOT / "runtime", probe=PROBE_DIR.parent))
         self._poll_queue()
+        self._start_resource_monitor()
         self.root.after(1000, self.start_update_check)
 
     def _configure_styles(self):
@@ -926,61 +1828,195 @@ class App:
             style.theme_use("clam")
         except Exception:
             pass
-        style.configure(".", background=COLOR_BG, foreground=COLOR_TEXT, fieldbackground=COLOR_INPUT)
-        style.configure("TFrame", background=COLOR_BG)
-        style.configure("TNotebook", background=COLOR_BG, borderwidth=0)
-        style.configure("Primary.TNotebook", background=COLOR_BG, borderwidth=0, tabmargins=(0, 0, 0, 0))
-        style.configure(
-            "Primary.TNotebook.Tab",
-            padding=(18, 8),
-            font=("Segoe UI", 10, "bold"),
-            background=COLOR_PANEL_ALT,
-            foreground=COLOR_MUTED,
-            borderwidth=0,
-        )
-        style.map(
-            "Primary.TNotebook.Tab",
-            background=[("selected", COLOR_ACCENT_DARK), ("active", COLOR_PANEL_ALT)],
-            foreground=[("selected", "#ffffff"), ("active", COLOR_TEXT)],
-        )
-        style.configure(
-            "TLabelframe",
-            background=COLOR_PANEL,
-            foreground=COLOR_TEXT,
-            bordercolor=COLOR_BORDER,
-            lightcolor=COLOR_BORDER,
-            darkcolor=COLOR_BORDER,
-        )
-        style.configure(
-            "TLabelframe.Label",
-            background=COLOR_PANEL,
-            foreground=COLOR_TEXT,
-            font=("Segoe UI", 10, "bold"),
-        )
-        style.configure(
-            "TCombobox",
-            fieldbackground=COLOR_INPUT,
-            background=COLOR_PANEL_ALT,
-            foreground=COLOR_TEXT,
-            arrowcolor=COLOR_TEXT,
-            bordercolor=COLOR_BORDER,
-            lightcolor=COLOR_BORDER,
-            darkcolor=COLOR_BORDER,
-        )
-        style.map(
-            "TCombobox",
-            fieldbackground=[("readonly", COLOR_INPUT)],
-            foreground=[("readonly", COLOR_TEXT)],
-            selectbackground=[("readonly", COLOR_ACCENT_DARK)],
-            selectforeground=[("readonly", "#ffffff")],
-        )
-        style.configure(
-            "TScrollbar",
-            background=COLOR_PANEL_ALT,
-            troughcolor=COLOR_BG,
-            bordercolor=COLOR_BORDER,
-            arrowcolor=COLOR_TEXT,
-        )
+        # ttk style calls occasionally differ across bundled Tcl/Tk builds in one-file EXEs.
+        # Keep startup resilient: if a style element is unsupported, skip that rule.
+        try:
+            style.configure(".", background=COLOR_BG, foreground=COLOR_TEXT, fieldbackground=COLOR_INPUT)
+            style.configure("TFrame", background=COLOR_BG)
+            style.configure("TNotebook", background=COLOR_BG, borderwidth=0)
+            style.configure("Primary.TNotebook", background=COLOR_BG, borderwidth=0, tabmargins=(0, 0, 0, 0))
+            style.configure(
+                "Primary.TNotebook.Tab",
+                padding=(22, 10),
+                font=("Segoe UI", 10, "bold"),
+                background=COLOR_PANEL_ALT,
+                foreground=COLOR_TEXT,
+                borderwidth=0,
+            )
+            style.map(
+                "Primary.TNotebook.Tab",
+                background=[("selected", COLOR_ACCENT_DARK), ("!selected", COLOR_PANEL_ALT)],
+                foreground=[("selected", COLOR_SELECT_FG), ("!selected", COLOR_MUTED)],
+            )
+            style.configure(
+                "Script.TNotebook",
+                background=COLOR_BG,
+                borderwidth=0,
+                tabmargins=(0, 0, 0, 0),
+            )
+            style.configure(
+                "Script.TNotebook.Tab",
+                padding=(14, 8),
+                font=("Segoe UI", 9, "bold"),
+                background=COLOR_PANEL_ALT,
+                foreground=COLOR_TEXT,
+                borderwidth=0,
+            )
+            style.map(
+                "Script.TNotebook.Tab",
+                background=[("selected", COLOR_ACCENT_DARK), ("!selected", COLOR_PANEL_ALT)],
+                foreground=[("selected", COLOR_SELECT_FG), ("!selected", COLOR_MUTED)],
+            )
+            style.configure(
+                "TLabelframe",
+                background=COLOR_PANEL,
+                foreground=COLOR_TEXT,
+                bordercolor=COLOR_BORDER,
+                lightcolor="#3d4a5c",
+                darkcolor="#1a1f2a",
+                relief="solid",
+            )
+            style.configure(
+                "TLabelframe.Label",
+                background=COLOR_PANEL,
+                foreground=COLOR_TEXT,
+                font=("Segoe UI", 10, "bold"),
+            )
+            style.configure(
+                "TCombobox",
+                fieldbackground=COLOR_INPUT,
+                background=COLOR_PANEL_ALT,
+                foreground=COLOR_TEXT,
+                arrowcolor=COLOR_TEXT,
+                bordercolor=COLOR_BORDER,
+                lightcolor=COLOR_BORDER,
+                darkcolor=COLOR_BORDER,
+            )
+            style.map(
+                "TCombobox",
+                fieldbackground=[("readonly", COLOR_INPUT)],
+                foreground=[("readonly", COLOR_TEXT)],
+                selectbackground=[("readonly", COLOR_ACCENT_DARK)],
+                selectforeground=[("readonly", COLOR_SELECT_FG)],
+            )
+            style.configure(
+                "TScrollbar",
+                background=COLOR_PANEL_ALT,
+                troughcolor=COLOR_BG,
+                bordercolor=COLOR_BORDER,
+                arrowcolor=COLOR_TEXT,
+            )
+            style.configure("TPanedwindow", background=COLOR_BORDER)
+        except Exception:
+            pass
+
+        try:
+            style.configure("Sash", sashthickness=5, gripcount=0, background="#1f2633")
+            style.map("Sash", background=[("active", COLOR_ACCENT)])
+        except Exception:
+            pass
+
+    def _register_pane(self, paned, layout_key: str, orient: str) -> None:
+        self._layout_panes[layout_key] = (paned, orient)
+        paned.bind("<ButtonRelease-1>", lambda _event: self._schedule_layout_save(), add="+")
+        paned.bind("<B1-Motion>", lambda _event: self._schedule_layout_save(), add="+")
+
+    def _widget_alive(self, widget) -> bool:
+        if widget is None:
+            return False
+        try:
+            return bool(widget.winfo_exists())
+        except (TclError, Exception):
+            return False
+
+    def _cancel_layout_jobs(self) -> None:
+        if self._layout_save_job:
+            try:
+                self.root.after_cancel(self._layout_save_job)
+            except Exception:
+                pass
+            self._layout_save_job = None
+        for job in self._layout_restore_jobs:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+        self._layout_restore_jobs.clear()
+
+    def _schedule_layout_save(self):
+        if self._layout_save_job:
+            try:
+                self.root.after_cancel(self._layout_save_job)
+            except Exception:
+                pass
+        self._layout_save_job = self.root.after(400, self._persist_pane_layout)
+
+    def _persist_pane_layout(self):
+        self._layout_save_job = None
+        ratios = dict(self._ui_layout)
+        for key, (paned, orient) in list(self._layout_panes.items()):
+            measured = pane_ratio(paned, orient)
+            if measured is not None:
+                ratios[key] = measured
+        self._ui_layout = ratios
+        save_ui_layout(ROOT, ratios)
+
+    def _restore_pane_layout(self, layout_key: str | None = None) -> None:
+        keys = [layout_key] if layout_key else list(self._layout_panes.keys())
+        for key in keys:
+            entry = self._layout_panes.get(key)
+            if not entry:
+                continue
+            paned, orient = entry
+            try:
+                if not paned.winfo_exists():
+                    continue
+            except Exception:
+                continue
+            ratio = self._ui_layout.get(key, DEFAULT_PANE_RATIOS.get(key, 0.7))
+            apply_pane_ratio(paned, orient, ratio)
+
+    def _restore_all_pane_layouts(self) -> None:
+        for key in list(self._layout_panes.keys()):
+            self._restore_pane_layout(key)
+
+    def _restore_ready_pane_layouts(self) -> None:
+        """Restore pane ratios only when widgets exist and are large enough to measure."""
+        for key, (paned, orient) in list(self._layout_panes.items()):
+            try:
+                if not paned.winfo_exists():
+                    continue
+            except Exception:
+                continue
+            paned.update_idletasks()
+            total = paned.winfo_height() if orient == "vertical" else paned.winfo_width()
+            if total < 80:
+                continue
+            self._restore_pane_layout(key)
+
+    def _restore_shell_layouts(self) -> None:
+        self._restore_pane_layout("main_vertical")
+
+    def _schedule_layout_restore(self, *, include_tabs: bool = True) -> None:
+        self._cancel_layout_jobs()
+
+        def _run_shell() -> None:
+            if self.closed:
+                return
+            self._restore_shell_layouts()
+            if include_tabs:
+                self._restore_ready_pane_layouts()
+
+        for delay in (80, 200, 500):
+            self._layout_restore_jobs.append(self.root.after(delay, _run_shell))
+
+    def _create_paned(self, parent, orient: str, layout_key: str, **pack_kwargs) -> ttk.PanedWindow:
+        paned = ttk.PanedWindow(parent, orient=orient)
+        pack_kwargs.setdefault("fill", BOTH)
+        pack_kwargs.setdefault("expand", True)
+        paned.pack(**pack_kwargs)
+        self._register_pane(paned, layout_key, orient)
+        return paned
 
     def _register_process(self, proc):
         with self.process_lock:
@@ -1042,10 +2078,23 @@ class App:
         except Exception:
             return COLOR_PANEL
 
-    def _label(self, parent, key, **kwargs):
+    def _theme_fg(self, role: str) -> str:
+        roles = {
+            "text": COLOR_TEXT,
+            "muted": COLOR_MUTED,
+            "hint": COLOR_HINT,
+            "info": COLOR_INFO,
+            "success": COLOR_SUCCESS,
+            "error": COLOR_ERROR,
+        }
+        return roles.get(role, COLOR_TEXT)
+
+    def _label(self, parent, key, theme_role: str = "text", **kwargs):
         kwargs.setdefault("bg", self._parent_bg(parent))
-        kwargs.setdefault("fg", COLOR_TEXT)
+        if "fg" not in kwargs:
+            kwargs.setdefault("fg", self._theme_fg(theme_role))
         widget = Label(parent, text=tr(self.lang, key), **kwargs)
+        widget._theme_role = theme_role
         self.translated.append((widget, key, "text"))
         return widget
 
@@ -1054,7 +2103,7 @@ class App:
         kwargs.setdefault("fg", COLOR_TEXT)
         kwargs.setdefault("disabledforeground", COLOR_MUTED)
         kwargs.setdefault("activebackground", COLOR_BUTTON_ACTIVE)
-        kwargs.setdefault("activeforeground", COLOR_TEXT)
+        kwargs.setdefault("activeforeground", COLOR_BUTTON_ACTIVE_FG)
         kwargs.setdefault("relief", "flat")
         kwargs.setdefault("bd", 0)
         kwargs.setdefault("highlightthickness", 1)
@@ -1066,39 +2115,108 @@ class App:
         self.translated.append((widget, key, "text"))
         return widget
 
-    def _mapped_label_color(self, color):
-        value = str(color or "").lower()
-        if value in ("black", "#000000", "#000", "systembuttontext", "systemwindowtext"):
-            return COLOR_TEXT
-        if value in ("systemdisabledtext", "gray", "grey", "gray40", "grey40"):
-            return COLOR_MUTED
-        if value in ("#555", "#555555", "gray50", "grey50"):
-            return COLOR_MUTED
-        if value in ("#005a9e", "blue"):
-            return COLOR_ACCENT
-        if value in ("#8a5300", "orange", "darkorange"):
-            return COLOR_WARN
-        return color if color else COLOR_TEXT
+    def _bind_wraplength(self, label, container, padding=24, minimum=160):
+        def _on_configure(event=None):
+            if not self._widget_alive(label) or not self._widget_alive(container):
+                return
+            try:
+                width = event.width if event is not None else container.winfo_width()
+                if width > padding + minimum:
+                    label.configure(wraplength=max(minimum, width - padding))
+            except TclError:
+                pass
 
-    def _apply_dark_theme_recursive(self, widget):
+        container.bind("<Configure>", _on_configure, add="+")
+
+    def _make_vertical_scroll(self, parent):
+        scroll_area = Frame(parent)
+        canvas = Canvas(scroll_area, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(scroll_area, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side=LEFT, fill=BOTH, expand=True)
+        scrollbar.pack(side=RIGHT, fill="y")
+        inner = Frame(canvas)
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _update_scroll_region(_event=None):
+            if not self._widget_alive(canvas):
+                return
+            try:
+                canvas.configure(scrollregion=canvas.bbox("all"))
+            except TclError:
+                pass
+
+        def _match_canvas_width(event):
+            if not self._widget_alive(canvas):
+                return
+            try:
+                canvas.itemconfigure(window, width=event.width)
+            except TclError:
+                pass
+
+        def _mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _bind_mousewheel(_event=None):
+            canvas.bind_all("<MouseWheel>", _mousewheel)
+
+        def _unbind_mousewheel(_event=None):
+            canvas.unbind_all("<MouseWheel>")
+
+        inner.bind("<Configure>", _update_scroll_region)
+        canvas.bind("<Configure>", _match_canvas_width)
+        scroll_area.bind("<Enter>", _bind_mousewheel)
+        scroll_area.bind("<Leave>", _unbind_mousewheel)
+        return scroll_area, inner
+
+    def _bind_text_mousewheel(self, widget):
+        def _mousewheel(event):
+            widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _bind(_event=None):
+            widget.bind_all("<MouseWheel>", _mousewheel)
+
+        def _unbind(_event=None):
+            widget.unbind_all("<MouseWheel>")
+
+        widget.bind("<Enter>", _bind)
+        widget.bind("<Leave>", _unbind)
+
+    def _label_fg_for_widget(self, widget) -> str:
+        role = getattr(widget, "_theme_role", None)
+        if role:
+            return self._theme_fg(role)
+        return COLOR_TEXT
+
+    def _apply_theme_recursive(self, widget):
         try:
             if isinstance(widget, Frame):
-                bg = COLOR_BG if widget.master is self.root else COLOR_PANEL
-                widget.configure(bg=bg)
+                if getattr(widget, "_chrome_bg_locked", False):
+                    widget.configure(bg=COLOR_BG)
+                elif widget.master is self.root:
+                    widget.configure(bg=COLOR_BG)
+                else:
+                    widget.configure(bg=COLOR_PANEL)
             elif isinstance(widget, Label):
-                if widget in (getattr(self, "preview_label", None), getattr(self, "import_preview_label", None)):
-                    widget.configure(bg=COLOR_INPUT, fg=COLOR_TEXT)
+                if widget in (
+                    getattr(self, "generate_source_before_preview", None),
+                    getattr(self, "generate_source_after_preview", None),
+                    getattr(self, "generate_result_without_preview", None),
+                    getattr(self, "generate_result_with_preview", None),
+                    getattr(self, "import_preview_label", None),
+                ):
+                    widget.configure(bg=COLOR_PREVIEW_BG, fg=COLOR_PREVIEW_FG)
                 elif widget is getattr(self, "update_indicator", None):
                     widget.configure(bg=COLOR_PANEL)
                 else:
-                    widget.configure(bg=self._parent_bg(widget.master), fg=self._mapped_label_color(widget.cget("fg")))
+                    widget.configure(bg=self._parent_bg(widget.master), fg=self._label_fg_for_widget(widget))
             elif isinstance(widget, Button):
                 widget.configure(
                     bg=COLOR_BUTTON,
                     fg=COLOR_TEXT,
                     disabledforeground=COLOR_MUTED,
                     activebackground=COLOR_BUTTON_ACTIVE,
-                    activeforeground=COLOR_TEXT,
+                    activeforeground=COLOR_BUTTON_ACTIVE_FG,
                     relief="flat",
                     bd=0,
                     highlightbackground=COLOR_BORDER,
@@ -1128,46 +2246,89 @@ class App:
                     highlightthickness=1,
                     highlightbackground=COLOR_BORDER,
                     highlightcolor=COLOR_ACCENT,
+                    font=UI_INPUT_FONT,
                 )
             elif isinstance(widget, Listbox):
                 widget.configure(
                     bg=COLOR_INPUT,
                     fg=COLOR_TEXT,
                     selectbackground=COLOR_ACCENT_DARK,
-                    selectforeground="#ffffff",
+                    selectforeground=COLOR_SELECT_FG,
                     highlightthickness=1,
                     highlightbackground=COLOR_BORDER,
                     relief="flat",
+                    font=UI_INPUT_FONT,
                 )
             elif isinstance(widget, Text):
+                log_font = UI_LOG_FONT if widget in (getattr(self, "log", None),) else UI_INPUT_FONT
                 widget.configure(
                     bg=COLOR_INPUT,
                     fg=COLOR_TEXT,
                     insertbackground=COLOR_TEXT,
                     selectbackground=COLOR_ACCENT_DARK,
-                    selectforeground="#ffffff",
+                    selectforeground=COLOR_SELECT_FG,
                     highlightthickness=1,
                     highlightbackground=COLOR_BORDER,
                     relief="flat",
+                    font=log_font,
+                )
+            elif isinstance(widget, DonutGauge):
+                fill = COLOR_SUCCESS if getattr(widget, "_donut_role", None) == "cpu" else COLOR_ACCENT
+                widget.set_scheme(
+                    track_color=COLOR_BORDER,
+                    fill_color=fill,
+                    bg_color=COLOR_BG if widget.master is self.root else self._parent_bg(widget.master),
+                    text_color=COLOR_TEXT,
+                    muted_color=COLOR_MUTED,
                 )
             elif isinstance(widget, Canvas):
-                widget.configure(bg=COLOR_PANEL, highlightthickness=0)
-        except Exception:
+                chrome_bg = getattr(widget, "_chrome_bg", None)
+                widget.configure(bg=chrome_bg or COLOR_PANEL, highlightthickness=0)
+        except (TclError, Exception):
             pass
         for child in widget.winfo_children():
-            self._apply_dark_theme_recursive(child)
+            self._apply_theme_recursive(child)
 
     def _build(self):
         self._configure_styles()
-        header = Frame(self.root)
-        header.pack(fill=X, padx=14, pady=(12, 6))
-        title_box = Frame(header)
+        header = Frame(self.root, bg=COLOR_BG)
+        header.pack(fill=X, padx=16, pady=(14, 8))
+        title_box = Frame(header, bg=COLOR_BG)
+        title_box._chrome_bg_locked = True
         title_box.pack(side=LEFT, fill=X, expand=True)
-        self._label(title_box, "title", font=("Segoe UI", 18, "bold"), anchor="w").pack(fill=X)
-        self._label(title_box, "subtitle", anchor="w", fg=COLOR_MUTED).pack(fill=X)
-        right = Frame(header)
+        kicker = self._label(title_box, "header_kicker", anchor="w", font=("Segoe UI", 9, "bold"), fg=COLOR_INFO)
+        kicker.pack(fill=X)
+        self._label(title_box, "title", font=("Segoe UI", 21, "bold"), anchor="w").pack(fill=X, pady=(2, 0))
+        audit_label = Label(
+            title_box,
+            text=tr(self.lang, "header_audit").upper(),
+            anchor="w",
+            fg=COLOR_MUTED,
+            bg=COLOR_BG,
+            font=("Segoe UI", 9),
+        )
+        audit_label.pack(fill=X, pady=(1, 2))
+        audit_label._theme_role = "muted"
+        self.translated.append((audit_label, "header_audit", "text_upper"))
+        self._label(title_box, "subtitle", anchor="w", theme_role="muted", font=("Segoe UI", 10)).pack(fill=X)
+
+        right = Frame(header, bg=COLOR_BG)
+        right._chrome_bg_locked = True
         right.pack(side=RIGHT)
-        update_row = Frame(right)
+        badge_row = Frame(right, bg=COLOR_BG)
+        badge_row._chrome_bg_locked = True
+        badge_row.pack(anchor="e", pady=(0, 10))
+        b1 = hud_badge(badge_row, "FP", bg=COLOR_PANEL_ALT, fg=COLOR_MUTED, border=COLOR_BORDER, font=("Segoe UI", 8, "bold"))
+        b1.pack(side=LEFT)
+        badge_sp = Frame(badge_row, width=8, bg=COLOR_BG)
+        badge_sp._chrome_bg_locked = True
+        badge_sp.pack(side=LEFT)
+        b2 = hud_badge(
+            badge_row, "FH6", bg=COLOR_PANEL_ALT, fg=COLOR_SUCCESS, border=COLOR_ACCENT_DARK, font=("Segoe UI", 8, "bold")
+        )
+        b2.pack(side=LEFT)
+        update_row = Frame(right, bg=COLOR_BG)
+        update_row._chrome_bg_locked = True
         update_row.pack(anchor="e", fill=X)
         self.update_indicator = Label(
             update_row,
@@ -1181,85 +2342,226 @@ class App:
         self.update_indicator.pack(side=RIGHT)
         self.update_indicator.bind("<Button-1>", self.show_update_status)
         self._label(right, "language").pack(anchor="e")
-        self.lang_combo = ttk.Combobox(right, values=list(LANGUAGES.keys()), state="readonly", width=10)
+        self.lang_combo = ttk.Combobox(right, values=list(LANGUAGES.keys()), state="readonly", width=14)
         self.lang_combo.set("English")
         self.lang_combo.pack(anchor="e")
         self.lang_combo.bind("<<ComboboxSelected>>", self._on_language)
 
-        process_bar = Frame(self.root)
-        process_bar.pack(fill=X, padx=14, pady=(0, 8))
-        self._label(process_bar, "process").pack(side=LEFT)
-        self.process_combo = ttk.Combobox(process_bar, textvariable=self.selected_pid, state="readonly", width=44)
+        self._header_rule_canvas = header_rule(self.root, height=2, bg=COLOR_BG, line=COLOR_BORDER)
+
+        process_card = Frame(self.root, bg=COLOR_PANEL, highlightbackground=COLOR_BORDER, highlightthickness=1)
+        process_card.pack(fill=X, padx=16, pady=(0, 10))
+        inner_bar = Frame(process_card, bg=COLOR_PANEL)
+        inner_bar.pack(fill=X, padx=12, pady=10)
+        self._label(inner_bar, "process").pack(side=LEFT)
+        self.process_combo = ttk.Combobox(inner_bar, textvariable=self.selected_pid, state="readonly", width=44)
         self.process_combo.pack(side=LEFT, padx=8)
-        self._button(process_bar, "refresh", self.refresh_processes).pack(side=LEFT)
-        Label(process_bar, textvariable=self.status, anchor="e", bg=COLOR_BG, fg=COLOR_MUTED).pack(side=RIGHT)
+        self._button(inner_bar, "refresh", self.refresh_processes).pack(side=LEFT)
+        status_label = Label(inner_bar, textvariable=self.status, anchor="e", bg=COLOR_PANEL, fg=COLOR_MUTED)
+        status_label._theme_role = "muted"
+        status_label.pack(side=RIGHT)
 
-        self.tabs = ttk.Notebook(self.root, style="Primary.TNotebook")
-        self.tabs.pack(fill=BOTH, expand=True, padx=14, pady=(0, 8))
-        self.generate_tab = Frame(self.tabs)
-        self.import_tab = Frame(self.tabs)
-        self.tools_tab = Frame(self.tabs)
-        self.tutorial_tab = Frame(self.tabs)
-        self.tabs.add(self.generate_tab, text=tr(self.lang, "generate_tab"))
-        self.tabs.add(self.import_tab, text=tr(self.lang, "import_tab"))
-        self.tabs.add(self.tutorial_tab, text=tr(self.lang, "tutorial_tab"))
+        self.main_pane = self._create_paned(
+            self.root,
+            orient=VERTICAL,
+            layout_key="main_vertical",
+            padx=14,
+            pady=(0, 4),
+        )
 
+        self.workspace = Frame(self.main_pane)
+        self.log_pane = Frame(self.main_pane)
+        self.main_pane.add(self.workspace, weight=4)
+        self.main_pane.add(self.log_pane, weight=1)
+
+        self.workspace.rowconfigure(0, weight=1)
+        self.workspace.columnconfigure(0, weight=1)
+        self.workspace_body = Frame(self.workspace)
+        self.workspace_body.grid(row=0, column=0, sticky="nsew")
+
+        self._init_workspace_tabs()
+        self._build_log()
+        self._refresh_mandarin_char_list()
+        self.refresh_text_fonts()
+        self._apply_dark_theme()
+        self._bind_workspace_tab_events()
+        self._schedule_layout_restore()
+
+    def _init_workspace_tabs(self) -> None:
+        self._workspace_bound_main = False
+        self.main_tabs = ttk.Notebook(self.workspace_body, style="Primary.TNotebook")
+        self.main_tabs.pack(fill=BOTH, expand=True, pady=(0, 4))
+
+        self.generate_tab = Frame(self.main_tabs)
+        self.import_final_tab = Frame(self.main_tabs)
+        self.handmade_tab = Frame(self.main_tabs)
+        self.export_game_tab = Frame(self.main_tabs)
+        self.preview_tab_frame = Frame(self.main_tabs)
+        self.text_tab = Frame(self.main_tabs)
+        self.colors_tab = Frame(self.main_tabs)
+        self.monitor_tab = Frame(self.main_tabs)
+        self.tools_tab = Frame(self.main_tabs)
+        self.tutorial_tab = Frame(self.main_tabs)
+        self.acknowledgements_tab = Frame(self.main_tabs)
+
+        self._build_image_preview_tab()
         self._build_generate_tab()
-        self._build_import_tab()
+        self._build_import_final_tab()
+        self._build_handmade_tab()
+        self._build_export_game_tab()
+        self._build_text_tab()
+        self._build_colors_tab()
+        self._build_monitor_tab()
         self._build_tools_tab()
         self._build_tutorial_tab()
-        self._build_log()
-        self._apply_dark_theme_recursive(self.root)
-        self.tabs.bind("<<NotebookTabChanged>>", self._schedule_preview_refresh)
+        self._build_acknowledgements_tab()
+
+        for tab, key in self._workspace_tab_specs():
+            self.main_tabs.add(tab, text=tr(self.lang, key))
+        self.tabs = self.main_tabs
+
+        self._ensure_tab_strip()
+        self._bind_workspace_tab_events()
+        try:
+            self.main_tabs.select(0)
+        except Exception:
+            pass
+        self.workspace_body.update_idletasks()
+
+    def _workspace_tab_specs(self):
+        return (
+            (self.generate_tab, "generate_tab"),
+            (self.import_final_tab, "import_final_tab"),
+            (self.handmade_tab, "import_handmade_tab"),
+            (self.export_game_tab, "export_game_tab"),
+            (self.preview_tab_frame, "preview_tab"),
+            (self.text_tab, "text_tab"),
+            (self.colors_tab, "colors_tab"),
+            (self.monitor_tab, "monitor_tab"),
+            (self.tools_tab, "tools_tab"),
+            (self.tutorial_tab, "tutorial_tab"),
+            (self.acknowledgements_tab, "acknowledgements_tab"),
+        )
+
+    def _ensure_tab_strip(self) -> None:
+        if not hasattr(self, "_tab_strip_canvas") or not self._tab_strip_canvas.winfo_exists():
+            self._tab_strip_canvas = Canvas(self.workspace, height=18, bg=COLOR_BG, highlightthickness=0, bd=0)
+            setattr(self._tab_strip_canvas, "_chrome_bg", COLOR_BG)
+            self._tab_strip_canvas.bind("<Configure>", lambda _e: self._paint_tab_strip())
+        self._tab_strip_canvas.grid(row=1, column=0, sticky="ew", pady=(2, 4))
+        self._paint_tab_strip()
+
+    def _paint_tab_strip(self, _event=None) -> None:
+        if not hasattr(self, "_tab_strip_canvas"):
+            return
+        c = self._tab_strip_canvas
+        c.delete("dots")
+        tabs = getattr(self, "main_tabs", None)
+        if tabs is None:
+            return
+        try:
+            sel = int(tabs.index(tabs.select()))
+        except Exception:
+            sel = 0
+        n = len(self._workspace_tab_specs())
+        w = max(1, c.winfo_width())
+        dot_r = 4
+        gap = 11
+        total = n * (dot_r * 2) + (n - 1) * gap
+        x_start = max(dot_r + 6, (w - total) // 2 + dot_r)
+        cy = 10
+        for i in range(n):
+            xc = x_start + i * (dot_r * 2 + gap)
+            if i == sel:
+                c.create_oval(
+                    xc - dot_r,
+                    cy - dot_r,
+                    xc + dot_r,
+                    cy + dot_r,
+                    fill=COLOR_ACCENT,
+                    outline=COLOR_SUCCESS,
+                    width=1,
+                    tags="dots",
+                )
+            else:
+                c.create_oval(
+                    xc - dot_r + 1,
+                    cy - dot_r + 1,
+                    xc + dot_r - 1,
+                    cy + dot_r - 1,
+                    fill="",
+                    outline=COLOR_BORDER,
+                    width=1,
+                    tags="dots",
+                )
+
+    def _bind_workspace_tab_events(self):
+        if getattr(self, "_workspace_bound_main", False) or self.main_tabs is None:
+            return
+        self.main_tabs.bind("<<NotebookTabChanged>>", self._on_main_tab_changed)
+        self._workspace_bound_main = True
+
+    def _is_colors_tab_active(self) -> bool:
+        return self.main_tabs.select() == str(self.colors_tab)
+
+    def _on_main_tab_changed(self, _event=None):
+        self._paint_tab_strip()
+        self._schedule_preview_refresh()
+        if self._is_colors_tab_active():
+            self._refresh_color_picker_image()
+        if self._is_import_final_tab_active():
+            self.refresh_generated_runs()
+        self.root.after(50, self._restore_ready_pane_layouts)
+
+    def _apply_dark_theme(self) -> None:
+        self.theme_id.set(APP_THEME_ID)
+        self.palette = resolve_palette()
+        _install_color_globals(self.palette)
+        save_theme_id(ROOT, APP_THEME_ID)
+        self.root.configure(bg=COLOR_BG)
+        self._configure_styles()
+        self._apply_theme_recursive(self.root)
+        if hasattr(self, "text_template_hint_label"):
+            self._update_text_shape_hint()
+        if hasattr(self, "text_coverage_label"):
+            self._update_text_coverage_status()
 
     def _build_generate_tab(self):
-        left_outer = Frame(self.generate_tab)
-        left_outer.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 10), pady=10)
-        right = Frame(self.generate_tab)
-        right.pack(side=RIGHT, fill=BOTH, expand=True, pady=10)
+        paned = self._create_paned(self.generate_tab, orient=HORIZONTAL, layout_key="generate_horizontal", padx=10, pady=10)
+        left_outer = Frame(paned)
+        right = Frame(paned)
+        paned.add(left_outer, weight=3)
+        paned.add(right, weight=2)
 
-        self._label(left_outer, "scroll_hint", anchor="w", justify=LEFT, fg="#8a5300").pack(fill=X, pady=(0, 6))
-        scroll_area = Frame(left_outer)
+        scroll_hint = self._label(left_outer, "scroll_hint", anchor="w", justify=LEFT, theme_role="hint")
+        scroll_hint.pack(fill=X, padx=0, pady=(0, 6))
+        self._bind_wraplength(scroll_hint, left_outer)
+        scroll_area, left = self._make_vertical_scroll(left_outer)
         scroll_area.pack(fill=BOTH, expand=True, pady=(0, 8))
-        left_canvas = Canvas(scroll_area, highlightthickness=0)
-        left_scroll = ttk.Scrollbar(scroll_area, orient="vertical", command=left_canvas.yview)
-        left_canvas.configure(yscrollcommand=left_scroll.set)
-        left_canvas.pack(side=LEFT, fill=BOTH, expand=True)
-        left_scroll.pack(side=RIGHT, fill="y")
-        left = Frame(left_canvas)
-        left_window = left_canvas.create_window((0, 0), window=left, anchor="nw")
-
-        def _update_scroll_region(_event=None):
-            left_canvas.configure(scrollregion=left_canvas.bbox("all"))
-
-        def _match_canvas_width(event):
-            left_canvas.itemconfigure(left_window, width=event.width)
-
-        def _mousewheel(event):
-            left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        def _bind_mousewheel(_event=None):
-            left_canvas.bind_all("<MouseWheel>", _mousewheel)
-
-        def _unbind_mousewheel(_event=None):
-            left_canvas.unbind_all("<MouseWheel>")
-
-        left.bind("<Configure>", _update_scroll_region)
-        left_canvas.bind("<Configure>", _match_canvas_width)
-        scroll_area.bind("<Enter>", _bind_mousewheel)
-        scroll_area.bind("<Leave>", _unbind_mousewheel)
 
         step1 = ttk.LabelFrame(left, text=tr(self.lang, "generate_step_image"))
         self.translated.append((step1, "generate_step_image", "text"))
         step1.pack(fill=X, pady=(0, 6))
+        step1_hint = self._label(step1, "generate_step_image_hint", anchor="w", justify=LEFT, theme_role="hint")
+        step1_hint.pack(fill=X, padx=10, pady=(8, 2))
+        self._bind_wraplength(step1_hint, step1)
+        self.translated.append((step1_hint, "generate_step_image_hint", "text"))
+        step1_credit = self._label(step1, "generate_step_image_credit", anchor="w", justify=LEFT, theme_role="hint")
+        step1_credit.pack(fill=X, padx=10, pady=(0, 6))
+        self._bind_wraplength(step1_credit, step1)
+        self.translated.append((step1_credit, "generate_step_image_credit", "text"))
         row = Frame(step1)
         row.pack(fill=X, padx=10, pady=(6, 2))
         self._label(row, "images").pack(side=LEFT)
         self._button(row, "add_images", self.add_images).pack(side=RIGHT)
         self._button(row, "remove_image", self.remove_selected_image).pack(side=RIGHT, padx=8)
         self.image_list = Listbox(step1, height=3)
-        self.image_list.pack(fill=X, padx=10, pady=(2, 8))
+        self.image_list.pack(fill=X, padx=10, pady=(2, 4))
         self.image_list.bind("<<ListboxSelect>>", self._preview_selected_image)
+        self.generate_luma_status = Label(step1, text="", anchor="w", justify=LEFT, fg=COLOR_MUTED, bg=COLOR_PANEL, wraplength=360)
+        self.generate_luma_status._theme_role = "hint"
+        self.generate_luma_status.pack(fill=X, padx=10, pady=(0, 8))
+        self._bind_wraplength(self.generate_luma_status, step1)
 
         step2 = ttk.LabelFrame(left, text=tr(self.lang, "generate_step_quality"))
         self.translated.append((step2, "generate_step_quality", "text"))
@@ -1280,13 +2582,33 @@ class App:
         preset_actions.pack(fill=X, padx=10, pady=(0, 6))
         self._button(preset_actions, "import_preset", self.import_preset).pack(side=LEFT)
         self._button(preset_actions, "open_preset_folder", self.open_preset_folder).pack(side=LEFT, padx=8)
-        self.setting_description = Label(step2, text="", anchor="w", justify=LEFT, wraplength=500)
-        self.setting_description.pack(fill=X, padx=10, pady=(0, 8))
+        self.setting_description = Label(step2, text="", anchor="w", justify=LEFT, fg=COLOR_MUTED, bg=COLOR_PANEL)
+        self.setting_description._theme_role = "muted"
+        self.setting_description._theme_role = "muted"
+        self.setting_description.pack(fill=X, padx=10, pady=(0, 4))
+        self._bind_wraplength(self.setting_description, step2)
+
+        filter_row = Frame(step2)
+        filter_row.pack(fill=X, padx=10, pady=(0, 4))
+        self._label(filter_row, "preprocess_filter").pack(side=LEFT)
+        self.preprocess_mode_combo = ttk.Combobox(filter_row, state="readonly", width=28)
+        self.preprocess_mode_combo.pack(side=LEFT, fill=X, expand=True, padx=(8, 0))
+        self.preprocess_mode_combo.bind("<<ComboboxSelected>>", self._on_preprocess_mode_combo)
+        self.preprocess_filter_active_hint = self._label(
+            step2, "filter_none_hint", anchor="w", justify=LEFT, theme_role="hint"
+        )
+        self.preprocess_filter_active_hint.pack(fill=X, padx=10, pady=(0, 4))
+        self._bind_wraplength(self.preprocess_filter_active_hint, step2)
+        filter_hint = self._label(step2, "preprocess_filter_hint", anchor="w", justify=LEFT, theme_role="hint")
+        filter_hint.pack(fill=X, padx=10, pady=(0, 8))
+        self._bind_wraplength(filter_hint, step2)
 
         custom_section = ttk.LabelFrame(left, text=tr(self.lang, "custom_panel_title"))
         self.translated.append((custom_section, "custom_panel_title", "text"))
         custom_section.pack(fill=X, pady=(0, 6))
-        self._label(custom_section, "custom_panel_hint", anchor="w", justify=LEFT, wraplength=540, fg="#005a9e").pack(fill=X, padx=10, pady=(6, 2))
+        custom_hint = self._label(custom_section, "custom_panel_hint", anchor="w", justify=LEFT, theme_role="info")
+        custom_hint.pack(fill=X, padx=10, pady=(6, 2))
+        self._bind_wraplength(custom_hint, custom_section)
         custom_toggle = Checkbutton(
             custom_section,
             text=tr(self.lang, "custom_settings"),
@@ -1314,17 +2636,27 @@ class App:
             entry.grid(row=row_index, column=1, sticky="ew", pady=1)
             self.custom_fields.append(entry)
         custom_grid.columnconfigure(1, weight=1)
-        preprocess_widget = self._field(custom_grid, "preprocess_mode", self.custom_preprocess_mode, row=len(custom_specs), values=["none", "luma_band"], readonly=True)
+        preprocess_widget = self._field(
+            custom_grid,
+            "preprocess_mode",
+            self.custom_preprocess_mode,
+            row=len(custom_specs),
+            values=list(PREPROCESS_MODE_IDS),
+            readonly=True,
+        )
         self.custom_fields.append(preprocess_widget)
         custom_actions = Frame(custom_section)
         custom_actions.pack(fill=X, padx=10, pady=(0, 8))
         self._button(custom_actions, "save_custom_preset", self.save_custom_preset).pack(side=LEFT)
         self._sync_custom_state()
+        self.root.after_idle(self._refresh_preprocess_mode_combo)
 
         step3 = ttk.LabelFrame(left_outer, text=tr(self.lang, "generate_step_run"))
         self.translated.append((step3, "generate_step_run", "text"))
         step3.pack(fill=X)
-        self._label(step3, "generate_step_run_hint", anchor="w", justify=LEFT, wraplength=540).pack(fill=X, padx=10, pady=(8, 4))
+        run_hint = self._label(step3, "generate_step_run_hint", anchor="w", justify=LEFT)
+        run_hint.pack(fill=X, padx=10, pady=(8, 4))
+        self._bind_wraplength(run_hint, step3)
         actions = Frame(step3)
         actions.pack(fill=X, padx=10, pady=(4, 12))
         self.generate_button = self._button(actions, "start_generate", self.start_generate, font=("Segoe UI", 12, "bold"), height=2)
@@ -1333,63 +2665,1073 @@ class App:
         self.stop_generate_button.pack(side=LEFT, padx=8)
         self._button(actions, "open_output", self.open_output_folder, height=2).pack(side=LEFT)
 
-        self._label(right, "preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X)
-        self.preview_label = Label(right, text=tr(self.lang, "preview_hint"), bg="#202020", fg="#dddddd", width=60, height=24)
-        self.preview_label.pack(fill=BOTH, expand=True, pady=6)
-        self.preview_label.bind("<Configure>", self._schedule_preview_refresh)
+        compare_scroll, compare_body = self._make_vertical_scroll(right)
+        compare_scroll.pack(fill=BOTH, expand=True)
+        compare_hint = self._label(compare_body, "generate_select_image", anchor="w", justify=LEFT, theme_role="hint")
+        compare_hint.pack(fill=X, pady=(0, 6))
+        self._bind_wraplength(compare_hint, compare_body)
+        self.generate_compare_hint = compare_hint
 
-    def _build_import_tab(self):
-        left = Frame(self.import_tab)
-        left.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 10), pady=10)
-        right = Frame(self.import_tab)
-        right.pack(side=RIGHT, fill=BOTH, expand=True, pady=10)
+        source_box = ttk.LabelFrame(compare_body, text=tr(self.lang, "generate_compare_source"))
+        self.translated.append((source_box, "generate_compare_source", "text"))
+        source_box.pack(fill=X, pady=(0, 8))
+        source_row = Frame(source_box)
+        source_row.pack(fill=X, padx=8, pady=8)
+        source_row.columnconfigure(0, weight=1)
+        source_row.columnconfigure(1, weight=1)
+        source_row.rowconfigure(1, weight=0, minsize=GENERATE_COMPARE_SOURCE_MIN)
 
-        step1 = ttk.LabelFrame(left, text=tr(self.lang, "step_game"))
+        self._label(source_row, "luma_before", anchor="w", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", padx=(0, 4))
+        self._label(source_row, "luma_after", anchor="w", font=("Segoe UI", 10, "bold")).grid(row=0, column=1, sticky="w", padx=(4, 0))
+        self.generate_source_before_preview = Label(
+            source_row,
+            text=tr(self.lang, "luma_before_hint"),
+            bg=COLOR_PREVIEW_BG,
+            fg=COLOR_PREVIEW_FG,
+        )
+        self.generate_source_before_preview.grid(row=1, column=0, sticky="nsew", padx=(0, 4), pady=(4, 0))
+        self.generate_source_before_preview.bind("<Configure>", lambda _e: self._schedule_generate_compare_refresh("source_before"))
+        self.generate_source_after_preview = Label(
+            source_row,
+            text=tr(self.lang, "luma_after_hint"),
+            bg=COLOR_PREVIEW_BG,
+            fg=COLOR_PREVIEW_FG,
+        )
+        self.generate_source_after_preview.grid(row=1, column=1, sticky="nsew", padx=(4, 0), pady=(4, 0))
+        self.generate_source_after_preview.bind("<Configure>", lambda _e: self._schedule_generate_compare_refresh("source_after"))
+
+        result_box = ttk.LabelFrame(compare_body, text=tr(self.lang, "generate_compare_result"))
+        self.translated.append((result_box, "generate_compare_result", "text"))
+        result_box.pack(fill=X, pady=(0, 8))
+        result_row = Frame(result_box)
+        result_row.pack(fill=X, padx=8, pady=8)
+        result_row.columnconfigure(0, weight=1)
+        result_row.columnconfigure(1, weight=1)
+        result_row.rowconfigure(1, weight=0, minsize=GENERATE_COMPARE_RESULT_MIN)
+
+        self.generate_result_without_header = self._label(
+            result_row, "generate_result_plain", anchor="w", font=("Segoe UI", 10, "bold")
+        )
+        self.generate_result_without_header.grid(row=0, column=0, sticky="w", padx=(0, 4))
+        self.generate_result_with_header = self._label(
+            result_row, "generate_result_filtered", anchor="w", font=("Segoe UI", 10, "bold")
+        )
+        self.generate_result_with_header.grid(row=0, column=1, sticky="w", padx=(4, 0))
+        self.generate_layers_without_label = self._label(result_row, "generate_no_checkpoint", anchor="w", theme_role="muted")
+        self.generate_layers_without_label.grid(row=2, column=0, sticky="w", padx=(0, 4), pady=(4, 0))
+        self.generate_layers_with_label = self._label(result_row, "generate_no_checkpoint", anchor="w", theme_role="muted")
+        self.generate_layers_with_label.grid(row=2, column=1, sticky="w", padx=(4, 0), pady=(4, 0))
+        self.generate_result_without_preview = Label(
+            result_row,
+            text=tr(self.lang, "generate_no_checkpoint"),
+            bg=COLOR_PREVIEW_BG,
+            fg=COLOR_PREVIEW_FG,
+        )
+        self.generate_result_without_preview.grid(row=1, column=0, sticky="nsew", padx=(0, 4), pady=(4, 0))
+        self.generate_result_without_preview.bind("<Configure>", lambda _e: self._schedule_generate_compare_refresh("result_without"))
+        self.generate_result_with_preview = Label(
+            result_row,
+            text=tr(self.lang, "generate_no_checkpoint"),
+            bg=COLOR_PREVIEW_BG,
+            fg=COLOR_PREVIEW_FG,
+        )
+        self.generate_result_with_preview.grid(row=1, column=1, sticky="nsew", padx=(4, 0), pady=(4, 0))
+        self.generate_result_with_preview.bind("<Configure>", lambda _e: self._schedule_generate_compare_refresh("result_with"))
+
+        self._generate_compare_image = None
+        self._generate_compare_jobs = {}
+
+    def _is_import_final_tab_active(self) -> bool:
+        try:
+            return self.main_tabs.select() == str(self.import_final_tab)
+        except Exception:
+            return False
+
+    def _active_generation_result_label(self):
+        if not hasattr(self, "generate_result_without_preview"):
+            return None
+        if self._selected_preprocess_mode() != PREPROCESS_NONE:
+            return self.generate_result_with_preview
+        return self.generate_result_without_preview
+
+    def _selected_preprocess_mode(self) -> str:
+        return normalize_preprocess_mode(self.preprocess_mode.get())
+
+    def _filter_label(self, mode_id: str | None = None) -> str:
+        mode_id = normalize_preprocess_mode(mode_id if mode_id is not None else self._selected_preprocess_mode())
+        spec = filter_spec(mode_id)
+        return tr(self.lang, spec.label_key) if spec else mode_id
+
+    def _filter_hint_text(self, mode_id: str | None = None) -> str:
+        mode_id = normalize_preprocess_mode(mode_id if mode_id is not None else self._selected_preprocess_mode())
+        spec = filter_spec(mode_id)
+        return tr(self.lang, spec.hint_key) if spec else ""
+
+    def _update_preprocess_filter_active_hint(self, mode_id: str | None = None):
+        if not hasattr(self, "preprocess_filter_active_hint"):
+            return
+        self.preprocess_filter_active_hint.config(text=self._filter_hint_text(mode_id))
+
+    def _refresh_preprocess_mode_combo(self):
+        if not hasattr(self, "preprocess_mode_combo"):
+            return
+        current = self._selected_preprocess_mode()
+        labels: list[str] = []
+        mapping: dict[str, str] = {}
+        for spec in PREPROCESS_FILTERS:
+            label = tr(self.lang, spec.label_key)
+            labels.append(label)
+            mapping[label] = spec.mode_id
+        self._preprocess_mode_labels = mapping
+        self.preprocess_mode_combo["values"] = labels
+        pick = next((label for label, mode in mapping.items() if mode == current), labels[0] if labels else "")
+        self.preprocess_mode_combo.set(pick)
+
+    def _set_preprocess_mode(self, mode_id: str, *, refresh_ui: bool = True):
+        mode_id = normalize_preprocess_mode(mode_id)
+        self.preprocess_mode.set(mode_id)
+        if self.use_custom_settings.get() == "1":
+            self.custom_preprocess_mode.set(mode_id)
+        if not refresh_ui:
+            self._update_preprocess_filter_active_hint(mode_id)
+            return
+        self._refresh_preprocess_mode_combo()
+        self._update_preprocess_filter_active_hint(mode_id)
+        self._refresh_generate_compare()
+        self._update_luma_status_label()
+        self._update_compare_column_headers()
+        if self._preview_filter_cards:
+            self._highlight_preview_filter_cards()
+
+    def _on_preprocess_mode_combo(self, _event=None):
+        mode_id = self._preprocess_mode_labels.get(self.preprocess_mode_combo.get(), PREPROCESS_NONE)
+        self._set_preprocess_mode(mode_id, refresh_ui=True)
+
+    def _image_list_display(self, image_path: Path) -> str:
+        mode = self._selected_preprocess_mode()
+        if mode != PREPROCESS_NONE and preprocessed_image_exists(image_path, mode):
+            tag = tr(self.lang, "luma_image_tag_ready")
+        elif mode != PREPROCESS_NONE:
+            tag = tr(self.lang, "luma_image_tag_missing")
+        else:
+            tag = self._filter_label(PREPROCESS_NONE)
+        return f"{image_path.name}  ·  {tag}"
+
+    def _json_preprocess_tag_key(self, json_path: Path) -> str:
+        path_mode = preprocess_mode_for_path(json_path)
+        if path_mode:
+            spec = filter_spec(path_mode)
+            if spec:
+                return spec.json_tag_key
+        for image_path in self.images:
+            for spec in PREPROCESS_FILTERS:
+                if spec.mode_id == PREPROCESS_NONE:
+                    continue
+                if json_from_preprocess_pipeline(json_path, image_path, preprocess_mode=spec.mode_id):
+                    return spec.json_tag_key
+        return "json_tag_plain"
+
+    def _json_list_display(self, json_path: Path) -> str:
+        return f"{tr(self.lang, self._json_preprocess_tag_key(json_path))}  {json_path.name}"
+
+    def _checkpoint_summary(self, jsons) -> str:
+        if not jsons:
+            return tr(self.lang, "generate_no_checkpoint")
+        return tr(self.lang, "generate_layers_count").format(count=geometry_shape_count(jsons[0]))
+
+    def _preview_estimate_for_image(self, image_path: Path | None, mode_id: str) -> int | None:
+        if image_path is None or not self._preview_filter_payload:
+            return None
+        if str(getattr(self, "_preview_source_path", "")) != str(image_path.resolve()):
+            return None
+        entry = self._preview_filter_payload.get(normalize_preprocess_mode(mode_id))
+        return int(entry["estimate"]) if entry and entry.get("estimate") else None
+
+    def _result_layer_label(self, image_path: Path, mode_id: str, json_path) -> str:
+        if json_path:
+            return tr(self.lang, "generate_layers_count").format(count=geometry_shape_count(json_path))
+        estimate = self._preview_estimate_for_image(image_path, mode_id)
+        if estimate:
+            return tr(self.lang, "preview_estimate").format(count=estimate)
+        return tr(self.lang, "generate_no_checkpoint")
+
+    def _update_luma_status_label(self):
+        if not hasattr(self, "generate_luma_status"):
+            return
+        image_path = self._selected_generate_image()
+        if image_path is None:
+            self.generate_luma_status.config(text=tr(self.lang, "luma_status_none"))
+            return
+        mode = self._selected_preprocess_mode()
+        lines = [
+            tr(self.lang, "luma_status_next_off")
+            if mode == PREPROCESS_NONE
+            else tr(self.lang, "luma_status_next_on").format(filter=self._filter_label(mode))
+        ]
+        if mode != PREPROCESS_NONE:
+            if preprocessed_image_exists(image_path, mode):
+                lines.append(
+                    tr(self.lang, "luma_status_file_ready").format(
+                        name=preprocessed_image_path(image_path, mode).name
+                    )
+                )
+            else:
+                lines.append(tr(self.lang, "luma_status_file_missing"))
+        plain = checkpoints_for_image(image_path, preprocess_mode=PREPROCESS_NONE)
+        filtered = checkpoints_for_image(image_path, preprocess_mode=mode) if mode != PREPROCESS_NONE else []
+        lines.append(
+            tr(self.lang, "luma_status_checkpoints").format(
+                plain=self._checkpoint_summary(plain),
+                filtered=self._checkpoint_summary(filtered),
+            )
+        )
+        last = self._last_generation_preprocess.get(str(image_path.resolve()))
+        if last and last != PREPROCESS_NONE:
+            lines.append(tr(self.lang, "luma_status_last_run_on").format(filter=self._filter_label(last)))
+        elif last == PREPROCESS_NONE:
+            lines.append(tr(self.lang, "luma_status_last_run_off"))
+        else:
+            lines.append(tr(self.lang, "luma_status_last_run_unknown"))
+        self.generate_luma_status.config(text="\n".join(lines))
+
+    def _update_compare_column_headers(self):
+        if not hasattr(self, "generate_result_without_header"):
+            return
+        mode = self._selected_preprocess_mode()
+        uses_filter = mode != PREPROCESS_NONE
+        image_path = self._selected_generate_image()
+        last = self._last_generation_preprocess.get(str(image_path.resolve())) if image_path else None
+
+        self.generate_result_with_header.config(
+            text=tr(self.lang, "generate_result_filtered").format(filter=self._filter_label(mode))
+            if uses_filter
+            else tr(self.lang, "generate_result_plain"),
+        )
+        self.generate_result_without_header.config(text=tr(self.lang, "generate_result_plain"))
+
+        columns = (
+            (self.generate_result_without_header, self.generate_result_without_preview, False),
+            (self.generate_result_with_header, self.generate_result_with_preview, True),
+        )
+        for header, preview, is_filtered_column in columns:
+            is_next = uses_filter == is_filtered_column
+            is_last = last is not None and (last != PREPROCESS_NONE) == is_filtered_column
+            if is_next:
+                header.config(fg=COLOR_ACCENT)
+                preview.config(highlightbackground=COLOR_ACCENT, highlightthickness=3)
+            elif is_last:
+                header.config(fg=COLOR_WARN)
+                preview.config(highlightbackground=COLOR_WARN, highlightthickness=2)
+            else:
+                header.config(fg=COLOR_MUTED)
+                preview.config(highlightthickness=0)
+
+    def _selected_generate_image(self):
+        selection = self.image_list.curselection() if hasattr(self, "image_list") else ()
+        if selection:
+            return Path(self.images[selection[0]])
+        if self.images:
+            return Path(self.images[0])
+        return None
+
+    def _label_preview_bounds(self, label, *, min_height: int = 0):
+        try:
+            self.root.update_idletasks()
+            width = label.winfo_width()
+            height = label.winfo_height()
+        except Exception:
+            width = height = 0
+        if width <= 32:
+            width = PREVIEW_MAX
+        else:
+            width = max(1, width - 12)
+        if height <= 32:
+            height = min_height if min_height > 0 else PREVIEW_MAX
+        else:
+            height = max(min_height, height - 12) if min_height > 0 else max(1, height - 12)
+        return width, height
+
+    def _render_label_image_preview(self, label, path, hint_key, *, min_height: int = 0):
+        if path is None or not Path(path).exists():
+            label.config(image="", text=tr(self.lang, hint_key))
+            label.image = None
+            return
+        data = render_source_image(path, self._label_preview_bounds(label, min_height=min_height))
+        if not data:
+            label.config(image="", text=tr(self.lang, "preview_unavailable"))
+            label.image = None
+            return
+        image = PhotoImage(data=data)
+        label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+        label.image = image
+
+    def _render_label_json_preview(self, label, path, hint_key, *, min_height: int = 0):
+        if path is None or not Path(path).exists():
+            label.config(image="", text=tr(self.lang, hint_key))
+            label.image = None
+            return
+        data = render_geometry_json(path, self._label_preview_bounds(label, min_height=min_height))
+        if not data:
+            label.config(image="", text=tr(self.lang, "preview_unavailable"))
+            label.image = None
+            return
+        image = PhotoImage(data=data)
+        label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+        label.image = image
+
+    def _refresh_generate_compare(self, which=None):
+        if not hasattr(self, "generate_source_before_preview"):
+            return
+        image_path = self._selected_generate_image()
+        self._generate_compare_image = image_path
+        if image_path is None:
+            if which in (None, "source_before"):
+                self.generate_source_before_preview.config(image="", text=tr(self.lang, "luma_before_hint"))
+                self.generate_source_before_preview.image = None
+            if which in (None, "source_after"):
+                self.generate_source_after_preview.config(image="", text=tr(self.lang, "luma_after_hint"))
+                self.generate_source_after_preview.image = None
+            if which in (None, "result_without"):
+                self.generate_result_without_preview.config(image="", text=tr(self.lang, "generate_no_checkpoint"))
+                self.generate_result_without_preview.image = None
+                self.generate_layers_without_label.config(text=tr(self.lang, "generate_no_checkpoint"))
+            if which in (None, "result_with"):
+                self.generate_result_with_preview.config(image="", text=tr(self.lang, "generate_no_checkpoint"))
+                self.generate_result_with_preview.image = None
+                self.generate_layers_with_label.config(text=tr(self.lang, "generate_no_checkpoint"))
+            self._update_luma_status_label()
+            self._update_compare_column_headers()
+            return
+
+        if which in (None, "source_before"):
+            self._render_label_image_preview(
+                self.generate_source_before_preview,
+                image_path,
+                "luma_before_hint",
+                min_height=GENERATE_COMPARE_SOURCE_MIN,
+            )
+        mode = self._selected_preprocess_mode()
+        if which in (None, "source_after"):
+            after_path = None
+            if mode != PREPROCESS_NONE:
+                if preprocessed_image_exists(image_path, mode):
+                    after_path = preprocessed_image_path(image_path, mode)
+                else:
+                    cached = self._preview_filter_payload.get(mode)
+                    if cached and Path(cached.get("path", "")).exists():
+                        after_path = Path(cached["path"])
+                    elif load_cv2():
+                        try:
+                            from preprocess.filters import preprocess_image_file
+
+                            after_path = preprocess_image_file(image_path, mode)
+                        except Exception:
+                            after_path = None
+            self._render_label_image_preview(
+                self.generate_source_after_preview,
+                after_path,
+                "luma_after_hint",
+                min_height=GENERATE_COMPARE_SOURCE_MIN,
+            )
+
+        without_jsons = checkpoints_for_image(image_path, preprocess_mode=PREPROCESS_NONE)
+        with_jsons = checkpoints_for_image(image_path, preprocess_mode=mode) if mode != PREPROCESS_NONE else []
+        without_json = without_jsons[0] if without_jsons else None
+        with_json = with_jsons[0] if with_jsons else None
+
+        if which in (None, "result_without"):
+            if without_json:
+                self._render_label_json_preview(
+                    self.generate_result_without_preview,
+                    without_json,
+                    "generate_no_checkpoint",
+                    min_height=GENERATE_COMPARE_RESULT_MIN,
+                )
+            else:
+                self.generate_result_without_preview.config(image="", text=tr(self.lang, "generate_no_checkpoint"))
+                self.generate_result_without_preview.image = None
+            self.generate_layers_without_label.config(
+                text=self._result_layer_label(image_path, PREPROCESS_NONE, without_json)
+            )
+        if which in (None, "result_with"):
+            if with_json:
+                self._render_label_json_preview(
+                    self.generate_result_with_preview,
+                    with_json,
+                    "generate_no_checkpoint",
+                    min_height=GENERATE_COMPARE_RESULT_MIN,
+                )
+            else:
+                self.generate_result_with_preview.config(image="", text=tr(self.lang, "generate_no_checkpoint"))
+                self.generate_result_with_preview.image = None
+            self.generate_layers_with_label.config(
+                text=self._result_layer_label(image_path, mode, with_json)
+            )
+        self._update_luma_status_label()
+        self._update_compare_column_headers()
+
+    def _schedule_generate_compare_refresh(self, which=None):
+        if not hasattr(self, "_generate_compare_jobs"):
+            return
+        job_key = which or "all"
+        job = self._generate_compare_jobs.get(job_key)
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+        self._generate_compare_jobs[job_key] = self.root.after(
+            180,
+            lambda w=which: self._run_generate_compare_refresh(w),
+        )
+
+    def _run_generate_compare_refresh(self, which):
+        self._generate_compare_jobs.pop(which or "all", None)
+        if self.closed:
+            return
+        self._refresh_generate_compare(which)
+
+    def _text_script_tab_key(self, script: str) -> str:
+        return f"text_script_{script}"
+
+    def _text_script_hint_key(self, script: str) -> str:
+        return f"text_script_hint_{script}"
+
+    def _active_text_script(self) -> str:
+        if not hasattr(self, "text_script_notebook"):
+            return SCRIPT_CHINESE
+        index = self.text_script_notebook.index(self.text_script_notebook.select())
+        return TEXT_SCRIPT_IDS[index]
+
+    def _text_panel(self, script: str | None = None) -> dict:
+        return self.text_panels[script or self._active_text_script()]
+
+    def _build_text_tab(self):
+        paned = self._create_paned(self.text_tab, orient=VERTICAL, layout_key="text_vertical")
+        outer = Frame(paned)
+        image_host = Frame(paned)
+        paned.add(outer, weight=4)
+        paned.add(image_host, weight=1)
+
+        image_box = ttk.LabelFrame(image_host, text=tr(self.lang, "text_reference_image"))
+        self.translated.append((image_box, "text_reference_image", "text"))
+        image_box.pack(fill=BOTH, expand=True, padx=14, pady=(4, 10))
+        row = Frame(image_box)
+        row.pack(fill=X, padx=10, pady=8)
+        Entry(row, textvariable=self.text_image_path).pack(side=LEFT, fill=X, expand=True)
+        self._button(row, "text_browse_image", self.browse_text_image).pack(side=LEFT, padx=8)
+        image_actions = Frame(image_box)
+        image_actions.pack(fill=X, padx=10, pady=(0, 10))
+        invert_toggle = Checkbutton(
+            image_actions,
+            text=tr(self.lang, "text_invert"),
+            variable=self.text_invert,
+            onvalue="1",
+            offvalue="0",
+        )
+        invert_toggle.pack(side=LEFT)
+        self.translated.append((invert_toggle, "text_invert", "text"))
+        self._button(image_actions, "text_run_ocr", self.start_text_ocr).pack(side=LEFT, padx=8)
+        self._button(image_actions, "text_trace_image", self.start_trace_text_image).pack(side=LEFT)
+
+        scroll_area, body = self._make_vertical_scroll(outer)
+        scroll_area.pack(fill=BOTH, expand=True, padx=14, pady=(10, 4))
+        tab_hint = self._label(body, "text_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
+        tab_hint.pack(fill=X, pady=(0, 8))
+        self._bind_wraplength(tab_hint, body)
+
+        self._build_text_options_panel(body)
+
+        self.text_script_notebook = ttk.Notebook(body, style="Script.TNotebook")
+        self.text_script_notebook.pack(fill=BOTH, expand=True, pady=(0, 8))
+        self.text_script_notebook.bind("<<NotebookTabChanged>>", lambda _event: self._on_text_script_tab_changed())
+
+        for script in TEXT_SCRIPT_IDS:
+            panel_frame = Frame(self.text_script_notebook)
+            self.text_script_notebook.add(panel_frame, text=tr(self.lang, self._text_script_tab_key(script)))
+            self._build_text_script_panel(panel_frame, script)
+
+        self._on_text_script_tab_changed()
+
+    def _build_text_options_panel(self, parent: Frame):
+        shared = ttk.LabelFrame(parent, text=tr(self.lang, "text_options"))
+        self.translated.append((shared, "text_options", "text"))
+        shared.pack(fill=X, pady=(0, 8))
+        opts = Frame(shared)
+        opts.pack(fill=X, padx=10, pady=8)
+        self._label(opts, "text_font_size").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        Entry(opts, textvariable=self.text_font_size, width=8).grid(row=0, column=1, sticky="w")
+        self._label(opts, "text_cell_size").grid(row=0, column=2, sticky="w", padx=(16, 8))
+        Entry(opts, textvariable=self.text_cell_size, width=8).grid(row=0, column=3, sticky="w")
+        self._label(opts, "text_shape_mode").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
+        self.text_shape_combo = ttk.Combobox(
+            opts,
+            textvariable=self.text_shape_mode,
+            values=text_shape_mode_choices(),
+            width=18,
+            state="readonly",
+        )
+        self.text_shape_combo.grid(row=1, column=1, columnspan=3, sticky="w", pady=(6, 0))
+        self.text_shape_combo.bind("<<ComboboxSelected>>", lambda _event: self._update_text_shape_hint())
+        self.text_template_hint_label = self._label(opts, "text_template_hint", anchor="w", theme_role="info")
+        self.text_template_hint_label.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        self._bind_wraplength(self.text_template_hint_label, opts, padding=8)
+        text_shape_hint = self._label(opts, "text_shape_mode_hint", anchor="w", theme_role="muted")
+        text_shape_hint.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        self._bind_wraplength(text_shape_hint, opts, padding=8)
+        self._label(opts, "text_color").grid(row=4, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
+        Entry(opts, textvariable=self.text_color, width=24).grid(row=4, column=1, columnspan=3, sticky="w", pady=(6, 0))
+        self._label(opts, "text_cell_hint", anchor="w", theme_role="muted").grid(
+            row=5, column=0, columnspan=4, sticky="w", pady=(6, 0)
+        )
+        self.text_coverage_label = self._label(opts, "text_coverage_ok", anchor="w", theme_role="text", justify=LEFT)
+        self.text_coverage_label.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        opts.columnconfigure(0, weight=1)
+        self._bind_wraplength(self.text_coverage_label, opts, padding=8)
+        self._update_text_shape_hint()
+
+        actions = Frame(shared)
+        actions.pack(fill=X, padx=10, pady=(0, 10))
+        self._button(actions, "text_font_refresh", self.refresh_text_fonts).pack(side=LEFT)
+        self._button(actions, "text_generate_typed", self.start_generate_text_typed).pack(side=LEFT, padx=8)
+
+    def _build_text_script_panel(self, parent: Frame, script: str):
+        panel = self._text_panel(script)
+        widgets = panel["widgets"]
+
+        hint = self._label(parent, self._text_script_hint_key(script), anchor="w", justify=LEFT, theme_role="muted")
+        hint.pack(fill=X, padx=10, pady=(10, 6))
+        self._bind_wraplength(hint, parent, padding=20)
+        widgets["hint"] = hint
+
+        typed = ttk.LabelFrame(parent, text=tr(self.lang, "text_input"))
+        typed.pack(fill=X, padx=10, pady=(0, 8))
+        Entry(typed, textvariable=panel["input"]).pack(fill=X, padx=10, pady=8)
+        panel["input"].trace_add("write", lambda *_args, s=script: self._on_text_input_changed(s))
+
+        font_box = Frame(typed)
+        font_box.pack(fill=X, padx=10, pady=(0, 6))
+        font_box.columnconfigure(1, weight=1)
+        self._label(font_box, "text_font_search").grid(row=0, column=0, sticky="w")
+        font_search = Entry(font_box, textvariable=panel["font_search"], width=28)
+        font_search.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        font_search.bind("<KeyRelease>", lambda _event, s=script: self._on_text_font_search_changed(s))
+
+        self._label(font_box, "text_font").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        font_combo = ttk.Combobox(font_box, textvariable=panel["font_choice"], state="readonly")
+        font_combo.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(6, 0))
+        font_combo.bind("<<ComboboxSelected>>", lambda _event, s=script: self._on_text_font_selected(s))
+        widgets["font_combo"] = font_combo
+
+        font_actions = Frame(typed)
+        font_actions.pack(fill=X, padx=10, pady=(0, 10))
+        self._button(font_actions, "text_font_browse", lambda s=script: self.browse_text_font(s)).pack(side=LEFT)
+
+        if script == SCRIPT_CHINESE:
+            library = ttk.LabelFrame(parent, text=tr(self.lang, "text_char_library"))
+            library.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+            self.translated.append((library, "text_char_library", "text"))
+            lib_top = Frame(library)
+            lib_top.pack(fill=X, padx=10, pady=8)
+            self._label(lib_top, "text_char_search").pack(side=LEFT)
+            char_search = Entry(lib_top, textvariable=self.text_char_search, width=16)
+            char_search.pack(side=LEFT, padx=8)
+            char_search.bind("<KeyRelease>", lambda _event: self._refresh_mandarin_char_list())
+            self.text_char_count_label = self._label(lib_top, "text_char_count", theme_role="muted")
+            self.text_char_count_label.pack(side=LEFT, padx=8)
+            self.text_char_count_label.config(
+                text=tr(self.lang, "text_char_count").format(count=len(mandarin_character_library()))
+            )
+            lib_body = Frame(library)
+            lib_body.pack(fill=BOTH, expand=True, padx=10, pady=(0, 8))
+            char_scrollbar = ttk.Scrollbar(lib_body, orient="vertical")
+            char_scrollbar.pack(side=RIGHT, fill="y")
+            self.text_char_list = Listbox(
+                lib_body,
+                height=8,
+                selectmode="browse",
+                exportselection=False,
+                yscrollcommand=char_scrollbar.set,
+                font=("Microsoft YaHei UI", 11),
+            )
+            self.text_char_list.pack(side=LEFT, fill=BOTH, expand=True)
+            char_scrollbar.config(command=self.text_char_list.yview)
+            self.text_char_list.bind("<Double-Button-1>", lambda _event: self.insert_selected_mandarin_char())
+            lib_actions = Frame(library)
+            lib_actions.pack(fill=X, padx=10, pady=(0, 10))
+            self._button(lib_actions, "text_char_insert", self.insert_selected_mandarin_char).pack(side=LEFT)
+            widgets["library"] = library
+
+    def _resolve_text_font_path(self, script: str | None = None) -> Path:
+        script = script or self._active_text_script()
+        panel = self._text_panel(script)
+        browse = panel["font_path"].get().strip()
+        if browse:
+            path = Path(browse)
+            if path.exists():
+                return path.resolve()
+            raise FileNotFoundError(f"Font not found: {path}")
+
+        selection = panel["font_choice"].get().strip()
+        if selection in panel["font_by_label"]:
+            return panel["font_by_label"][selection]
+
+        if selection:
+            path = Path(selection)
+            if path.exists():
+                return path.resolve()
+
+        discovered = panel["discovered"]
+        if discovered:
+            return discovered[0].path
+
+        from text_fonts import find_font_for_text
+
+        return find_font_for_text(panel["input"].get(), script=script)
+
+    def refresh_text_fonts(self):
+        quick = {
+            script: tuple(
+                font for font in discover_fonts_for_script(script, deep_scan=False) if font.path.exists()
+            )
+            for script in TEXT_SCRIPT_IDS
+        }
+        if any(quick.values()):
+            self._apply_text_fonts_by_script(quick)
+        self.log_line("Scanning installed fonts for all script tabs...")
+        threading.Thread(target=self._refresh_text_fonts_worker, daemon=True).start()
+
+    def _refresh_text_fonts_worker(self):
+        try:
+            fonts_by_script = {
+                script: tuple(
+                    font for font in discover_fonts_for_script(script, deep_scan=True) if font.path.exists()
+                )
+                for script in TEXT_SCRIPT_IDS
+            }
+            self.queue.put(("text_fonts_ready", fonts_by_script))
+        except Exception as exc:
+            self.queue.put(("log", f"Font scan failed: {exc}"))
+
+    def _refresh_script_font_combo(self, script: str):
+        panel = self._text_panel(script)
+        widgets = panel["widgets"]
+        combo = widgets.get("font_combo")
+        if combo is None:
+            return
+
+        filtered = filter_font_labels(panel["discovered"], panel["font_search"].get())
+        panel["font_by_label"] = {font.label: font.path for font in filtered}
+        labels = [font.label for font in filtered]
+        combo["values"] = labels
+
+        current = panel["font_choice"].get().strip()
+        browse = panel["font_path"].get().strip()
+        if browse:
+            return
+        if labels and current not in labels:
+            panel["font_choice"].set(labels[0])
+        elif not labels:
+            panel["font_choice"].set("")
+
+    def _apply_text_fonts_by_script(self, fonts_by_script: dict):
+        total = 0
+        for script in TEXT_SCRIPT_IDS:
+            fonts = tuple(fonts_by_script.get(script, ()))
+            panel = self._text_panel(script)
+            panel["discovered"] = fonts
+            self._refresh_script_font_combo(script)
+            total += len(fonts)
+        if total:
+            self.log_line(f"Loaded fonts — Latin/Universal: {len(fonts_by_script.get('universal', ()))}, "
+                          f"Japanese: {len(fonts_by_script.get('japanese', ()))}, "
+                          f"Korean: {len(fonts_by_script.get('korean', ()))}, "
+                          f"Chinese: {len(fonts_by_script.get('chinese', ()))}.")
+        else:
+            self.log_line("No fonts found. Use Browse on each tab to pick a .ttf/.ttc/.otf file.")
+        self._schedule_text_coverage_check()
+
+    def browse_text_font(self, script: str | None = None):
+        script = script or self._active_text_script()
+        panel = self._text_panel(script)
+        path = filedialog.askopenfilename(
+            title="Select font file",
+            filetypes=[("Fonts", "*.ttf;*.ttc;*.otf"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        panel["font_path"].set(path)
+        panel["font_choice"].set(Path(path).name)
+        self._schedule_text_coverage_check()
+
+    def _on_text_font_selected(self, script: str | None = None):
+        panel = self._text_panel(script)
+        panel["font_path"].set("")
+        self._schedule_text_coverage_check()
+
+    def _on_text_font_search_changed(self, script: str):
+        self._refresh_script_font_combo(script)
+
+    def _on_text_input_changed(self, script: str):
+        self._schedule_text_coverage_check()
+
+    def _on_text_script_tab_changed(self):
+        self._schedule_text_coverage_check()
+
+    def _resolve_text_shape_mode(self) -> str:
+        return normalize_text_shape_mode(self.text_shape_mode.get())
+
+    def _update_text_shape_hint(self):
+        if not hasattr(self, "text_template_hint_label"):
+            return
+        hint = template_hint_for_shape_mode(self._resolve_text_shape_mode())
+        self.text_template_hint_label.config(
+            text=tr(self.lang, "text_template_hint").format(hint=hint),
+            fg=COLOR_INFO,
+        )
+
+    def _schedule_text_coverage_check(self):
+        if getattr(self, "_text_coverage_job", None):
+            try:
+                self.root.after_cancel(self._text_coverage_job)
+            except Exception:
+                pass
+        self._text_coverage_job = self.root.after(250, self._update_text_coverage_status)
+
+    def _update_text_coverage_status(self):
+        if not self._widget_alive(getattr(self, "text_coverage_label", None)):
+            return
+        script = self._active_text_script()
+        panel = self._text_panel(script)
+        text = panel["input"].get().strip()
+        if not text:
+            self.text_coverage_label.config(text="", fg=COLOR_MUTED)
+            return
+        try:
+            font_path = self._resolve_text_font_path(script)
+        except Exception as exc:
+            self.text_coverage_label.config(text=str(exc), fg=COLOR_ERROR)
+            return
+        ok, missing = validate_text_coverage(text, font_path)
+        if ok:
+            message = tr(self.lang, coverage_message_key(text, True, missing))
+            suggest = recommend_font_label_for_text(text, script=script)
+            selected = panel["font_choice"].get().strip()
+            if suggest and text_contains_hangul(text) and "[KR]" not in selected.upper():
+                message = tr(self.lang, "text_coverage_suggest_kr").format(font=suggest)
+                fg = COLOR_HINT
+            else:
+                fg = COLOR_SUCCESS
+            self.text_coverage_label.config(text=message, fg=fg)
+        else:
+            key = coverage_message_key(text, False, missing)
+            self.text_coverage_label.config(
+                text=tr(self.lang, key).format(
+                    count=len(missing),
+                    chars=format_missing_chars(missing),
+                ),
+                fg=COLOR_ERROR,
+            )
+
+    def _refresh_mandarin_char_list(self):
+        if not hasattr(self, "text_char_list"):
+            return
+        query = self.text_char_search.get().strip()
+        matches = filter_mandarin_library(query)
+        self.text_char_list.delete(0, END)
+        for char in matches:
+            self.text_char_list.insert(END, char)
+        if hasattr(self, "text_char_count_label"):
+            total = len(gb2312_hanzi_chars())
+            shown = len(matches)
+            suffix = f" ({shown} shown)" if query else ""
+            self.text_char_count_label.config(text=f"{total} GB2312 hanzi{suffix}")
+
+    def insert_selected_mandarin_char(self):
+        if not hasattr(self, "text_char_list"):
+            return
+        selection = self.text_char_list.curselection()
+        if not selection:
+            return
+        char = self.text_char_list.get(selection[0])
+        panel = self._text_panel(SCRIPT_CHINESE)
+        current = panel["input"].get()
+        panel["input"].set(current + char)
+        if hasattr(self, "text_script_notebook"):
+            self.text_script_notebook.select(TEXT_SCRIPT_IDS.index(SCRIPT_CHINESE))
+        self._schedule_text_coverage_check()
+
+    def _parse_text_color(self):
+        parts = [int(part.strip()) for part in self.text_color.get().split(",")]
+        if len(parts) == 3:
+            parts.append(255)
+        if len(parts) != 4:
+            raise ValueError("Color must be R,G,B or R,G,B,A")
+        return tuple(parts[:4])
+
+    def browse_text_image(self):
+        path = filedialog.askopenfilename(
+            title="Select text reference image",
+            filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.bmp;*.webp"), ("All files", "*.*")],
+        )
+        if path:
+            self.text_image_path.set(path)
+
+    def start_generate_text_typed(self):
+        script = self._active_text_script()
+        panel = self._text_panel(script)
+        text = panel["input"].get().strip()
+        if not text:
+            self.log_line("Enter text to generate.")
+            return
+        try:
+            font_path = self._resolve_text_font_path(script)
+        except Exception as exc:
+            self.log_line(f"{tr(self.lang, 'text_failed')}: {exc}")
+            return
+        self.status.set(tr(self.lang, "running"))
+        threading.Thread(target=self._text_typed_worker, args=(text, font_path), daemon=True).start()
+
+    def start_trace_text_image(self):
+        path = self.text_image_path.get().strip()
+        if not path:
+            self.log_line("Choose a reference image to trace.")
+            return
+        self.status.set(tr(self.lang, "running"))
+        threading.Thread(target=self._text_trace_worker, args=(path,), daemon=True).start()
+
+    def start_text_ocr(self):
+        path = self.text_image_path.get().strip()
+        if not path:
+            self.log_line("Choose a reference image for OCR.")
+            return
+        self.status.set(tr(self.lang, "running"))
+        threading.Thread(target=self._text_ocr_worker, args=(path,), daemon=True).start()
+
+    def _text_output_path(self, stem: str) -> Path:
+        safe = re.sub(r"[^\w\u3040-\u30ff\u3400-\u9fff-]+", "_", stem, flags=re.UNICODE).strip("_")
+        if not safe:
+            safe = "text_vinyl"
+        folder = ROOT / "runtime" / "text-vinyl"
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder / f"{safe[:48]}.json"
+
+    def _finish_text_json(self, payload, output: Path, shape_mode: str | None = None):
+        write_geometry_json(output, payload)
+        layers = estimate_layer_count(payload)
+        if output not in self.json_files:
+            self.json_files.append(output)
+        if output not in self.outputs:
+            self.outputs.append(output)
+        self._render_lists()
+        self._update_import_layer_info(output)
+        self.show_json_preview(output)
+        self.log_line(tr(self.lang, "text_done").format(layers=layers, path=output))
+        if shape_mode:
+            self.log_line(template_hint_for_shape_mode(shape_mode))
+        self.status.set(tr(self.lang, "done"))
+
+    def _text_typed_worker(self, text: str, font_path: Path):
+        try:
+            self.queue.put(("log", tr(self.lang, "text_generating")))
+            color = self._parse_text_color()
+            font_size = int(self.text_font_size.get().strip() or "120")
+            cell_size = int(self.text_cell_size.get().strip() or "4")
+            shape_mode = self._resolve_text_shape_mode()
+            payload = build_geometry_from_text(
+                text,
+                color=color,
+                font_path=font_path,
+                font_size=font_size,
+                cell_size=cell_size,
+                shape_mode=shape_mode,
+            )
+            output = self._text_output_path(text[:12])
+            self.queue.put(("text_json_done", (payload, output, shape_mode)))
+        except Exception as exc:
+            self.queue.put(("log", f"{tr(self.lang, 'text_failed')}: {exc}"))
+            self.queue.put(("status", tr(self.lang, "failed")))
+
+    def _text_trace_worker(self, path: str):
+        try:
+            self.queue.put(("log", tr(self.lang, "text_generating")))
+            color = self._parse_text_color()
+            cell_size = int(self.text_cell_size.get().strip() or "4")
+            shape_mode = self._resolve_text_shape_mode()
+            payload = build_geometry_from_text_image(
+                Path(path),
+                color=color,
+                cell_size=cell_size,
+                invert=self.text_invert.get() == "1",
+                shape_mode=shape_mode,
+            )
+            output = self._text_output_path(Path(path).stem)
+            self.queue.put(("text_json_done", (payload, output, shape_mode)))
+        except Exception as exc:
+            self.queue.put(("log", f"{tr(self.lang, 'text_failed')}: {exc}"))
+            self.queue.put(("status", tr(self.lang, "failed")))
+
+    def _text_ocr_worker(self, path: str):
+        try:
+            easy_lines = try_easyocr_lines(Path(path))
+            if easy_lines is not None:
+                text = "".join(line.text for line in easy_lines)
+                engine = "EasyOCR"
+            elif ocr_available():
+                text = read_combined_text(Path(path))
+                engine = "Tesseract"
+            else:
+                self.queue.put(
+                    (
+                        "log",
+                        "OCR not installed. pip install -r requirements-text-ocr.txt "
+                        "and install Tesseract with Japanese language data.",
+                    )
+                )
+                self.queue.put(("status", tr(self.lang, "failed")))
+                return
+            self.queue.put(("log", f"{engine} read: {text or '(empty)'}"))
+            if text:
+                self.queue.put(("text_ocr_result", text))
+            self.queue.put(("status", tr(self.lang, "done")))
+        except Exception as exc:
+            self.queue.put(("log", f"OCR failed: {exc}"))
+            self.queue.put(("status", tr(self.lang, "failed")))
+
+    def _build_fh6_import_connection(self, parent) -> Frame:
+        container = Frame(parent)
+
+        step1 = ttk.LabelFrame(container, text=tr(self.lang, "step_game"))
         self.translated.append((step1, "step_game", "text"))
         step1.pack(fill=X, pady=(0, 10))
-        self._label(step1, "step_game_hint", anchor="w", justify=LEFT, wraplength=540).pack(fill=X, padx=10, pady=(8, 4))
+        step1_hint = self._label(step1, "step_game_hint", anchor="w", justify=LEFT)
+        step1_hint.pack(fill=X, padx=10, pady=(8, 4))
+        self._bind_wraplength(step1_hint, step1)
         game_row = Frame(step1)
         game_row.pack(fill=X, padx=10, pady=(0, 10))
         self._label(game_row, "game_profile").pack(side=LEFT)
-        self.import_game_combo = ttk.Combobox(game_row, values=list(PROFILES.keys()), textvariable=self.selected_game, state="readonly", width=8)
-        self.import_game_combo.pack(side=LEFT, padx=8)
+        ttk.Combobox(
+            game_row,
+            values=list(PROFILES.keys()),
+            textvariable=self.selected_game,
+            state="readonly",
+            width=8,
+        ).pack(side=LEFT, padx=8)
         self._label(game_row, "pid").pack(side=LEFT)
-        self.import_pid_entry = Entry(game_row, textvariable=self.selected_pid, width=30)
-        self.import_pid_entry.pack(side=LEFT, padx=8)
+        Entry(game_row, textvariable=self.selected_pid, width=30).pack(side=LEFT, padx=8)
         self._button(game_row, "refresh", self.refresh_processes).pack(side=LEFT)
 
-        step2 = ttk.LabelFrame(left, text=tr(self.lang, "step_template"))
+        step2 = ttk.LabelFrame(container, text=tr(self.lang, "step_template"))
         self.translated.append((step2, "step_template", "text"))
         step2.pack(fill=X, pady=(0, 10))
-        self._label(step2, "step_template_hint", anchor="w", justify=LEFT, wraplength=540).pack(fill=X, padx=10, pady=(8, 4))
+        step2_hint = self._label(step2, "step_template_hint", anchor="w", justify=LEFT)
+        step2_hint.pack(fill=X, padx=10, pady=(8, 4))
+        self._bind_wraplength(step2_hint, step2)
         template_row = Frame(step2)
         template_row.pack(fill=X, padx=10, pady=(0, 10))
         self._label(template_row, "layer_count").pack(side=LEFT)
-        Entry(template_row, textvariable=self.layer_count, width=18, font=("Segoe UI", 13)).pack(side=LEFT, padx=8)
+        entry = Entry(template_row, textvariable=self.layer_count, width=18, font=("Segoe UI", 13))
+        entry.pack(side=LEFT, padx=8)
+        if not hasattr(self, "layer_count_entry"):
+            self.layer_count_entry = entry
+            self.layer_count.trace_add("write", self._on_layer_count_changed)
+        layer_info = Label(
+            step2,
+            textvariable=self.layer_count_info,
+            anchor="w",
+            justify=LEFT,
+            bg=COLOR_PANEL,
+            fg=COLOR_MUTED,
+        )
+        layer_info._theme_role = "muted"
+        layer_info.pack(fill=X, padx=10, pady=(0, 10))
+        if not hasattr(self, "_layer_info_label_bound"):
+            self.translated.append((layer_info, "layer_import_info", "text"))
+            self._layer_info_label_bound = True
+        self._bind_wraplength(layer_info, step2)
+        return container
 
-        step3 = ttk.LabelFrame(left, text=tr(self.lang, "step_json"))
-        self.translated.append((step3, "step_json", "text"))
-        step3.pack(fill=BOTH, expand=True, pady=(0, 10))
-        self._label(step3, "step_json_hint", anchor="w", justify=LEFT, wraplength=540).pack(fill=X, padx=10, pady=(8, 4))
-        row = Frame(step3)
-        row.pack(fill=X, padx=10)
-        self._label(row, "json_files").pack(side=LEFT)
-        self._button(row, "add_json", self.add_json).pack(side=RIGHT)
-        self._button(row, "remove_json", self.remove_selected_json).pack(side=RIGHT, padx=(8, 0))
-        self._button(row, "use_outputs", self.use_generated_outputs).pack(side=RIGHT, padx=8)
-        self.json_list = Listbox(step3, height=10)
-        self.json_list.pack(fill=BOTH, expand=True, padx=10, pady=6)
+    def _build_import_final_tab(self):
+        paned = self._create_paned(
+            self.import_final_tab, orient=HORIZONTAL, layout_key="import_horizontal", padx=10, pady=10
+        )
+        left_outer = Frame(paned)
+        right = Frame(paned)
+        paned.add(left_outer, weight=3)
+        paned.add(right, weight=2)
+
+        scroll_area, left = self._make_vertical_scroll(left_outer)
+        scroll_area.pack(fill=BOTH, expand=True, padx=0, pady=10)
+
+        tab_hint = self._label(left, "import_final_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
+        tab_hint.pack(fill=X, pady=(0, 10))
+        self._bind_wraplength(tab_hint, left)
+
+        self._build_fh6_import_connection(left).pack(fill=X)
+
+        runs_box = ttk.LabelFrame(left, text=tr(self.lang, "import_final_runs"))
+        self.translated.append((runs_box, "import_final_runs", "text"))
+        runs_box.pack(fill=X, pady=(0, 10))
+        runs_row = Frame(runs_box)
+        runs_row.pack(fill=X, padx=10, pady=(8, 4))
+        self._button(runs_row, "import_final_refresh_runs", self.refresh_generated_runs).pack(side=LEFT)
+        self._button(runs_row, "import_final_pick_best", self.pick_best_safe_final_json).pack(side=RIGHT)
+        runs_body = Frame(runs_box)
+        runs_body.pack(fill=X, padx=10, pady=(0, 6))
+        self.generated_runs_list = Listbox(runs_body, height=5)
+        self.generated_runs_list.pack(fill=X, expand=True)
+        self.generated_runs_list.bind("<<ListboxSelect>>", self._on_generated_run_select)
+        self._generated_run_paths: list[Path] = []
+
+        files_box = ttk.LabelFrame(left, text=tr(self.lang, "import_final_run_files"))
+        self.translated.append((files_box, "import_final_run_files", "text"))
+        files_box.pack(fill=X, pady=(0, 10))
+        files_row = Frame(files_box)
+        files_row.pack(fill=X, padx=10, pady=(8, 4))
+        self._label(files_row, "json_files").pack(side=LEFT)
+        self._button(files_row, "add_json", self.add_json).pack(side=RIGHT)
+        self._button(files_row, "remove_json", self.remove_selected_json).pack(side=RIGHT, padx=(8, 0))
+        self._button(files_row, "use_outputs", self.use_generated_outputs).pack(side=RIGHT, padx=8)
+        json_body = Frame(files_box)
+        json_body.pack(fill=X, padx=10, pady=(0, 6))
+        json_scrollbar = ttk.Scrollbar(json_body, orient="vertical")
+        json_scrollbar.pack(side=RIGHT, fill="y")
+        self.json_list = Listbox(json_body, height=7, yscrollcommand=json_scrollbar.set)
+        self.json_list.pack(side=LEFT, fill=X, expand=True)
+        json_scrollbar.config(command=self.json_list.yview)
         self.json_list.bind("<<ListboxSelect>>", self._preview_selected_json)
+        best_toggle = Checkbutton(
+            files_box,
+            text=tr(self.lang, "import_final_use_best"),
+            variable=self.use_best_safe_final,
+            onvalue="1",
+            offvalue="0",
+        )
+        best_toggle.pack(anchor="w", padx=10, pady=(0, 10))
+        self.translated.append((best_toggle, "import_final_use_best", "text"))
+        self._final_run_json_paths: list[Path] = []
 
         step4 = ttk.LabelFrame(right, text=tr(self.lang, "step_import"))
         self.translated.append((step4, "step_import", "text"))
         step4.pack(fill=X, pady=(0, 10))
-        self._label(step4, "step_import_hint", anchor="w", justify=LEFT, wraplength=500).pack(fill=X, padx=10, pady=(8, 4))
-        self._label(step4, "easy_import_hint", anchor="w", justify=LEFT, wraplength=500, fg="#555").pack(fill=X, padx=10, pady=4)
-        self._label(step4, "admin_note", anchor="w", justify=LEFT, wraplength=500, fg="#8a5300").pack(fill=X, padx=10, pady=4)
+        import_hint = self._label(step4, "step_import_hint", anchor="w", justify=LEFT)
+        import_hint.pack(fill=X, padx=10, pady=(8, 4))
+        self._bind_wraplength(import_hint, step4)
+        easy_hint = self._label(step4, "easy_import_hint", anchor="w", justify=LEFT, theme_role="muted")
+        easy_hint.pack(fill=X, padx=10, pady=4)
+        self._bind_wraplength(easy_hint, step4)
+        admin_note = self._label(step4, "admin_note", anchor="w", justify=LEFT, theme_role="hint")
+        admin_note.pack(fill=X, padx=10, pady=4)
+        self._bind_wraplength(admin_note, step4)
         actions = Frame(step4)
         actions.pack(fill=X, padx=10, pady=12)
-        self._button(actions, "import_json", self.start_import, font=("Segoe UI", 13, "bold"), height=2).pack(side=LEFT, fill=X, expand=True)
+        self._button(
+            actions,
+            "import_final_import",
+            self.start_import_final,
+            font=("Segoe UI", 13, "bold"),
+            height=2,
+        ).pack(side=LEFT, fill=X, expand=True)
         self.advanced_button = self._button(actions, "show_advanced", self.toggle_advanced)
         self.advanced_button.pack(side=LEFT, padx=(8, 0))
 
@@ -1397,45 +3739,1333 @@ class App:
         self.translated.append((self.advanced_frame, "advanced_options", "text"))
         self._field(self.advanced_frame, "manual_count", self.count_address, row=0)
         self._field(self.advanced_frame, "manual_table", self.table_address, row=1)
-        self._button(self.advanced_frame, "auto_locate", self.start_auto_locate).grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 4))
+        self._button(self.advanced_frame, "auto_locate", self.start_auto_locate).grid(
+            row=2, column=0, columnspan=2, sticky="ew", pady=(8, 4)
+        )
 
         self._label(right, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X, pady=(8, 0))
-        self.import_preview_label = Label(right, text=tr(self.lang, "preview_hint"), bg="#202020", fg="#dddddd", width=56, height=20)
+        self.import_preview_label = Label(
+            right,
+            text=tr(self.lang, "preview_hint"),
+            bg=COLOR_PREVIEW_BG,
+            fg=COLOR_PREVIEW_FG,
+            width=56,
+            height=20,
+        )
         self.import_preview_label.pack(fill=BOTH, expand=True, pady=6)
         self.import_preview_label.bind("<Configure>", self._schedule_preview_refresh)
+        self.refresh_generated_runs()
+
+    def _build_export_game_tab(self):
+        paned = self._create_paned(
+            self.export_game_tab, orient=HORIZONTAL, layout_key="export_game_horizontal", padx=10, pady=10
+        )
+        left = Frame(paned)
+        right = Frame(paned)
+        paned.add(left, weight=3)
+        paned.add(right, weight=2)
+
+        scroll_area, body = self._make_vertical_scroll(left)
+        scroll_area.pack(fill=BOTH, expand=True, padx=0, pady=10)
+
+        hint = self._label(body, "export_game_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
+        hint.pack(fill=X, pady=(0, 10))
+        self._bind_wraplength(hint, body)
+
+        self._build_fh6_import_connection(body).pack(fill=X)
+
+        export_box = ttk.LabelFrame(body, text=tr(self.lang, "export_game_tab"))
+        self.translated.append((export_box, "export_game_tab", "text"))
+        export_box.pack(fill=X, pady=(0, 10))
+        export_actions = Frame(export_box)
+        export_actions.pack(fill=X, padx=10, pady=12)
+        self._button(
+            export_actions,
+            "export_game_json",
+            self.start_export_typecode_json,
+            font=("Segoe UI", 13, "bold"),
+            height=2,
+        ).pack(side=LEFT, fill=X, expand=True)
+        self._button(export_actions, "export_open_folder", self.open_typecode_export_folder).pack(side=LEFT, padx=(8, 0))
+
+        admin_note = self._label(right, "admin_note", anchor="w", justify=LEFT, theme_role="hint")
+        admin_note.pack(fill=X, padx=10, pady=8)
+        self._bind_wraplength(admin_note, right)
+        typecode_hint = self._label(right, "handmade_section_hint", anchor="w", justify=LEFT, theme_role="hint")
+        typecode_hint.pack(fill=X, padx=10, pady=4)
+        self._bind_wraplength(typecode_hint, right)
+
+    def _build_handmade_tab(self):
+        paned = self._create_paned(self.handmade_tab, orient=HORIZONTAL, layout_key="import_horizontal", padx=10, pady=10)
+        left = Frame(paned)
+        right = Frame(paned)
+        paned.add(left, weight=3)
+        paned.add(right, weight=2)
+
+        scroll_area, body = self._make_vertical_scroll(left)
+        scroll_area.pack(fill=BOTH, expand=True, padx=0, pady=10)
+
+        hint = self._label(body, "handmade_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
+        hint.pack(fill=X, pady=(0, 10))
+        self._bind_wraplength(hint, body)
+
+        self._build_fh6_import_connection(body).pack(fill=X)
+
+        actions = ttk.LabelFrame(body, text=tr(self.lang, "import_handmade_tab"))
+        self.translated.append((actions, "import_handmade_tab", "text"))
+        actions.pack(fill=X, pady=(0, 10))
+        row = Frame(actions)
+        row.pack(fill=X, padx=10, pady=(10, 8))
+        self._button(row, "handmade_choose_json", self.add_handmade_json).pack(side=LEFT)
+        self._button(row, "handmade_import", self.start_import_handmade).pack(side=RIGHT)
+
+        trim_toggle = Checkbutton(
+            actions,
+            text=tr(self.lang, "typecode_trim_after_import"),
+            variable=self.typecode_trim_after_import,
+            onvalue="1",
+            offvalue="0",
+        )
+        trim_toggle.pack(anchor="w", padx=10, pady=(0, 2))
+        self.translated.append((trim_toggle, "typecode_trim_after_import", "text"))
+        unknown_toggle = Checkbutton(
+            actions,
+            text=tr(self.lang, "typecode_allow_unknown"),
+            variable=self.typecode_allow_unknown,
+            onvalue="1",
+            offvalue="0",
+        )
+        unknown_toggle.pack(anchor="w", padx=10, pady=(0, 10))
+        self.translated.append((unknown_toggle, "typecode_allow_unknown", "text"))
+
+        files_box = ttk.LabelFrame(body, text=tr(self.lang, "step_json"))
+        self.translated.append((files_box, "step_json", "text"))
+        files_box.pack(fill=X, pady=(0, 10))
+        files_hint = self._label(files_box, "step_json_hint", anchor="w", justify=LEFT, theme_role="hint")
+        files_hint.pack(fill=X, padx=10, pady=(8, 4))
+        self._bind_wraplength(files_hint, files_box)
+
+        list_row = Frame(files_box)
+        list_row.pack(fill=X, padx=10, pady=(0, 8))
+        self.handmade_json_list = Listbox(list_row, height=7)
+        self.handmade_json_list.pack(side=LEFT, fill=X, expand=True)
+        self.handmade_json_list.bind("<<ListboxSelect>>", self._preview_selected_handmade_json)
+        self._button(list_row, "remove_json", self.remove_selected_handmade_json).pack(side=RIGHT, padx=(8, 0))
+        self.handmade_status_label = self._label(files_box, "handmade_status_none", anchor="w", justify=LEFT, theme_role="muted")
+        self.handmade_status_label.pack(fill=X, padx=10, pady=(0, 10))
+        self._bind_wraplength(self.handmade_status_label, files_box)
+
+        self._label(right, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X, pady=(0, 8))
+        self.handmade_preview_label = Label(
+            right,
+            text=tr(self.lang, "preview_hint"),
+            bg=COLOR_PREVIEW_BG,
+            fg=COLOR_PREVIEW_FG,
+            width=56,
+            height=20,
+        )
+        self.handmade_preview_label.pack(fill=BOTH, expand=True)
+        self.handmade_preview_label.bind("<Configure>", lambda _e: self._schedule_handmade_preview_refresh())
+        self._handmade_preview_job = None
+
+        self.handmade_json_files: list[Path] = []
+        self._update_handmade_status()
+
+    def refresh_generated_runs(self):
+        if not hasattr(self, "generated_runs_list"):
+            return
+        self._generated_run_paths = discover_generated_run_folders(ROOT)
+        self.generated_runs_list.delete(0, END)
+        for path in self._generated_run_paths:
+            try:
+                mtime = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+            except OSError:
+                mtime = "?"
+            self.generated_runs_list.insert(END, f"{path.name}  ({mtime})")
+        if self._generated_run_paths:
+            self.generated_runs_list.selection_set(0)
+            self._on_generated_run_select()
+
+    def _on_generated_run_select(self, _event=None):
+        if not hasattr(self, "generated_runs_list"):
+            return
+        selection = list(self.generated_runs_list.curselection())
+        if not selection:
+            return
+        try:
+            run_folder = self._generated_run_paths[selection[0]]
+        except IndexError:
+            return
+        self._final_run_json_paths = json_candidates_for_run_folder(run_folder)
+        if not hasattr(self, "json_list"):
+            return
+        self.json_list.delete(0, END)
+        self.json_files.clear()
+        for path in self._final_run_json_paths:
+            try:
+                layers = geometry_shape_count(path)
+            except OSError:
+                layers = "?"
+            label = f"{path.name}  ({layers} layers)"
+            self.json_list.insert(END, label)
+            self.json_files.append(path)
+        if self.use_best_safe_final.get() == "1":
+            self.pick_best_safe_final_json(select_only=True)
+        elif self.json_files:
+            self.json_list.selection_set(len(self.json_files) - 1)
+            self.show_json_preview(self.json_files[-1])
+            self._update_import_layer_info(self.json_files[-1])
+
+    def pick_best_safe_final_json(self, select_only: bool = False):
+        selection = list(self.generated_runs_list.curselection()) if hasattr(self, "generated_runs_list") else []
+        run_folder = None
+        if selection:
+            try:
+                run_folder = self._generated_run_paths[selection[0]]
+            except (IndexError, AttributeError):
+                run_folder = None
+        if run_folder is None and getattr(self, "_generated_run_paths", None):
+            run_folder = self._generated_run_paths[0]
+        if run_folder is None:
+            self.log_line("No generated run folder selected.")
+            return
+        best = best_safe_final_json(run_folder)
+        if best is None:
+            self.log_line(f"No JSON found in {run_folder}")
+            return
+        if best not in self.json_files:
+            self.json_files.append(best)
+            self._render_lists()
+        try:
+            index = self.json_files.index(best)
+        except ValueError:
+            return
+        if hasattr(self, "json_list"):
+            self.json_list.selection_clear(0, END)
+            self.json_list.selection_set(index)
+            self.json_list.see(index)
+        self.show_json_preview(best)
+        self._update_import_layer_info(best)
+        if not select_only:
+            self.log_line(f"Selected best final: {best.name}")
+
+    def open_typecode_export_folder(self):
+        TYPECODE_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+        os.startfile(TYPECODE_EXPORT_DIR)
+
+    def start_import_final(self):
+        if not self.json_files:
+            self.log_line(tr(self.lang, "no_json_selected"))
+            return
+        layer_count = self.layer_count.get().strip()
+        if not layer_count:
+            self.log_line(tr(self.lang, "layer_count_required"))
+            if hasattr(self, "layer_count_entry"):
+                self.layer_count_entry.config(highlightbackground=COLOR_WARN, highlightthickness=1)
+            return
+        if hasattr(self, "layer_count_entry"):
+            self.layer_count_entry.config(highlightbackground=COLOR_BORDER, highlightthickness=0)
+        pid = self.ensure_live_game_pid()
+        if not pid:
+            return
+        self.status.set(tr(self.lang, "running"))
+        threading.Thread(target=self._import_final_worker, args=(pid,), daemon=True).start()
+
+    def _import_final_worker(self, pid):
+        game = self.selected_game.get() or "fh6"
+        layer_count = self.layer_count.get().strip()
+        try:
+            locations = self._resolve_import_locations(pid, game, layer_count)
+        except ValueError as exc:
+            self.queue.put(("log", str(exc)))
+            self.queue.put(("status", tr(self.lang, "failed")))
+            return
+        except RuntimeError:
+            self.queue.put(("status", tr(self.lang, "failed")))
+            return
+        pid = locations["pid"]
+        count_address = locations.get("count_address")
+        table_address = locations.get("table_address")
+        import_env = locations.get("import_env", {})
+        for path in list(self.json_files):
+            path = Path(path)
+            if is_typecode_geometry_json(path):
+                self.queue.put(
+                    ("log", f"Skipped handmade/type-code JSON on Final import tab: {path.name}")
+                )
+                continue
+            if game == "fh6" and layer_count:
+                self._check_json_layer_fit(path, layer_count)
+            cmd = [*helper_command("main"), "--game", game, "--no-preview", "--pid", str(pid)]
+            if count_address:
+                cmd.extend(["--layer-count-address", f"0x{int(count_address):x}"])
+            if table_address:
+                cmd.extend(["--layer-table-address", f"0x{int(table_address):x}"])
+            if game == "fh6" and layer_count:
+                cmd.extend(["--layer-count-value", str(layer_count)])
+            cmd.append(str(path.resolve()))
+            code = self.run_subprocess(cmd, extra_env=import_env)
+            if code != 0:
+                self.queue.put(("status", tr(self.lang, "failed")))
+                return
+        self.queue.put(("status", tr(self.lang, "done")))
+
+    def add_handmade_json(self):
+        files = filedialog.askopenfilenames(
+            title=tr(self.lang, "handmade_choose_json"),
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+        )
+        if not files:
+            return
+        for item in files:
+            path = Path(item)
+            if path.exists() and path not in self.handmade_json_files:
+                self.handmade_json_files.append(path)
+        self._render_handmade_list()
+        if files:
+            self._set_handmade_preview(Path(files[0]))
+
+    def remove_selected_handmade_json(self):
+        if not hasattr(self, "handmade_json_list"):
+            return
+        selection = list(self.handmade_json_list.curselection())
+        if not selection:
+            self.log_line(tr(self.lang, "no_json_selected"))
+            return
+        for index in sorted(selection, reverse=True):
+            try:
+                del self.handmade_json_files[index]
+            except IndexError:
+                pass
+        self._render_handmade_list()
+        self.handmade_preview_label.config(image="", text=tr(self.lang, "preview_hint"))
+        self.handmade_preview_label.image = None
+
+    def _render_handmade_list(self):
+        if not hasattr(self, "handmade_json_list"):
+            return
+        self.handmade_json_list.delete(0, END)
+        for path in self.handmade_json_files:
+            self.handmade_json_list.insert(END, str(path))
+        self._update_handmade_status()
+
+    def _preview_selected_handmade_json(self, _event=None):
+        if not hasattr(self, "handmade_json_list"):
+            return
+        selection = self.handmade_json_list.curselection()
+        if selection:
+            self._set_handmade_preview(self.handmade_json_files[selection[0]])
+
+    def _schedule_handmade_preview_refresh(self):
+        if not hasattr(self, "handmade_preview_label") or self.closed:
+            return
+        if self._handmade_preview_job is not None:
+            try:
+                self.root.after_cancel(self._handmade_preview_job)
+            except Exception:
+                pass
+        self._handmade_preview_job = self.root.after(180, lambda: self._refresh_handmade_preview())
+
+    def _refresh_handmade_preview(self):
+        self._handmade_preview_job = None
+        path = getattr(self, "_handmade_preview_path", None)
+        if path:
+            self._set_handmade_preview(path)
+
+    def _set_handmade_preview(self, path: Path):
+        self._handmade_preview_path = Path(path)
+        if not path or not Path(path).exists():
+            self.handmade_preview_label.config(image="", text=tr(self.lang, "preview_hint"))
+            self.handmade_preview_label.image = None
+            return
+        data = render_geometry_json(path, self._preview_bounds(self.handmade_preview_label))
+        if not data:
+            self.handmade_preview_label.config(image="", text=tr(self.lang, "preview_unavailable"))
+            self.handmade_preview_label.image = None
+            return
+        image = PhotoImage(data=data)
+        self.handmade_preview_label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+        self.handmade_preview_label.image = image
+        self._update_handmade_status(path)
+
+    def _update_handmade_status(self, path: Path | None = None):
+        if not hasattr(self, "handmade_status_label"):
+            return
+        if path is None:
+            path = getattr(self, "_handmade_preview_path", None)
+        if not path or not Path(path).exists():
+            self.handmade_status_label.config(text=tr(self.lang, "handmade_status_none"))
+            return
+        try:
+            summary = typecode_shape_summary(path, allow_unknown_low_byte=False)
+        except Exception:
+            self.handmade_status_label.config(text=tr(self.lang, "handmade_status_none"))
+            return
+        self.handmade_status_label.config(
+            text=tr(self.lang, "handmade_status_counts").format(
+                total=summary.get("total", 0),
+                supported=summary.get("supported", 0),
+                unsupported=summary.get("unsupported", 0),
+            )
+        )
+
+    def start_import_handmade(self):
+        if not getattr(self, "handmade_json_files", None):
+            self.log_line(tr(self.lang, "no_json_selected"))
+            return
+        layer_count = self.layer_count.get().strip()
+        if not layer_count:
+            self.log_line(tr(self.lang, "layer_count_required"))
+            return
+        pid = self.ensure_live_game_pid()
+        if not pid:
+            return
+        self.status.set(tr(self.lang, "running"))
+        threading.Thread(target=self._import_handmade_worker, args=(pid,), daemon=True).start()
+
+    def _import_handmade_worker(self, pid):
+        game = self.selected_game.get() or "fh6"
+        layer_count = self.layer_count.get().strip()
+        try:
+            locations = self._resolve_import_locations(pid, game, layer_count)
+        except Exception as exc:
+            self.queue.put(("log", str(exc)))
+            self.queue.put(("status", tr(self.lang, "failed")))
+            return
+        for path in list(self.handmade_json_files):
+            path = Path(path)
+            if not is_typecode_geometry_json(path):
+                self.queue.put(("log", f"Skipped non-handmade JSON: {path.name}"))
+                continue
+            code = self._import_typecode_json_file(path, locations, layer_count)
+            if code != 0:
+                self.queue.put(("status", tr(self.lang, "failed")))
+                return
+        self.queue.put(("status", tr(self.lang, "done")))
+
+    def _build_image_preview_tab(self):
+        body = Frame(self.preview_tab_frame)
+        body.pack(fill=BOTH, expand=True, padx=10, pady=10)
+
+        controls = ttk.LabelFrame(body, text=tr(self.lang, "preview_tab"))
+        self.translated.append((controls, "preview_tab", "text"))
+        controls.pack(fill=X, pady=(0, 10))
+
+        hint = self._label(controls, "preview_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
+        hint.pack(fill=X, padx=10, pady=(8, 6))
+        self._bind_wraplength(hint, controls)
+
+        actions = Frame(controls)
+        actions.pack(fill=X, padx=10, pady=(0, 8))
+        self._button(actions, "preview_choose_image", self.choose_preview_image).pack(side=LEFT)
+        self._button(actions, "preview_use_generate_image", self.use_generate_image_for_preview).pack(side=LEFT, padx=8)
+        self._button(actions, "preview_apply_generate", self.apply_preview_filter_to_generate).pack(side=LEFT)
+        self._button(actions, "preview_open_folder", self.open_preview_folder).pack(side=RIGHT)
+
+        self.preview_status_label = Label(
+            controls,
+            text=tr(self.lang, "preview_output_folder").format(path=PREVIEW_EXPORT_ROOT),
+            anchor="w",
+            justify=LEFT,
+            bg=COLOR_PANEL,
+            fg=COLOR_MUTED,
+        )
+        self.preview_status_label._theme_role = "muted"
+        self.preview_status_label.pack(fill=X, padx=10, pady=(0, 6))
+        self._bind_wraplength(self.preview_status_label, controls)
+
+        select_hint = self._label(controls, "preview_select_filter", anchor="w", theme_role="hint")
+        select_hint.pack(fill=X, padx=10, pady=(0, 10))
+        self._bind_wraplength(select_hint, controls)
+
+        scroll_area, grid_host = self._make_vertical_scroll(body)
+        scroll_area.pack(fill=BOTH, expand=True)
+        self.preview_filter_grid = Frame(grid_host)
+        self.preview_filter_grid.pack(fill=BOTH, expand=True)
+        preview_row_count = (len(PREPROCESS_FILTERS) + 1) // 2
+        for row_index in range(preview_row_count):
+            self.preview_filter_grid.rowconfigure(row_index, weight=1, minsize=340)
+        for column in range(2):
+            self.preview_filter_grid.columnconfigure(column, weight=1)
+
+        for index, spec in enumerate(PREPROCESS_FILTERS):
+            row, column = divmod(index, 2)
+            card = Frame(
+                self.preview_filter_grid,
+                bg=COLOR_PANEL_ALT,
+                highlightthickness=1,
+                highlightbackground=COLOR_BORDER,
+                cursor="hand2",
+            )
+            card.grid(row=row, column=column, sticky="nsew", padx=6, pady=6)
+            card.columnconfigure(0, weight=1)
+            card.rowconfigure(3, weight=1, minsize=260)
+
+            title = Label(
+                card,
+                text=tr(self.lang, spec.label_key),
+                anchor="w",
+                bg=COLOR_PANEL_ALT,
+                fg=COLOR_TEXT,
+                font=("Segoe UI", 10, "bold"),
+                cursor="hand2",
+            )
+            title.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 2))
+            estimate = Label(card, text="", anchor="w", bg=COLOR_PANEL_ALT, fg=COLOR_MUTED, cursor="hand2")
+            estimate.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 2))
+            card_hint = Label(
+                card,
+                text=tr(self.lang, spec.hint_key),
+                anchor="w",
+                justify=LEFT,
+                wraplength=280,
+                bg=COLOR_PANEL_ALT,
+                fg=COLOR_MUTED,
+                font=("Segoe UI", 9),
+                cursor="hand2",
+            )
+            card_hint.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 4))
+            preview = Label(
+                card,
+                text=tr(self.lang, "luma_before_hint"),
+                bg=COLOR_PREVIEW_BG,
+                fg=COLOR_PREVIEW_FG,
+                cursor="hand2",
+            )
+            preview.grid(row=3, column=0, sticky="nsew", padx=8, pady=(0, 8))
+            preview.bind("<Configure>", lambda _e, mid=spec.mode_id: self._schedule_preview_filter_render(mid))
+
+            def _select(_e=None, mode_id=spec.mode_id):
+                self._set_preprocess_mode(mode_id, refresh_ui=True)
+
+            for widget in (card, title, estimate, card_hint, preview):
+                widget.bind("<Button-1>", _select)
+            self._preview_filter_cards[spec.mode_id] = {
+                "card": card,
+                "title": title,
+                "estimate": estimate,
+                "hint": card_hint,
+                "preview": preview,
+                "spec": spec,
+            }
+
+        self._highlight_preview_filter_cards()
+
+    def _preview_card_bounds(self, label):
+        try:
+            width = label.winfo_width()
+            height = label.winfo_height()
+        except Exception:
+            width = height = 0
+        if width <= 40 or height <= 40:
+            return 360, 260
+        return max(1, width - 12), max(1, height - 12)
+
+    def _schedule_preview_filter_render(self, mode_id: str):
+        job = self._preview_render_jobs.get(mode_id)
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+        self._preview_render_jobs[mode_id] = self.root.after(
+            180, lambda mid=mode_id: self._render_preview_filter_card(mid)
+        )
+
+    def _render_preview_filter_card(self, mode_id: str):
+        self._preview_render_jobs[mode_id] = None
+        if self.closed:
+            return
+        widgets = self._preview_filter_cards.get(mode_id)
+        if not widgets:
+            return
+        label = widgets["preview"]
+        estimate_label = widgets["estimate"]
+        entry = self._preview_filter_payload.get(mode_id)
+        if entry and entry.get("estimate"):
+            estimate_label.config(text=tr(self.lang, "preview_estimate").format(count=int(entry["estimate"])))
+        else:
+            estimate_label.config(text=tr(self.lang, "preview_estimate_unknown"))
+        path = entry.get("path") if entry else None
+        if not path or not Path(path).exists():
+            label.config(image="", text=tr(self.lang, "luma_before_hint"))
+            label.image = None
+            return
+        data = render_source_image(path, self._preview_card_bounds(label))
+        if not data:
+            label.config(image="", text=tr(self.lang, "preview_unavailable"))
+            label.image = None
+            return
+        image = PhotoImage(data=data)
+        label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+        label.image = image
+
+    def _highlight_preview_filter_cards(self):
+        if not self._preview_filter_cards:
+            return
+        selected = self._selected_preprocess_mode()
+        for mode_id, widgets in self._preview_filter_cards.items():
+            card = widgets["card"]
+            if mode_id == selected:
+                card.config(highlightbackground=COLOR_ACCENT, highlightthickness=3)
+            else:
+                card.config(highlightbackground=COLOR_BORDER, highlightthickness=1)
+
+    def _start_preview_filter_compute(self, source: Path):
+        if not load_cv2():
+            messagebox.showerror(APP_DISPLAY_NAME, tr(self.lang, "preview_unavailable"))
+            return
+        if self._preview_compute_running:
+            return
+        source = Path(source)
+        self._preview_source_path = source.resolve()
+        self._preview_filter_payload = {}
+        self._preview_compute_running = True
+        self.preview_status_label.config(text=tr(self.lang, "preview_processing").format(path=source.name))
+        for widgets in self._preview_filter_cards.values():
+            widgets["estimate"].config(text=tr(self.lang, "preview_estimate_unknown"))
+            widgets["preview"].config(image="", text=tr(self.lang, "luma_before_hint"))
+            widgets["preview"].image = None
+        threading.Thread(target=self._preview_filter_worker, args=(source,), daemon=True).start()
+
+    def _preview_filter_worker(self, source: Path):
+        try:
+            payload = build_preview_payload(source)
+            self.queue.put(("preview_filters_ready", (str(source.resolve()), payload)))
+        except Exception as exc:
+            self.queue.put(("preview_filters_failed", (str(source), str(exc))))
+
+    def _apply_preview_filters_ready(self, source_key: str, payload: dict):
+        self._preview_compute_running = False
+        if str(getattr(self, "_preview_source_path", "")) != source_key:
+            return
+        self._preview_filter_payload = payload
+        self.preview_status_label.config(
+            text=tr(self.lang, "preview_output_folder").format(path=PREVIEW_EXPORT_ROOT)
+        )
+        for mode_id in self._preview_filter_cards:
+            self._render_preview_filter_card(mode_id)
+        self._highlight_preview_filter_cards()
+        self._refresh_generate_compare()
+
+    def choose_preview_image(self):
+        path = filedialog.askopenfilename(
+            title=tr(self.lang, "preview_choose_image"),
+            filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp *.webp"), ("All files", "*.*")],
+        )
+        if path:
+            self._start_preview_filter_compute(Path(path))
+
+    def _ensure_generate_images(self, paths: list[Path]) -> list[Path]:
+        added_paths: list[Path] = []
+        for item in paths:
+            path = Path(item)
+            if not path.exists() or path in self.images:
+                continue
+            self.images.append(path)
+            added_paths.append(path)
+            self._load_existing_checkpoints_for_image(path)
+        if added_paths:
+            self._render_lists()
+            self._sync_color_picker_images()
+            select_path = added_paths[0]
+            try:
+                index = self.images.index(select_path)
+                self.image_list.selection_clear(0, END)
+                self.image_list.selection_set(index)
+                self.image_list.see(index)
+            except (ValueError, TclError):
+                pass
+            self.show_source_preview(select_path)
+        return added_paths
+
+    def use_generate_image_for_preview(self):
+        image_path = self._selected_generate_image()
+        if image_path is None:
+            messagebox.showinfo(APP_DISPLAY_NAME, tr(self.lang, "luma_status_none"))
+            return
+        image_path = Path(image_path)
+        added = self._ensure_generate_images([image_path])
+        if added:
+            self.log_line(tr(self.lang, "preview_image_added_to_generate").format(name=image_path.name))
+        elif image_path in self.images:
+            try:
+                index = self.images.index(image_path)
+                self.image_list.selection_clear(0, END)
+                self.image_list.selection_set(index)
+                self.image_list.see(index)
+            except (ValueError, TclError):
+                pass
+            self.show_source_preview(image_path)
+            self.log_line(tr(self.lang, "preview_image_already_on_generate").format(name=image_path.name))
+        self._start_preview_filter_compute(image_path)
+
+    def apply_preview_filter_to_generate(self):
+        try:
+            self.main_tabs.select(self.generate_tab)
+        except Exception:
+            pass
+
+    def open_preview_folder(self):
+        PREVIEW_EXPORT_ROOT.mkdir(parents=True, exist_ok=True)
+        os.startfile(PREVIEW_EXPORT_ROOT)
+
+    def _build_colors_tab(self):
+        paned = self._create_paned(self.colors_tab, orient=HORIZONTAL, layout_key="colors_vertical", padx=10, pady=10)
+        left = Frame(paned)
+        right = Frame(paned)
+        paned.add(left, weight=3)
+        paned.add(right, weight=2)
+
+        self.colors_hint = self._label(left, "colors_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
+        self.colors_hint.pack(fill=X, pady=(0, 8))
+        self._bind_wraplength(self.colors_hint, left)
+
+        nav = Frame(left)
+        nav.pack(fill=X, pady=(0, 6))
+        self._button(nav, "colors_prev_image", self._color_picker_prev).pack(side=LEFT)
+        self.color_image_label = Label(nav, text="", anchor="w", bg=COLOR_PANEL, fg=COLOR_TEXT)
+        self.color_image_label.pack(side=LEFT, fill=X, expand=True, padx=8)
+        self._button(nav, "colors_next_image", self._color_picker_next).pack(side=LEFT)
+
+        size_row = Frame(left)
+        size_row.pack(fill=X, pady=(0, 6))
+        self._label(size_row, "colors_pixel_size").pack(side=LEFT)
+        Entry(size_row, textvariable=self.color_pixel_size, width=6).pack(side=LEFT, padx=8)
+
+        canvas_host = Frame(left)
+        canvas_host.pack(fill=BOTH, expand=True)
+        self.color_canvas = Canvas(
+            canvas_host,
+            bg=COLOR_PANEL,
+            highlightthickness=1,
+            highlightbackground=COLOR_BORDER,
+            cursor="crosshair",
+        )
+        self.color_canvas.pack(fill=BOTH, expand=True)
+        self.color_canvas.bind("<Button-1>", self._color_picker_click)
+        self.color_canvas.bind("<Motion>", self._color_picker_hover)
+        self.color_canvas.bind("<Configure>", self._color_picker_redraw)
+        self.color_canvas.bind("<Shift-MouseWheel>", self._color_picker_wheel)
+        self.color_canvas.bind("<Enter>", lambda _e: self.color_canvas.focus_set())
+
+        self.colors_click_hint = self._label(left, "colors_click_hint", anchor="w", theme_role="muted")
+        self.colors_click_hint.pack(fill=X, pady=(6, 0))
+
+        self.color_hex_var = StringVar(value="#808080")
+        self.color_rgb_r_var = StringVar(value="128")
+        self.color_rgb_g_var = StringVar(value="128")
+        self.color_rgb_b_var = StringVar(value="128")
+        self.color_hsl_h_var = StringVar()
+        self.color_hsl_s_var = StringVar()
+        self.color_hsl_l_var = StringVar()
+        self.color_hsb_h_var = StringVar()
+        self.color_hsb_s_var = StringVar()
+        self.color_hsb_b_var = StringVar()
+        self.color_forza_h_var = StringVar()
+        self.color_forza_s_var = StringVar()
+        self.color_forza_b_var = StringVar()
+
+        swatch_row = Frame(right)
+        swatch_row.pack(fill=X, pady=(0, 10))
+        self.color_swatch = Label(swatch_row, text="", width=10, height=2, bg="#808080", relief="solid", bd=1)
+        self.color_swatch.pack(side=LEFT, padx=(0, 12))
+        actions = Frame(swatch_row)
+        actions.pack(side=LEFT, fill=X, expand=True)
+        self._button(actions, "colors_copy_hex", lambda: self._copy_color_value(self.color_hex_var.get())).pack(fill=X, pady=2)
+        self._button(actions, "colors_copy_forza", self._copy_forza_color).pack(fill=X, pady=2)
+        self._button(actions, "colors_open_bang", self._open_bang_color_converter).pack(fill=X, pady=2)
+
+        values = ttk.LabelFrame(right, text=tr(self.lang, "colors_values"))
+        self.translated.append((values, "colors_values", "text"))
+        values.pack(fill=X)
+        grid = Frame(values)
+        grid.pack(fill=X, padx=10, pady=8)
+        self._color_value_row(grid, 0, "colors_hex", self.color_hex_var)
+        self._color_value_row(grid, 1, "colors_rgb", self.color_rgb_r_var, extra=(self.color_rgb_g_var, self.color_rgb_b_var))
+        self._color_value_row(grid, 2, "colors_hsl", self.color_hsl_h_var, extra=(self.color_hsl_s_var, self.color_hsl_l_var))
+        self._color_value_row(grid, 3, "colors_hsb", self.color_hsb_h_var, extra=(self.color_hsb_s_var, self.color_hsb_b_var))
+        self._color_value_row(grid, 4, "colors_forza", self.color_forza_h_var, extra=(self.color_forza_s_var, self.color_forza_b_var))
+
+        self._apply_color_formats(describe_color(128, 128, 128))
+        self._update_color_image_label()
+        saved_row = Frame(right)
+        saved_row.pack(fill=X, pady=(8, 0))
+        self._label(saved_row, "colors_saved_history", anchor="w", theme_role="muted").pack(fill=X)
+        self.color_history_frame = Frame(saved_row)
+        self.color_history_frame.pack(fill=X, pady=(4, 0))
+        self.root.after(200, self._refresh_color_picker_image)
+
+    def _color_value_row(self, parent, row, label_key, primary_var, extra=()):
+        self._label(parent, label_key, anchor="w").grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
+        Entry(parent, textvariable=primary_var, width=14, state="readonly").grid(row=row, column=1, sticky="w", pady=4)
+        column = 2
+        for var in extra:
+            Entry(parent, textvariable=var, width=8, state="readonly").grid(row=row, column=column, sticky="w", padx=(6, 0), pady=4)
+            column += 1
+
+    def _open_bang_color_converter(self):
+        webbrowser.open("https://dxbang.github.io/forza-colors/")
+
+    def _copy_to_clipboard(self, text: str):
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.root.update_idletasks()
+            self.log_line(tr(self.lang, "colors_copied"))
+        except Exception as exc:
+            self.log_line(f"Clipboard copy failed: {exc}")
+
+    def _copy_color_value(self, value: str):
+        self._copy_to_clipboard(value.strip())
+
+    def _copy_forza_color(self):
+        text = f"{self.color_forza_h_var.get()}, {self.color_forza_s_var.get()}, {self.color_forza_b_var.get()}"
+        self._copy_to_clipboard(text)
+
+    def _apply_color_formats(self, formats) -> None:
+        self.color_hex_var.set(formats.hex)
+        self.color_rgb_r_var.set(str(formats.rgb.r))
+        self.color_rgb_g_var.set(str(formats.rgb.g))
+        self.color_rgb_b_var.set(str(formats.rgb.b))
+        self.color_hsl_h_var.set(f"{formats.hsl_h:.2f}")
+        self.color_hsl_s_var.set(f"{formats.hsl_s:.2f}")
+        self.color_hsl_l_var.set(f"{formats.hsl_l:.2f}")
+        self.color_hsb_h_var.set(f"{formats.hsb_h:.2f}")
+        self.color_hsb_s_var.set(f"{formats.hsb_s:.2f}")
+        self.color_hsb_b_var.set(f"{formats.hsb_b:.2f}")
+        self.color_forza_h_var.set(f"{formats.forza_h:.2f}")
+        self.color_forza_s_var.set(f"{formats.forza_s:.2f}")
+        self.color_forza_b_var.set(f"{formats.forza_b:.2f}")
+        try:
+            self.color_swatch.config(bg=formats.hex)
+        except Exception:
+            pass
+
+    def _color_picker_pixel_size(self) -> int:
+        try:
+            size = int(str(self.color_pixel_size.get()).strip())
+        except ValueError:
+            size = 1
+        return max(1, min(64, size))
+
+    def _color_picker_wheel(self, event):
+        delta = 1 if event.delta > 0 else -1
+        self.color_pixel_size.set(str(self._color_picker_pixel_size() + delta))
+
+    def _update_color_image_label(self):
+        if not hasattr(self, "color_image_label"):
+            return
+        if not self.images:
+            self.color_image_label.config(text=tr(self.lang, "colors_no_images"), fg=COLOR_MUTED)
+            return
+        index = max(0, min(self.color_image_index, len(self.images) - 1))
+        path = self.images[index]
+        self.color_image_label.config(
+            text=tr(self.lang, "colors_image_label").format(
+                current=index + 1,
+                total=len(self.images),
+                name=path.name,
+            ),
+            fg=COLOR_TEXT,
+        )
+
+    def _load_color_pil_image(self, path: Path):
+        loaded = load_pillow()
+        if not loaded:
+            return None
+        Image, _ImageDraw = loaded
+        try:
+            with Image.open(path) as image:
+                return image.convert("RGB")
+        except Exception:
+            return None
+
+    def _refresh_color_picker_image(self):
+        if not hasattr(self, "color_canvas"):
+            return
+        self._color_pil_image = None
+        self._color_photo = None
+        if not self.images:
+            self.color_image_index = 0
+            self._update_color_image_label()
+            self._color_picker_redraw()
+            return
+        self.color_image_index = max(0, min(self.color_image_index, len(self.images) - 1))
+        path = self.images[self.color_image_index]
+        self._color_pil_image = self._load_color_pil_image(path)
+        self._update_color_image_label()
+        self._color_picker_redraw()
+
+    def _color_picker_prev(self):
+        if not self.images:
+            return
+        self.color_image_index = (self.color_image_index - 1) % len(self.images)
+        self._refresh_color_picker_image()
+
+    def _color_picker_next(self):
+        if not self.images:
+            return
+        self.color_image_index = (self.color_image_index + 1) % len(self.images)
+        self._refresh_color_picker_image()
+
+    def _pil_resample_lanczos(self):
+        loaded = load_pillow()
+        if not loaded:
+            return None
+        Image, _ImageDraw = loaded
+        if hasattr(Image, "Resampling"):
+            return Image.Resampling.LANCZOS
+        return Image.LANCZOS
+
+    def _color_picker_redraw(self, _event=None):
+        if not hasattr(self, "color_canvas"):
+            return
+        canvas = self.color_canvas
+        canvas.delete("all")
+        width = max(1, canvas.winfo_width())
+        height = max(1, canvas.winfo_height())
+        self._color_canvas_size = (width, height)
+        if self._color_pil_image is None:
+            canvas.create_text(
+                width // 2,
+                height // 2,
+                text=tr(self.lang, "colors_no_images"),
+                fill=COLOR_MUTED,
+                font=("Segoe UI", 11),
+            )
+            return
+        resample = self._pil_resample_lanczos()
+        image = self._color_pil_image.copy()
+        if resample is not None:
+            image.thumbnail((width, height), resample)
+        disp_w, disp_h = image.size
+        offset_x = (width - disp_w) // 2
+        offset_y = (height - disp_h) // 2
+        self._color_canvas_offset = (offset_x, offset_y)
+        self._color_canvas_scale = self._color_pil_image.width / max(1, disp_w)
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        self._color_photo = PhotoImage(data=buffer.getvalue())
+        canvas.create_image(offset_x, offset_y, anchor="nw", image=self._color_photo)
+
+    def _color_picker_canvas_to_image_xy(self, canvas_x: int, canvas_y: int):
+        offset_x, offset_y = self._color_canvas_offset
+        if self._color_pil_image is None:
+            return None
+        local_x = canvas_x - offset_x
+        local_y = canvas_y - offset_y
+        if self._color_pil_image is None or self._color_photo is None:
+            return None
+        resample = self._pil_resample_lanczos()
+        disp = self._color_pil_image.copy()
+        if resample is not None:
+            disp.thumbnail(self._color_canvas_size, resample)
+        if local_x < 0 or local_y < 0 or local_x >= disp.width or local_y >= disp.height:
+            return None
+        img_x = int(local_x * self._color_canvas_scale)
+        img_y = int(local_y * self._color_canvas_scale)
+        img_x = max(0, min(self._color_pil_image.width - 1, img_x))
+        img_y = max(0, min(self._color_pil_image.height - 1, img_y))
+        return img_x, img_y
+
+    def _color_picker_sample(self, canvas_x: int, canvas_y: int):
+        coords = self._color_picker_canvas_to_image_xy(canvas_x, canvas_y)
+        if coords is None or self._color_pil_image is None:
+            return None
+        img_x, img_y = coords
+        size = self._color_picker_pixel_size()
+        half = size // 2
+        left = max(0, img_x - half)
+        top = max(0, img_y - half)
+        right = min(self._color_pil_image.width, left + size)
+        bottom = min(self._color_pil_image.height, top + size)
+        region = self._color_pil_image.crop((left, top, right, bottom))
+        pixels = list(region.getdata())
+        if not pixels:
+            return None
+        total_r = total_g = total_b = 0
+        for r, g, b in pixels:
+            total_r += r
+            total_g += g
+            total_b += b
+        count = len(pixels)
+        return describe_color(total_r // count, total_g // count, total_b // count)
+
+    def _color_picker_hover(self, event):
+        formats = self._color_picker_sample(event.x, event.y)
+        if formats:
+            try:
+                self.color_swatch.config(bg=formats.hex)
+            except Exception:
+                pass
+
+    def _color_picker_click(self, event):
+        formats = self._color_picker_sample(event.x, event.y)
+        if formats:
+            self._apply_color_formats(formats)
+            self._color_picker_save_color(formats)
+
+    def _color_picker_save_color(self, formats) -> None:
+        hex_value = formats.hex.lower()
+        if hex_value in self._color_saved_history:
+            self._color_saved_history.remove(hex_value)
+        self._color_saved_history.insert(0, hex_value)
+        self._color_saved_history = self._color_saved_history[:16]
+        self._render_color_history()
+        self.log_line(tr(self.lang, "colors_saved").format(hex=hex_value))
+
+    def _render_color_history(self) -> None:
+        if not hasattr(self, "color_history_frame"):
+            return
+        for child in self.color_history_frame.winfo_children():
+            child.destroy()
+        for hex_value in self._color_saved_history:
+            try:
+                btn = Button(
+                    self.color_history_frame,
+                    text="",
+                    width=3,
+                    height=1,
+                    bg=hex_value,
+                    activebackground=hex_value,
+                    relief="solid",
+                    bd=1,
+                    highlightthickness=1,
+                    highlightbackground=COLOR_BORDER,
+                    command=lambda value=hex_value: self._recall_saved_color(value),
+                )
+                btn.pack(side=LEFT, padx=(0, 4))
+            except Exception:
+                pass
+
+    def _recall_saved_color(self, hex_value: str) -> None:
+        from forza_colors import hex_to_rgb
+
+        rgb = hex_to_rgb(hex_value)
+        if rgb is None:
+            return
+        self._apply_color_formats(describe_color(rgb.r, rgb.g, rgb.b))
+        try:
+            self.color_swatch.config(bg=hex_value)
+        except Exception:
+            pass
+
+    def _sync_color_picker_images(self):
+        if not self.images:
+            self.color_image_index = 0
+        else:
+            self.color_image_index = max(0, min(self.color_image_index, len(self.images) - 1))
+        if self._is_colors_tab_active():
+            self._refresh_color_picker_image()
+        elif hasattr(self, "color_image_label"):
+            self._update_color_image_label()
 
     def _build_tools_tab(self):
-        form = Frame(self.tools_tab)
-        form.pack(fill=X, padx=10, pady=10)
+        scroll_area, body = self._make_vertical_scroll(self.tools_tab)
+        scroll_area.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        form = Frame(body)
+        form.pack(fill=X)
         self._field(form, "layer_count", self.layer_count, row=0)
         self._field(form, "snapshot_count", self.snapshot_count, row=1)
         self._field(form, "current_count", self.current_count, row=2)
         self._field(form, "table_address", self.inspect_table_value, row=3)
         runtime_entry = self._field(form, "runtime_folder", self.runtime_folder, row=4)
         runtime_entry.config(state="readonly")
-        actions = Frame(self.tools_tab)
-        actions.pack(fill=X, padx=10, pady=8)
-        self._button(actions, "diagnose", self.start_diagnose).pack(side=LEFT)
-        self._button(actions, "auto_locate", self.start_auto_locate).pack(side=LEFT, padx=6)
-        self._button(actions, "save_snapshot", self.start_save_snapshot).pack(side=LEFT, padx=6)
-        self._button(actions, "compare_snapshot", self.start_compare_snapshot).pack(side=LEFT, padx=6)
-        self._button(actions, "inspect_table", self.start_inspect_table).pack(side=LEFT, padx=6)
-        self._button(actions, "open_runtime_folder", self.open_runtime_folder).pack(side=LEFT, padx=6)
+        actions = Frame(body)
+        actions.pack(fill=X, pady=8)
+        tool_buttons = [
+            ("diagnose", self.start_diagnose),
+            ("auto_locate", self.start_auto_locate),
+            ("save_snapshot", self.start_save_snapshot),
+            ("compare_snapshot", self.start_compare_snapshot),
+            ("inspect_table", self.start_inspect_table),
+            ("open_runtime_folder", self.open_runtime_folder),
+        ]
+        for index, (key, command) in enumerate(tool_buttons):
+            self._button(actions, key, command).grid(row=index // 3, column=index % 3, sticky="ew", padx=4, pady=4)
+        for column in range(3):
+            actions.columnconfigure(column, weight=1)
+
+    def _build_resource_monitor_strip(self, parent):
+        if not self._resource_monitor_settings.enabled:
+            return
+
+        self._resource_donuts = {}
+        self.resource_monitor_frame = Frame(parent, bg=COLOR_PANEL, highlightbackground=COLOR_BORDER, highlightthickness=1)
+        self.resource_monitor_frame.pack(fill=X, padx=10, pady=(0, 10))
+
+        body = Frame(self.resource_monitor_frame, bg=COLOR_PANEL)
+        body.pack(fill=X, padx=12, pady=10)
+
+        title = Label(
+            body,
+            text=tr(self.lang, "resource_monitor_title").upper(),
+            anchor="w",
+            bg=COLOR_PANEL,
+            fg=COLOR_MUTED,
+            font=("Segoe UI", 9, "bold"),
+        )
+        title.pack(fill=X)
+        title._theme_role = "muted"
+        self.translated.append((title, "resource_monitor_title", "text_upper"))
+
+        metrics_row = Frame(body, bg=COLOR_PANEL)
+        metrics_row.pack(fill=X, pady=(6, 2))
+        self._resource_metric_values = {}
+        self._resource_metric_status = {}
+        for column, key in enumerate(("resource_cpu", "resource_gpu")):
+            cell = Frame(metrics_row, bg=COLOR_PANEL)
+            cell.grid(row=0, column=column, sticky="nsew", padx=(0, 20 if column == 0 else 0))
+            metrics_row.columnconfigure(column, weight=1)
+            fill = COLOR_SUCCESS if key == "resource_cpu" else COLOR_ACCENT
+            donut = DonutGauge(
+                cell,
+                size=88,
+                track_color=COLOR_BORDER,
+                fill_color=fill,
+                bg_color=COLOR_PANEL,
+                text_color=COLOR_TEXT,
+                muted_color=COLOR_MUTED,
+                ring_width=9,
+            )
+            donut._donut_role = "cpu" if key == "resource_cpu" else "gpu"
+            donut.pack(side=LEFT, padx=(0, 12))
+            self._resource_donuts[key] = donut
+            right_col = Frame(cell, bg=COLOR_PANEL)
+            right_col.pack(side=LEFT, fill=BOTH, expand=True)
+            heading = Label(right_col, text=tr(self.lang, key).upper(), anchor="w", bg=COLOR_PANEL, fg=COLOR_TEXT, font=("Segoe UI", 10, "bold"))
+            heading.pack(fill=X)
+            self.translated.append((heading, key, "text_upper"))
+            value_row = Frame(right_col, bg=COLOR_PANEL)
+            value_row.pack(anchor="w", fill=X, pady=(6, 0))
+            parts = self._create_resource_value_row(value_row, key)
+            status = Label(cell, text="", anchor="w", bg=COLOR_PANEL, fg=COLOR_SUCCESS, font=("Segoe UI", 9))
+            status.pack(anchor="w", pady=(4, 0))
+            self._resource_metric_values[key] = parts
+            self._resource_metric_status[key] = status
+
+        self.resource_monitor_status = Label(
+            body,
+            text="",
+            anchor="w",
+            bg=COLOR_PANEL,
+            fg=COLOR_MUTED,
+            font=("Segoe UI", 9),
+        )
+        self.resource_monitor_status._theme_role = "muted"
+        self.resource_monitor_status.pack(fill=X, pady=(2, 0))
+
+        self.resource_monitor_heat_wrap = Frame(body, bg=COLOR_PANEL)
+        self.resource_monitor_heat_stripe = Frame(self.resource_monitor_heat_wrap, width=5, bg=COLOR_PANEL)
+        self.resource_monitor_heat_stripe.pack(side=LEFT, fill=Y)
+        self.resource_monitor_heat_banner = Label(
+            self.resource_monitor_heat_wrap,
+            text="",
+            anchor="w",
+            bg=COLOR_PANEL,
+            fg=COLOR_WARN,
+            font=("Segoe UI", 9, "bold"),
+            padx=8,
+        )
+        self.resource_monitor_heat_banner.pack(side=LEFT, fill=X, expand=True)
+        self.resource_monitor_heat_wrap.pack_forget()
+
+    def _build_monitor_tab(self):
+        scroll_area, body = self._make_vertical_scroll(self.monitor_tab)
+        scroll_area.pack(fill=BOTH, expand=True, padx=10, pady=10)
+
+        why = ttk.LabelFrame(body, text=tr(self.lang, "monitor_why_title"))
+        self.translated.append((why, "monitor_why_title", "text"))
+        why.pack(fill=X, pady=(0, 10))
+
+        why_body = Frame(why)
+        why_body.pack(fill=X, padx=10, pady=10)
+        why_label = Label(
+            why_body,
+            text=RESOURCE_MONITOR_DESCRIPTION,
+            anchor="w",
+            justify=LEFT,
+            bg=self._parent_bg(why_body),
+            fg=COLOR_MUTED,
+            font=("Segoe UI", 10),
+        )
+        why_label._theme_role = "muted"
+        why_label.pack(fill=X)
+        self._bind_wraplength(why_label, why_body)
+
+        self._build_resource_monitor_strip(body)
+
+    def _create_resource_value_row(self, parent, metric_key: str):
+        parts = {}
+        bg = parent.cget("bg")
+        for index, part_key in enumerate(("load", "clock", "temp")):
+            if index:
+                sep = Label(parent, text=" · ", bg=bg, fg=COLOR_MUTED, font=("Segoe UI", 9))
+                sep._theme_role = "muted"
+                sep.pack(side=LEFT)
+            label = Label(parent, text="—", bg=bg, fg=COLOR_MUTED, font=("Segoe UI", 9))
+            label._theme_role = "muted"
+            label._resource_part = part_key
+            label.pack(side=LEFT)
+            parts[part_key] = label
+        return parts
+
+    def _start_resource_monitor(self):
+        if not self._resource_monitor_settings.enabled:
+            return
+        self._resource_monitor_backend = ResourceMonitorBackend()
+        threading.Thread(target=self._resource_monitor_worker, daemon=True).start()
+
+    def _resource_monitor_worker(self):
+        settings = self._resource_monitor_settings
+        backend = self._resource_monitor_backend
+        if backend is None:
+            return
+        while not self.shutdown_event.is_set():
+            snapshot = backend.poll()
+            init_error = backend.consume_init_error_for_log()
+            if init_error:
+                self.queue.put(("log", f"Resource monitor: {init_error}"))
+            self.queue.put(("resource_monitor", snapshot))
+            if self.shutdown_event.wait(settings.poll_seconds):
+                break
+
+    def _peak_temperature(self, snapshot: ResourceSnapshot) -> float | None:
+        temps = [snapshot.cpu_temp_c, snapshot.gpu_temp_c]
+        measured = [temp for temp in temps if temp is not None]
+        return max(measured) if measured else None
+
+    def _handle_resource_heat_state(self, snapshot: ResourceSnapshot) -> None:
+        heat_state = evaluate_heat_state(snapshot)
+        previous = self._resource_heat_state
+        self._resource_heat_state = heat_state
+
+        if not hasattr(self, "resource_monitor_heat_banner"):
+            return
+
+        if heat_state == "critical":
+            self.resource_monitor_heat_stripe.config(bg=COLOR_ERROR)
+            self.resource_monitor_heat_banner.config(
+                text=tr(self.lang, "resource_heat_critical_banner"),
+                fg=COLOR_ERROR,
+            )
+            self.resource_monitor_heat_wrap.pack(fill=X, pady=(4, 0))
+        elif heat_state == "warning":
+            self.resource_monitor_heat_stripe.config(bg=COLOR_WARN)
+            self.resource_monitor_heat_banner.config(
+                text=tr(self.lang, "resource_heat_warning_banner"),
+                fg=COLOR_WARN,
+            )
+            self.resource_monitor_heat_wrap.pack(fill=X, pady=(4, 0))
+        else:
+            self.resource_monitor_heat_stripe.config(bg=COLOR_PANEL)
+            self.resource_monitor_heat_banner.config(text="")
+            self.resource_monitor_heat_wrap.pack_forget()
+
+        if heat_state == previous:
+            return
+
+        peak = self._peak_temperature(snapshot)
+        peak_text = f"{peak:.0f}" if peak is not None else "?"
+        if heat_state == "warning" and previous == "normal":
+            self.log_line(tr(self.lang, "resource_heat_log_warning").format(temp=peak_text))
+        elif heat_state == "critical" and previous in ("normal", "warning"):
+            self.log_line(tr(self.lang, "resource_heat_log_critical").format(temp=peak_text))
+        elif heat_state == "normal" and previous in ("warning", "critical"):
+            self.log_line(f"Resource monitor: temperatures returned to normal (peak {peak_text}°C).")
+
+    def _apply_resource_snapshot(self, snapshot: ResourceSnapshot):
+        self._resource_monitor_snapshot = snapshot
+        if not hasattr(self, "_resource_metric_values"):
+            return
+        if snapshot.backend == "unavailable":
+            for key in ("resource_cpu", "resource_gpu"):
+                self._set_resource_metric_unavailable(key)
+            message = tr(self.lang, "resource_unavailable")
+            if snapshot.message:
+                message = f"{message}: {snapshot.message}"
+            self.resource_monitor_status.config(text=message)
+            self.resource_monitor_heat_banner.config(text="")
+            self.resource_monitor_heat_stripe.config(bg=COLOR_PANEL)
+            self.resource_monitor_heat_wrap.pack_forget()
+            self._resource_heat_state = "normal"
+            return
+
+        self.resource_monitor_status.config(text="")
+        component_map = {
+            "resource_cpu": (snapshot.cpu_load_pct, snapshot.cpu_clock_mhz, snapshot.cpu_temp_c),
+            "resource_gpu": (snapshot.gpu_load_pct, snapshot.gpu_clock_mhz, snapshot.gpu_temp_c),
+        }
+        for key, (load, clock, temp) in component_map.items():
+            donut = getattr(self, "_resource_donuts", {}).get(key)
+            if donut is not None:
+                donut.set_value(load)
+            parts = self._resource_metric_values[key]
+            parts["load"].config(text=format_load(load), fg=self._theme_fg("muted"))
+            parts["clock"].config(text=format_clock_mhz(clock), fg=self._theme_fg("muted"))
+            parts["temp"].config(text=format_temp_c(temp), fg=self._theme_fg(temp_color_role(temp)))
+            status = self._resource_metric_status.get(key)
+            if status is not None:
+                if temp is not None and temp_color_role(temp) == "success":
+                    status.config(text=tr(self.lang, "resource_temp_nominal"), fg=COLOR_SUCCESS)
+                else:
+                    status.config(text="")
+
+        self._handle_resource_heat_state(snapshot)
+
+    def _set_resource_metric_unavailable(self, key: str):
+        parts = self._resource_metric_values[key]
+        donut = getattr(self, "_resource_donuts", {}).get(key)
+        if donut is not None:
+            donut.set_value(None)
+        for part_key in ("load", "clock", "temp"):
+            parts[part_key].config(text="—", fg=self._theme_fg("muted"))
+        status = self._resource_metric_status.get(key)
+        if status is not None:
+            status.config(text="")
 
     def _build_tutorial_tab(self):
-        self.tutorial_text = Text(self.tutorial_tab, wrap="word")
-        self.tutorial_text.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        frame = Frame(self.tutorial_tab)
+        frame.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        tutorial_scroll = ttk.Scrollbar(frame, orient="vertical")
+        tutorial_scroll.pack(side=RIGHT, fill="y")
+        self.tutorial_text = Text(frame, wrap="word", yscrollcommand=tutorial_scroll.set)
+        self.tutorial_text.pack(side=LEFT, fill=BOTH, expand=True)
+        tutorial_scroll.config(command=self.tutorial_text.yview)
+        self._bind_text_mousewheel(self.tutorial_text)
         self._update_tutorial()
 
+    def _build_acknowledgements_tab(self):
+        frame = Frame(self.acknowledgements_tab)
+        frame.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        acknowledgements_scroll = ttk.Scrollbar(frame, orient="vertical")
+        acknowledgements_scroll.pack(side=RIGHT, fill="y")
+        self.acknowledgements_text = Text(frame, wrap="word", yscrollcommand=acknowledgements_scroll.set)
+        self.acknowledgements_text.pack(side=LEFT, fill=BOTH, expand=True)
+        acknowledgements_scroll.config(command=self.acknowledgements_text.yview)
+        self._bind_text_mousewheel(self.acknowledgements_text)
+        self._update_acknowledgements()
+
     def _build_log(self):
-        row = Frame(self.root)
-        row.pack(fill=X, padx=14)
+        row = Frame(self.log_pane)
+        row.pack(fill=X, padx=0, pady=(6, 2))
         self._label(row, "logs", anchor="w").pack(side=LEFT)
         self._button(row, "export_logs", self.export_detailed_log).pack(side=RIGHT)
         self._label(row, "progress", anchor="e").pack(side=LEFT, padx=(18, 4))
-        Label(row, textvariable=self.progress_text, anchor="w", fg="#005a9e").pack(side=LEFT, fill=X, expand=True)
-        self.log = Text(self.root, height=9)
-        self.log.pack(fill=BOTH, padx=14, pady=(0, 12))
+        progress_label = Label(row, textvariable=self.progress_text, anchor="w", bg=COLOR_BG, fg=COLOR_INFO)
+        progress_label._theme_role = "info"
+        progress_label.pack(side=LEFT, fill=X, expand=True)
+        resize_hint = self._label(self.log_pane, "layout_resize_hint", anchor="w", theme_role="muted")
+        resize_hint.pack(fill=X, padx=0, pady=(0, 4))
+        log_frame = Frame(self.log_pane)
+        log_frame.pack(fill=BOTH, expand=True, padx=0, pady=(0, 8))
+        log_scroll = ttk.Scrollbar(log_frame, orient="vertical")
+        log_scroll.pack(side=RIGHT, fill="y")
+        self.log = Text(log_frame, height=9, yscrollcommand=log_scroll.set)
+        self.log.pack(side=LEFT, fill=BOTH, expand=True)
+        log_scroll.config(command=self.log.yview)
+        self._bind_text_mousewheel(self.log)
 
     def _field(self, parent, key, variable, row, values=None, readonly=False):
         self._label(parent, key, anchor="w").grid(row=row, column=0, sticky="w", padx=(0, 8), pady=5)
@@ -1451,19 +5081,63 @@ class App:
         self.lang = LANGUAGES.get(self.lang_combo.get(), "en")
         for widget, key, option in self.translated:
             try:
-                widget.config(**{option: tr(self.lang, key)})
+                if option == "text_upper":
+                    widget.config(text=tr(self.lang, key).upper())
+                else:
+                    widget.config(**{option: tr(self.lang, key)})
             except Exception:
                 pass
-        self.tabs.tab(self.generate_tab, text=tr(self.lang, "generate_tab"))
-        self.tabs.tab(self.import_tab, text=tr(self.lang, "import_tab"))
-        self.tabs.tab(self.tutorial_tab, text=tr(self.lang, "tutorial_tab"))
-        if self.photo is None:
-            self.preview_label.config(text=tr(self.lang, "preview_hint"))
-            if hasattr(self, "import_preview_label"):
-                self.import_preview_label.config(text=tr(self.lang, "preview_hint"))
+        for tab, key in self._workspace_tab_specs():
+            self.main_tabs.tab(tab, text=tr(self.lang, key))
+        if hasattr(self, "color_image_label"):
+            self._update_color_image_label()
+        if hasattr(self, "colors_hint"):
+            self.colors_hint.config(text=tr(self.lang, "colors_tab_hint"))
+        if hasattr(self, "colors_click_hint"):
+            self.colors_click_hint.config(text=tr(self.lang, "colors_click_hint"))
+        if hasattr(self, "generate_compare_hint"):
+            self.generate_compare_hint.config(text=tr(self.lang, "generate_select_image"))
+        if hasattr(self, "preview_status_label"):
+            if self._preview_compute_running and self._preview_source_path:
+                self.preview_status_label.config(
+                    text=tr(self.lang, "preview_processing").format(path=Path(self._preview_source_path).name)
+                )
+            else:
+                self.preview_status_label.config(
+                    text=tr(self.lang, "preview_output_folder").format(path=PREVIEW_EXPORT_ROOT)
+                )
+        if self._preview_filter_cards:
+            for mode_id, widgets in self._preview_filter_cards.items():
+                widgets["title"].config(text=self._filter_label(mode_id))
+                spec = widgets.get("spec")
+                if spec and widgets.get("hint"):
+                    widgets["hint"].config(text=tr(self.lang, spec.hint_key))
+            self._refresh_preprocess_mode_combo()
+            self._update_preprocess_filter_active_hint()
+            self._highlight_preview_filter_cards()
+            for mode_id in self._preview_filter_cards:
+                self._render_preview_filter_card(mode_id)
+        if hasattr(self, "text_script_notebook"):
+            for index, script in enumerate(TEXT_SCRIPT_IDS):
+                self.text_script_notebook.tab(index, text=tr(self.lang, self._text_script_tab_key(script)))
+            for script in TEXT_SCRIPT_IDS:
+                hint = self._text_panel(script)["widgets"].get("hint")
+                if hint is not None:
+                    hint.config(text=tr(self.lang, self._text_script_hint_key(script)))
+        if self.photo is None and hasattr(self, "import_preview_label"):
+            self.import_preview_label.config(text=tr(self.lang, "preview_hint"))
+        if hasattr(self, "generate_source_before_preview"):
+            self._refresh_generate_compare()
         if hasattr(self, "advanced_button"):
             self.advanced_button.config(text=tr(self.lang, "hide_advanced" if self.advanced_visible else "show_advanced"))
         self._update_tutorial()
+        self._update_acknowledgements()
+        if hasattr(self, "text_template_hint_label"):
+            self._update_text_shape_hint()
+        if hasattr(self, "text_coverage_label"):
+            self._update_text_coverage_status()
+        if self._resource_monitor_snapshot is not None:
+            self._apply_resource_snapshot(self._resource_monitor_snapshot)
         self.status.set(tr(self.lang, "ready"))
 
     def _update_tutorial(self):
@@ -1472,9 +5146,20 @@ class App:
         self.tutorial_text.insert(END, tr(self.lang, "tutorial"))
         self.tutorial_text.config(state="disabled")
 
+    def _update_acknowledgements(self):
+        self.acknowledgements_text.config(state="normal")
+        self.acknowledgements_text.delete("1.0", END)
+        self.acknowledgements_text.insert(END, get_acknowledgements(self.lang))
+        self.acknowledgements_text.config(state="disabled")
+
     def _update_setting_description(self, _event=None):
+        if not self._widget_alive(getattr(self, "setting_description", None)):
+            return
         item = self._selected_setting()
-        self.setting_description.config(text=item["description"] if item else "No settings profiles found.")
+        try:
+            self.setting_description.config(text=item["description"] if item else "No settings profiles found.")
+        except TclError:
+            return
         if item and self.use_custom_settings.get() != "1":
             values = item.get("values", {})
             self.custom_stop_at.set(values.get("stopAt", "3000"))
@@ -1483,6 +5168,18 @@ class App:
             self.custom_mutated_samples.set(values.get("mutatedSamples", "1000"))
             self.custom_save_at.set(values.get("saveAt", values.get("stopAt", "3000")))
             self.custom_preprocess_mode.set(values.get("preprocessMode", "none"))
+            self._set_preprocess_mode(
+                normalize_preprocess_mode(values.get("preprocessMode", "none")),
+                refresh_ui=True,
+            )
+
+    def _sync_preprocess_from_custom(self, *_args):
+        if self.use_custom_settings.get() != "1":
+            return
+        self.preprocess_mode.set(normalize_preprocess_mode(self.custom_preprocess_mode.get()))
+        self._refresh_preprocess_mode_combo()
+        if self._preview_filter_cards:
+            self._highlight_preview_filter_cards()
 
     def _sync_custom_state(self):
         state = "normal" if self.use_custom_settings.get() == "1" else "disabled"
@@ -1493,9 +5190,17 @@ class App:
 
     def _effective_setting(self):
         setting = self._selected_setting()
-        if not setting or self.use_custom_settings.get() != "1":
-            return setting
-        return write_custom_settings(setting, self._custom_values())
+        if not setting:
+            return None
+        overlay = {}
+        if self.use_custom_settings.get() == "1":
+            overlay.update(self._custom_values())
+        mode = self._selected_preprocess_mode()
+        if mode != PREPROCESS_NONE:
+            overlay["preprocessMode"] = mode
+        if overlay:
+            return write_custom_settings(setting, overlay)
+        return setting
 
     def _custom_values(self):
         custom = {
@@ -1579,10 +5284,12 @@ class App:
     def _render_lists(self):
         self.image_list.delete(0, END)
         for path in self.images:
-            self.image_list.insert(END, str(path))
+            self.image_list.insert(END, self._image_list_display(path))
         self.json_list.delete(0, END)
         for path in self.json_files:
-            self.json_list.insert(END, str(path))
+            self.json_list.insert(END, self._json_list_display(path))
+        self._update_import_layer_info()
+        self._refresh_generate_compare()
 
     def _add_json_paths(self, paths):
         added = 0
@@ -1608,8 +5315,9 @@ class App:
                 self.log_line(message)
         return added
 
-    def _queue_generated_outputs(self, image_path, before):
-        after = generated_jsons(image_path)
+    def _queue_generated_outputs(self, source_image, before, *, generator_input=None, preprocess_mode=None):
+        generator_input = Path(generator_input or source_image)
+        after = generated_jsons(generator_input)
         new_outputs = best_geometry_jsons([path for path in after if path.resolve() not in before])
         if not new_outputs and after:
             new_outputs = best_geometry_jsons(after[:1])
@@ -1618,12 +5326,29 @@ class App:
                 self.outputs.append(output)
             if output not in self.json_files:
                 self.json_files.append(output)
-            self.queue.put(("log", f"Generated: {output}"))
+            mode = normalize_preprocess_mode(preprocess_mode) if preprocess_mode else PREPROCESS_NONE
+            if mode == PREPROCESS_NONE:
+                path_mode = preprocess_mode_for_path(output)
+                if path_mode:
+                    mode = path_mode
+            if mode == PREPROCESS_NONE:
+                self.queue.put(("log", tr(self.lang, "generate_log_output_plain").format(path=output.name)))
+            else:
+                self.queue.put(
+                    (
+                        "log",
+                        tr(self.lang, "generate_log_output_filter").format(
+                            filter=self._filter_label(mode), path=output.name
+                        ),
+                    )
+                )
         return new_outputs
 
     def log_line(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
         self._record_detail(f"UI: {message}")
+        if not hasattr(self, "log"):
+            return
         self.log.insert(END, f"[{timestamp}] {message}\n")
         self.log.see(END)
 
@@ -1722,7 +5447,7 @@ class App:
         )
         if not output:
             return
-        text = self._build_detailed_log_text()
+        text = redact_sensitive_log_text(self._build_detailed_log_text())
         try:
             Path(output).write_text(text, encoding="utf-8")
         except OSError as exc:
@@ -1733,21 +5458,23 @@ class App:
     def start_update_check(self):
         if self.closed or self.update_check_started:
             return
+        if not updates_enabled():
+            self.update_state = {"status": "disabled"}
+            return
         self.update_check_started = True
         threading.Thread(target=self._update_check_worker, daemon=True).start()
 
     def _update_check_worker(self):
         try:
-            version_source = fetch_text_url(UPDATE_VERSION_URL)
-            latest_version = parse_version_source(version_source)
-        except (OSError, ValueError, urllib.error.URLError) as exc:
+            latest_version = fetch_latest_release_version()
+        except (OSError, ValueError, urllib.error.URLError, json.JSONDecodeError) as exc:
             self.queue.put(("update_failed", str(exc)))
             return
 
         changelog = ""
         try:
             changelog = fetch_text_url(UPDATE_CHANGELOG_URL)
-        except (OSError, urllib.error.URLError) as exc:
+        except (OSError, urllib.error.URLError, ValueError) as exc:
             self._record_detail(f"Update changelog fetch failed: {exc}")
 
         payload = {
@@ -1835,7 +5562,7 @@ class App:
             fg=COLOR_TEXT,
             insertbackground=COLOR_TEXT,
             selectbackground=COLOR_ACCENT_DARK,
-            selectforeground="#ffffff",
+            selectforeground=COLOR_SELECT_FG,
             highlightthickness=1,
             highlightbackground=COLOR_BORDER,
             relief="flat",
@@ -1874,9 +5601,9 @@ class App:
             text=tr(self.lang, "update_open_page"),
             command=open_update_page,
             bg=COLOR_ACCENT_DARK,
-            fg="#ffffff",
+            fg=COLOR_SELECT_FG,
             activebackground=COLOR_ACCENT,
-            activeforeground="#ffffff",
+            activeforeground=COLOR_SELECT_FG,
             relief="flat",
             bd=0,
             padx=12,
@@ -1898,7 +5625,7 @@ class App:
         seconds = max(0, int(round(seconds)))
         hours, remainder = divmod(seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
-        suffix = {"zh": "剩余", "ko": "남음"}.get(self.lang, "left")
+        suffix = eta_suffix(self.lang)
         if hours:
             return f"{hours}h {minutes:02d}m {suffix}"
         if minutes:
@@ -2027,7 +5754,7 @@ class App:
             return (
                 "GPU generator crashed with Windows access violation 0xC0000005. "
                 "This is usually an OpenCL/GPU driver or generator runtime crash, not an import error. "
-                "Try a lower preset, lower Max resolution / Random samples, update the GPU driver, "
+                "Try a lower preset, a lower Max Resolution / Random Samples, update the GPU driver, "
                 "or convert the source image to a normal PNG/JPG path and retry."
             )
         if returncode == 3221226505:
@@ -2050,6 +5777,7 @@ class App:
                 added_paths.append(path)
                 self._load_existing_checkpoints_for_image(path)
         self._render_lists()
+        self._sync_color_picker_images()
         if files:
             self.show_source_preview(Path(files[0]))
         if added_paths:
@@ -2068,8 +5796,8 @@ class App:
             except IndexError:
                 pass
         self._render_lists()
-        self.preview_label.config(image="", text=tr(self.lang, "preview_hint"))
-        self.preview_label.image = None
+        self._sync_color_picker_images()
+        self._refresh_generate_compare()
 
     def _unique_preset_destination(self, source_path):
         USER_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -2145,20 +5873,67 @@ class App:
         selection = self.image_list.curselection()
         if selection:
             self.show_source_preview(self.images[selection[0]])
+        self._refresh_generate_compare()
 
     def _preview_selected_json(self, _event=None):
         selection = self.json_list.curselection()
         if selection:
-            self.show_json_preview(self.json_files[selection[0]])
+            path = self.json_files[selection[0]]
+            self.show_json_preview(path)
+            self._update_import_layer_info(path)
+
+    def _on_layer_count_changed(self, *_args):
+        self._update_import_layer_info()
+
+    def _update_import_layer_info(self, json_path=None):
+        from generator_backend import geometry_shape_count
+
+        if json_path is None:
+            selection = self.json_list.curselection()
+            if selection:
+                json_path = self.json_files[selection[0]]
+            elif self.json_files:
+                json_path = self.json_files[-1]
+        if not json_path:
+            self.layer_count_info.set(tr(self.lang, "layer_import_info"))
+            return
+        try:
+            json_layers = geometry_shape_count(json_path)
+            name = Path(json_path).name
+            template_text = self.layer_count.get().strip()
+            if not template_text:
+                self.layer_count_info.set(
+                    f"Selected {name}: {json_layers} drawable layers. Enter your in-game template layer count."
+                )
+                return
+            template_layers = int(template_text)
+            usable = max(0, template_layers - 4)
+            message = f"Selected {name}: {json_layers} drawable layers | Template: {template_layers} (usable ~{usable})"
+            if json_layers > usable:
+                message += " — template too small (+4 boundary layers required)"
+            elif json_layers < max(1, int(usable * 0.75)):
+                message += " — JSON may look sparse on this template"
+            else:
+                message += " — fit looks OK"
+            self.layer_count_info.set(message)
+        except (OSError, ValueError, TypeError) as exc:
+            self.layer_count_info.set(f"Selected {Path(json_path).name}: unable to read layer count ({exc})")
 
     def _active_preview_label(self):
-        if hasattr(self, "tabs") and hasattr(self, "import_preview_label"):
-            try:
-                if self.tabs.select() == str(self.import_tab):
-                    return self.import_preview_label
-            except Exception:
-                pass
-        return getattr(self, "preview_label", None)
+        if self._is_import_final_tab_active() and hasattr(self, "import_preview_label"):
+            return self.import_preview_label
+        return self._active_generation_result_label()
+
+    def _set_import_preview(self, data):
+        if not hasattr(self, "import_preview_label"):
+            return
+        if not data:
+            self.import_preview_label.config(image="", text=tr(self.lang, "preview_unavailable"), bg=COLOR_PREVIEW_BG, fg=COLOR_PREVIEW_FG)
+            self.import_preview_label.image = None
+            return
+        image = PhotoImage(data=data)
+        self.import_preview_label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+        self.import_preview_label.image = image
 
     def _preview_bounds(self, label=None):
         label = label or self._active_preview_label()
@@ -2186,8 +5961,10 @@ class App:
 
     def _refresh_current_preview(self):
         self.preview_resize_job = None
+        if self.closed:
+            return
         request = self.current_preview_request
-        if not request or self.closed:
+        if not request:
             return
         kind, path = request
         path = Path(path)
@@ -2202,43 +5979,57 @@ class App:
     def show_json_preview(self, path):
         path = Path(path)
         self.current_preview_request = ("json", path)
-        self.show_preview(render_geometry_json(path, self._preview_bounds()))
+        data = render_geometry_json(path, self._preview_bounds(self.import_preview_label))
+        self._set_import_preview(data)
 
     def show_preview(self, data):
         if not data:
             self.current_preview_request = None
             message = tr(self.lang, "preview_unavailable")
-            self.preview_label.config(image="", text=message, bg="#202020")
-            self.preview_label.image = None
-            if hasattr(self, "import_preview_label"):
-                self.import_preview_label.config(image="", text=message, bg="#202020")
-                self.import_preview_label.image = None
+            if self._is_import_final_tab_active():
+                self._set_import_preview(None)
+                if hasattr(self, "import_preview_label"):
+                    self.import_preview_label.config(text=message)
+            label = self._active_generation_result_label()
+            if label is not None:
+                label.config(image="", text=message, bg=COLOR_PREVIEW_BG, fg=COLOR_PREVIEW_FG)
+                label.image = None
             return
         self.photo = data
+        if self._is_import_final_tab_active():
+            self._set_import_preview(data)
+            return
+        label = self._active_generation_result_label()
+        if label is None:
+            return
         image = PhotoImage(data=data)
-        self.preview_label.config(image=image, text="", bg="#202020")
-        self.preview_label.image = image
-        if hasattr(self, "import_preview_label"):
-            import_image = PhotoImage(data=data)
-            self.import_preview_label.config(image=import_image, text="", bg="#202020")
-            self.import_preview_label.image = import_image
+        label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+        label.image = image
 
     def show_source_preview(self, path):
         path = Path(path)
         self.current_preview_request = ("source", path)
-        data = render_source_image(path, self._preview_bounds())
-        if data:
-            self.show_preview(data)
-            return
-        if Path(path).suffix.lower() in (".png", ".gif"):
-            self.show_preview_file(path, remember=False)
-            return
-        self.show_preview(None)
+        self._refresh_generate_compare()
 
     def show_preview_file(self, path, remember=True):
         path = Path(path)
         if remember:
             self.current_preview_request = ("file", path)
+        if path.suffix.lower() == ".json":
+            data = render_geometry_json(path, self._preview_bounds())
+            if data:
+                if hasattr(self, "generate_result_without_preview"):
+                    uses_filter = self._selected_preprocess_mode() != PREPROCESS_NONE
+                    label = self.generate_result_with_preview if uses_filter else self.generate_result_without_preview
+                    self._render_label_json_preview(label, path, "generate_no_checkpoint")
+                    self._refresh_generate_compare("result_with" if uses_filter else "result_without")
+                else:
+                    self.show_preview(data)
+                return
+        if hasattr(self, "generate_result_without_preview"):
+            label = self._active_generation_result_label()
+            self._render_label_image_preview(label, path, "generate_no_checkpoint")
+            return
         data = render_source_image(path, self._preview_bounds())
         if data:
             self.show_preview(data)
@@ -2249,12 +6040,11 @@ class App:
             self.show_preview(None)
             return
         self.photo = image
-        self.preview_label.config(image=image, text="", bg="#202020")
-        self.preview_label.image = image
-        if hasattr(self, "import_preview_label"):
-            import_image = PhotoImage(file=str(path))
-            self.import_preview_label.config(image=import_image, text="", bg="#202020")
-            self.import_preview_label.image = import_image
+        label = self._active_generation_result_label()
+        if label is None:
+            return
+        label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+        label.image = image
 
     def refresh_processes(self):
         self.processes = game_processes()
@@ -2356,8 +6146,24 @@ class App:
                     self.queue.put(("status", tr(self.lang, "stopped")))
                     return
                 self._reset_generation_eta()
-                before = {path.resolve() for path in generated_jsons(image_path)}
-                preview_path = generator_preview_path(image_path)
+                preprocess_mode = setting_preprocess_mode(setting)
+                input_image = preprocess_input_image(image_path, setting)
+                if preprocess_mode != PREPROCESS_NONE:
+                    self.queue.put(
+                        (
+                            "log",
+                            tr(self.lang, "generate_log_pipeline_filter").format(
+                                filter=self._filter_label(preprocess_mode),
+                                path=Path(input_image).name,
+                            ),
+                        )
+                    )
+                else:
+                    self.queue.put(("log", tr(self.lang, "generate_log_pipeline_plain")))
+                if input_image != image_path:
+                    self.queue.put(("log", f"Preprocessed image: {input_image}"))
+                before = {path.resolve() for path in generated_jsons(input_image)}
+                preview_path = generator_preview_path(input_image)
                 if preview_path.exists():
                     try:
                         preview_path.unlink()
@@ -2366,9 +6172,6 @@ class App:
                 self.queue.put(("log", f"Generating: {image_path}"))
                 self.queue.put(("preview_file", image_path))
                 flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-                input_image = preprocess_input_image(image_path, setting)
-                if input_image != image_path:
-                    self.queue.put(("log", f"Preprocessed image: {input_image}"))
                 cmd = build_generator_command(input_image, setting)
                 self._record_detail(f"GENERATOR COMMAND: {self._format_command(cmd)}")
                 self.queue.put(("log", f"Running GPU generator with {setting['path'].name}"))
@@ -2385,6 +6188,7 @@ class App:
                     encoding="utf-8",
                     errors="replace",
                     creationflags=flags,
+                    env=build_generator_env(),
                 )
                 if proc is None:
                     self.queue.put(("status", tr(self.lang, "stopped")))
@@ -2392,9 +6196,11 @@ class App:
                 with self.generation_lock:
                     self.current_generator_proc = proc
 
-                last_preview = None
+                last_json = None
                 last_preview_mtime = None
                 last_generator_message = None
+                next_preview_scan = 0.0
+                next_json_scan = 0.0
                 output_queue = queue.Queue()
 
                 def _read_generator_output():
@@ -2424,7 +6230,12 @@ class App:
                     while proc.poll() is None:
                         if self.shutdown_event.is_set():
                             self._terminate_process(proc)
-                            outputs = self._queue_generated_outputs(image_path, before)
+                            outputs = self._queue_generated_outputs(
+                                image_path, before, generator_input=input_image, preprocess_mode=preprocess_mode
+                            )
+                            self.queue.put(
+                                ("generation_preprocess", (str(Path(image_path).resolve()), preprocess_mode))
+                            )
                             for output in outputs:
                                 self.queue.put(("log", tr(self.lang, "checkpoint_available_after_failure").format(path=output)))
                             if outputs:
@@ -2432,17 +6243,22 @@ class App:
                             self.queue.put(("status", tr(self.lang, "stopped")))
                             return
                         _drain_generator_output()
-                        preview_files = generated_preview_files(input_image)
-                        if preview_files:
-                            newest_preview = preview_files[0]
-                            preview_mtime = newest_preview.stat().st_mtime
-                            if preview_mtime != last_preview_mtime:
-                                last_preview_mtime = preview_mtime
-                                self.queue.put(("preview_file", newest_preview))
-                        newest = generated_jsons(image_path)
-                        if newest and newest[0] != last_preview:
-                            last_preview = newest[0]
-                        time.sleep(0.1)
+                        now = time.monotonic()
+                        if now >= next_preview_scan:
+                            next_preview_scan = now + GENERATOR_PREVIEW_SCAN_SECONDS
+                            preview_files = generated_preview_files(input_image)
+                            if preview_files:
+                                newest_preview = preview_files[0]
+                                preview_mtime = newest_preview.stat().st_mtime
+                                if preview_mtime != last_preview_mtime:
+                                    last_preview_mtime = preview_mtime
+                                    self.queue.put(("preview_file", newest_preview))
+                        if now >= next_json_scan:
+                            next_json_scan = now + GENERATOR_JSON_SCAN_SECONDS
+                            newest = generated_jsons(input_image)
+                            if newest and newest[0] != last_json:
+                                last_json = newest[0]
+                        time.sleep(GENERATOR_POLL_SLEEP_SECONDS)
                     if self.shutdown_event.is_set():
                         return
                     reader.join(timeout=1)
@@ -2454,7 +6270,12 @@ class App:
                             self.current_generator_proc = None
                 if proc.returncode != 0:
                     self._record_detail(f"GENERATOR EXIT: {proc.returncode}")
-                    outputs = self._queue_generated_outputs(image_path, before)
+                    outputs = self._queue_generated_outputs(
+                        image_path, before, generator_input=input_image, preprocess_mode=preprocess_mode
+                    )
+                    self.queue.put(
+                        ("generation_preprocess", (str(Path(image_path).resolve()), preprocess_mode))
+                    )
                     for output in outputs:
                         self.queue.put(("log", tr(self.lang, "checkpoint_available_after_failure").format(path=output)))
                     if outputs:
@@ -2463,13 +6284,18 @@ class App:
                     self.queue.put(("status", tr(self.lang, "failed")))
                     return
                 self._record_detail("GENERATOR EXIT: 0")
-                new_outputs = self._queue_generated_outputs(image_path, before)
+                new_outputs = self._queue_generated_outputs(
+                    image_path, before, generator_input=input_image, preprocess_mode=preprocess_mode
+                )
+                self.queue.put(
+                    ("generation_preprocess", (str(Path(image_path).resolve()), preprocess_mode))
+                )
                 if not new_outputs:
                     self.queue.put(("log", "Generator finished but no JSON output was found."))
                     self.queue.put(("status", tr(self.lang, "failed")))
                     return
                 for output in new_outputs:
-                    preview_files = generated_preview_files(image_path)
+                    preview_files = generated_preview_files(input_image)
                     if preview_files:
                         self.queue.put(("preview_file", preview_files[0]))
                     else:
@@ -2495,12 +6321,14 @@ class App:
         ROOT.mkdir(parents=True, exist_ok=True)
         os.startfile(ROOT)
 
-    def run_subprocess(self, cmd, timeout=None):
+    def run_subprocess(self, cmd, timeout=None, extra_env=None):
         self._record_detail(f"HELPER COMMAND: {self._format_command(cmd)}")
         self.queue.put(("log", self._friendly_command_name(cmd)))
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         env = os.environ.copy()
         env.update({"FORZA_PAINTER_NO_ELEVATE": "1", "FORZA_PAINTER_NO_PAUSE": "1"})
+        if extra_env:
+            env.update(extra_env)
         if self.shutdown_event.is_set():
             self._record_detail("HELPER EXIT: 130 before start")
             return 130
@@ -2609,6 +6437,11 @@ class App:
             return raw
         if raw.startswith("Writing layer") or raw == "DONE!" or raw.startswith("The ideal background color"):
             return raw
+        if "access is denied" in lower or "winerror 5" in lower or "permissionerror" in lower:
+            return (
+                "Windows denied access to the FH6 process. "
+                "The app should already request administrator rights on startup."
+            )
         if "openprocess" in lower or "error" in lower or "failed" in lower or "traceback" in lower:
             return raw
         if raw.startswith("<class 'SystemExit'>") or raw.startswith("SystemExit: 0"):
@@ -2657,10 +6490,209 @@ class App:
         self.queue.put(("status", tr(self.lang, "done") if located else tr(self.lang, "failed")))
         return located
 
+    def _typecode_allow_unknown_shapes(self) -> bool:
+        return self.typecode_allow_unknown.get() == "1"
+
+    def _typecode_trim_enabled(self) -> bool:
+        return self.typecode_trim_after_import.get() == "1"
+
+    def _resolve_import_locations(self, pid, game: str, layer_count: str):
+        user_manual = bool(parse_hex_or_empty(self.count_address.get()) or parse_hex_or_empty(self.table_address.get()))
+        count_address = None
+        table_address = None
+        group_address = None
+        import_env = {}
+        if user_manual:
+            try:
+                count_value = parse_hex_or_empty(self.count_address.get())
+                table_value = parse_hex_or_empty(self.table_address.get())
+                if count_value:
+                    count_address = parse_safe_hex_address(count_value)
+                if table_value:
+                    table_address = parse_safe_hex_address(table_value)
+            except ValueError as exc:
+                raise ValueError(f"Invalid advanced memory address: {exc}") from exc
+            import_env["FORZA_PAINTER_ALLOW_MANUAL_ADDRESSES"] = "1"
+        if not count_address and not table_address and game == "fh6":
+            session = load_session_location()
+            if session_matches_current_import(session, game, pid, layer_count):
+                pid = int(session["pid"])
+                count_address = int(session["count_address"])
+                table_address = int(session["table_address"])
+                group_address = session.get("group_address")
+                if group_address is not None:
+                    group_address = int(group_address)
+                import_env["FORZA_PAINTER_TRUSTED_LOCATOR"] = "1"
+                self.queue.put(("log", tr(self.lang, "located")))
+            elif pid and layer_count:
+                self.queue.put(("log", tr(self.lang, "locating")))
+                located = self._auto_locate_worker(pid, layer_count)
+                session = load_session_location()
+                if located and session_matches_current_import(session, game, pid, layer_count):
+                    pid = int(session["pid"])
+                    count_address = int(session["count_address"])
+                    table_address = int(session["table_address"])
+                    group_address = session.get("group_address")
+                    if group_address is not None:
+                        group_address = int(group_address)
+                    import_env["FORZA_PAINTER_TRUSTED_LOCATOR"] = "1"
+                else:
+                    raise RuntimeError("FH6 layer table could not be located.")
+        if count_address and "FORZA_PAINTER_TRUSTED_LOCATOR" not in import_env and "FORZA_PAINTER_ALLOW_MANUAL_ADDRESSES" not in import_env:
+            import_env["FORZA_PAINTER_TRUSTED_LOCATOR"] = "1"
+        if group_address is None and count_address:
+            profile = PROFILES.get(game)
+            if profile:
+                group_address = int(count_address) - profile.livery_count_offset
+        return {
+            "pid": int(pid),
+            "count_address": count_address,
+            "table_address": table_address,
+            "group_address": group_address,
+            "import_env": import_env,
+        }
+
+    def _import_typecode_json_file(self, path: Path, locations: dict, layer_count: str) -> int:
+        table_address = locations.get("table_address")
+        if not table_address:
+            raise RuntimeError("Layer table address is required for handmade import.")
+        TYPECODE_IMPORT_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", path.stem).strip("._") or "import"
+        backup = TYPECODE_IMPORT_DIR / f"{safe}-{stamp}.backup.json"
+        report = TYPECODE_IMPORT_DIR / f"{safe}-{stamp}.report.json"
+        allow_unknown = self._typecode_allow_unknown_shapes()
+        shape_count = typecode_shape_count(path, allow_unknown_low_byte=allow_unknown)
+        cmd = [
+            *helper_command("fh6_import_typecode_json"),
+            "--pid",
+            str(locations["pid"]),
+            "--table",
+            f"0x{int(table_address):x}",
+            "--json",
+            str(path.resolve()),
+            "--backup",
+            str(backup),
+            "--report",
+            str(report),
+            "--write",
+            "--compact-supported-layers",
+            "--clear-unused",
+            "--template-count",
+            str(layer_count),
+        ]
+        if allow_unknown:
+            cmd.append("--allow-unknown-low-byte")
+        code = self.run_subprocess(cmd, extra_env=locations.get("import_env", {}))
+        if code != 0:
+            return code
+        if self._typecode_trim_enabled() and shape_count > 0:
+            code = self._trim_typecode_group_count(locations, shape_count)
+        return code
+
+    def _trim_typecode_group_count(self, locations: dict, new_count: int) -> int:
+        group_address = locations.get("group_address")
+        table_address = locations.get("table_address")
+        if not group_address:
+            self.queue.put(("log", tr(self.lang, "typecode_missing_group")))
+            return 1
+        TYPECODE_IMPORT_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup = TYPECODE_IMPORT_DIR / f"trim-{stamp}.backup.json"
+        cmd = [
+            *helper_command("fh6_trim_group_count"),
+            "--pid",
+            str(locations["pid"]),
+            "--group",
+            f"0x{int(group_address):x}",
+            "--new-count",
+            str(int(new_count)),
+            "--backup",
+            str(backup),
+            "--trim-vector-end",
+            "--write",
+        ]
+        if table_address:
+            cmd.extend(["--table", f"0x{int(table_address):x}"])
+        code = self.run_subprocess(cmd, extra_env=locations.get("import_env", {}))
+        if code == 0:
+            self.queue.put(("log", tr(self.lang, "typecode_trim_done").format(count=new_count)))
+        else:
+            self.queue.put(("log", tr(self.lang, "typecode_trim_failed").format(error=f"exit {code}")))
+        return code
+
+    def start_export_typecode_json(self):
+        layer_count = self.layer_count.get().strip()
+        if not layer_count:
+            self.log_line(tr(self.lang, "layer_count_required"))
+            return
+        pid = self.ensure_live_game_pid()
+        if not pid:
+            return
+        self.status.set(tr(self.lang, "running"))
+        threading.Thread(target=self._export_typecode_worker, args=(pid, layer_count), daemon=True).start()
+
+    def _export_typecode_worker(self, pid, layer_count: str):
+        game = self.selected_game.get() or "fh6"
+        try:
+            locations = self._resolve_import_locations(pid, game, layer_count)
+        except (ValueError, RuntimeError) as exc:
+            self.queue.put(("log", str(exc)))
+            self.queue.put(("status", tr(self.lang, "failed")))
+            return
+        table_address = locations.get("table_address")
+        group_address = locations.get("group_address")
+        if not table_address:
+            self.queue.put(("log", tr(self.lang, "typecode_missing_group")))
+            self.queue.put(("status", tr(self.lang, "failed")))
+            return
+        TYPECODE_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        output = TYPECODE_EXPORT_DIR / f"fh6-export-{stamp}.json"
+        report = output.with_suffix(".report.json")
+        cmd = [
+            *helper_command("fh6_export_typecode_json"),
+            "--pid",
+            str(locations["pid"]),
+            "--table",
+            f"0x{int(table_address):x}",
+            "--count",
+            str(layer_count),
+            "--out",
+            str(output),
+            "--report",
+            str(report),
+            "--skip-transparent",
+        ]
+        if group_address:
+            cmd.extend(["--group", f"0x{int(group_address):x}"])
+        code = self.run_subprocess(cmd, extra_env=locations.get("import_env", {}))
+        if code != 0:
+            self.queue.put(("status", tr(self.lang, "failed")))
+            return
+        try:
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            count = len(payload.get("shapes", []))
+        except (OSError, json.JSONDecodeError):
+            count = 0
+        self.queue.put(("log", tr(self.lang, "typecode_export_done").format(count=count, path=output)))
+        if hasattr(self, "handmade_json_files") and output not in self.handmade_json_files:
+            self.handmade_json_files.append(output)
+            self.queue.put(("render_handmade_lists", None))
+        self.queue.put(("status", tr(self.lang, "done")))
+
     def start_import(self):
         if not self.json_files:
             self.log_line("No JSON files selected.")
             return
+        layer_count = self.layer_count.get().strip()
+        if not layer_count:
+            self.log_line(tr(self.lang, "layer_count_required"))
+            if hasattr(self, "layer_count_entry"):
+                self.layer_count_entry.config(highlightbackground=COLOR_WARN, highlightthickness=1)
+            return
+        if hasattr(self, "layer_count_entry"):
+            self.layer_count_entry.config(highlightbackground=COLOR_BORDER, highlightthickness=0)
         pid = self.ensure_live_game_pid()
         if not pid:
             return
@@ -2669,40 +6701,41 @@ class App:
 
     def _import_worker(self, pid):
         game = self.selected_game.get() or "fh6"
-        count_address = parse_hex_or_empty(self.count_address.get())
-        table_address = parse_hex_or_empty(self.table_address.get())
         layer_count = self.layer_count.get().strip()
-        if not count_address and not table_address and game == "fh6":
-            session = load_session_location()
-            if session_matches_current_import(session, game, pid, layer_count):
-                pid = int(session["pid"])
-                count_address = "0x{:x}".format(int(session["count_address"]))
-                table_address = "0x{:x}".format(int(session["table_address"]))
-                self.queue.put(("log", tr(self.lang, "located")))
-            elif pid and layer_count:
-                self.queue.put(("log", tr(self.lang, "locating")))
-                located = self._auto_locate_worker(pid, layer_count)
-                session = load_session_location()
-                if located and session_matches_current_import(session, game, pid, layer_count):
-                    count_address = "0x{:x}".format(int(session["count_address"]))
-                    table_address = "0x{:x}".format(int(session["table_address"]))
-                else:
-                    self.queue.put(("status", tr(self.lang, "failed")))
-                    return
+        try:
+            locations = self._resolve_import_locations(pid, game, layer_count)
+        except ValueError as exc:
+            self.queue.put(("log", str(exc)))
+            self.queue.put(("status", tr(self.lang, "failed")))
+            return
+        except RuntimeError:
+            self.queue.put(("status", tr(self.lang, "failed")))
+            return
+        pid = locations["pid"]
+        count_address = locations.get("count_address")
+        table_address = locations.get("table_address")
+        import_env = locations.get("import_env", {})
         for path in list(self.json_files):
+            path = Path(path)
             if game == "fh6" and layer_count:
                 self._check_json_layer_fit(path, layer_count)
-            cmd = [*helper_command("main"), "--game", game, "--no-preview"]
-            if pid:
-                cmd.extend(["--pid", str(pid)])
+            if is_typecode_geometry_json(path):
+                self.queue.put(("log", tr(self.lang, "typecode_import_mode").format(name=path.name)))
+                code = self._import_typecode_json_file(path, locations, layer_count)
+                if code != 0:
+                    self.queue.put(("status", tr(self.lang, "failed")))
+                    return
+                self.queue.put(("log", tr(self.lang, "typecode_import_done").format(name=path.name)))
+                continue
+            cmd = [*helper_command("main"), "--game", game, "--no-preview", "--pid", str(pid)]
             if count_address:
-                cmd.extend(["--layer-count-address", count_address])
+                cmd.extend(["--layer-count-address", f"0x{int(count_address):x}"])
             if table_address:
-                cmd.extend(["--layer-table-address", table_address])
+                cmd.extend(["--layer-table-address", f"0x{int(table_address):x}"])
             if game == "fh6" and layer_count:
                 cmd.extend(["--layer-count-value", str(layer_count)])
-            cmd.append(path)
-            code = self.run_subprocess(cmd)
+            cmd.append(str(path.resolve()))
+            code = self.run_subprocess(cmd, extra_env=import_env)
             if code != 0:
                 self.queue.put(("status", tr(self.lang, "failed")))
                 return
@@ -2826,17 +6859,47 @@ class App:
             elif kind == "preview":
                 self.show_preview(payload)
             elif kind == "preview_json":
-                self.show_json_preview(payload)
+                self.show_preview_file(payload)
+                self._refresh_generate_compare()
             elif kind == "preview_file":
                 self.show_preview_file(payload)
             elif kind == "render_lists":
                 self._render_lists()
+            elif kind == "render_handmade_lists":
+                self._render_handmade_list()
+            elif kind == "preview_filters_ready":
+                source_key, filter_payload = payload
+                self._apply_preview_filters_ready(source_key, filter_payload)
+            elif kind == "preview_filters_failed":
+                _source_key, error = payload
+                self._preview_compute_running = False
+                self.preview_status_label.config(text=tr(self.lang, "preview_failed").format(error=error))
+                self.log_line(tr(self.lang, "preview_failed").format(error=error))
+            elif kind == "generation_preprocess":
+                image_key, preprocess_mode = payload
+                self._last_generation_preprocess[image_key] = normalize_preprocess_mode(preprocess_mode)
+                self._update_luma_status_label()
+                self._update_compare_column_headers()
+            elif kind == "text_json_done":
+                shape_mode = None
+                if len(payload) >= 3:
+                    payload, output, shape_mode = payload[0], payload[1], payload[2]
+                else:
+                    payload, output = payload[0], payload[1]
+                self._finish_text_json(payload, output, shape_mode=shape_mode)
+            elif kind == "text_fonts_ready":
+                self._apply_text_fonts_by_script(payload)
+            elif kind == "text_ocr_result":
+                self._text_panel(self._active_text_script())["input"].set(payload)
+                self._schedule_text_coverage_check()
             elif kind == "update_failed":
                 self._handle_update_failed(payload)
             elif kind == "update_current":
                 self._handle_update_current(payload)
             elif kind == "update_available":
                 self._handle_update_available(payload)
+            elif kind == "resource_monitor":
+                self._apply_resource_snapshot(payload)
         if not self.closed:
             self.root.after(100, self._poll_queue)
 
@@ -2845,14 +6908,45 @@ class App:
 
 
 def main():
-    if len(sys.argv) >= 3 and sys.argv[1] == "--helper":
-        run_embedded_helper(sys.argv[2], sys.argv[3:])
-        return
-    parser = argparse.ArgumentParser(description=f"Standalone {APP_DISPLAY_NAME} desktop app.")
-    parser.add_argument("--version", action="version", version=f"{APP_DISPLAY_NAME} {__version__}")
-    parser.add_argument("images", nargs="*", help="Optional image files to preload.")
-    args = parser.parse_args()
-    App(args.images).run()
+    # Best-effort crash reporting for windowed one-file EXEs (no console output).
+    fault_path = None
+    try:
+        for candidate in _startup_crash_report_paths():
+            try:
+                candidate.parent.mkdir(parents=True, exist_ok=True)
+                fault_path = candidate
+                break
+            except Exception:
+                continue
+        if fault_path is not None:
+            try:
+                faulthandler.enable(open(fault_path, "a", encoding="utf-8", errors="replace"))
+            except Exception:
+                pass
+
+        if len(sys.argv) >= 3 and sys.argv[1] == "--helper":
+            run_embedded_helper(sys.argv[2], sys.argv[3:])
+            return
+        ensure_elevated_or_exit()
+        parser = argparse.ArgumentParser(description=f"Standalone {APP_DISPLAY_NAME} desktop app.")
+        parser.add_argument("--version", action="version", version=f"{APP_DISPLAY_NAME} {__version__}")
+        parser.add_argument("images", nargs="*", help="Optional image files to preload.")
+        args = parser.parse_args()
+        App(args.images).run()
+    except SystemExit:
+        raise
+    except BaseException as exc:
+        written = _write_startup_crash_report(exc)
+        try:
+            # Show something user-visible when possible (even in --windowed mode).
+            path_text = f"\n\nCrash report: {written}" if written else ""
+            messagebox.showerror(
+                APP_DISPLAY_NAME,
+                f"The app failed to start.{path_text}\n\n{type(exc).__name__}: {exc}",
+            )
+        except Exception:
+            pass
+        raise
 
 
 if __name__ == "__main__":

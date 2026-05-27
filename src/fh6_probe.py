@@ -13,7 +13,17 @@ import psutil
 
 from app_paths import ROOT, SOURCE_DIR
 from game_profiles import get_profile
-from native import dereference_pointer, get_base_address, read_int, read_process_memory
+from native import (
+    ProcessMemoryError,
+    dereference_pointer,
+    get_base_address,
+    open_process_handle,
+    read_int,
+    read_process_memory,
+    release_process,
+)
+from security_policy import MAX_LAYER_BLOB_BYTES, MAX_MEMORY_READ_BYTES
+from utils import parse_int
 
 
 MEM_COMMIT = 0x1000
@@ -65,29 +75,24 @@ def is_readable(protect):
 
 
 def iter_regions(pid, min_address=0x10000, max_address=0x7FFFFFFFFFFF, type_filter=None, writable_only=True):
-    handle = kernel32.OpenProcess(0x0410, False, pid)
-    if not handle:
-        raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        address = min_address
-        info = MEMORY_BASIC_INFORMATION()
-        while address < max_address:
-            result = kernel32.VirtualQueryEx(handle, address, ctypes.byref(info), ctypes.sizeof(info))
-            if not result:
-                address += 0x10000
-                continue
-            base = int(info.BaseAddress)
-            size = int(info.RegionSize)
-            type_ok = type_filter is None or int(info.Type) == type_filter
-            protect_ok = is_readable_writable(info.Protect) if writable_only else is_readable(info.Protect)
-            if info.State == MEM_COMMIT and type_ok and protect_ok:
-                yield base, size, int(info.Protect), int(info.Type)
-            next_address = base + size
-            if next_address <= address:
-                break
-            address = next_address
-    finally:
-        kernel32.CloseHandle(handle)
+    handle = open_process_handle(pid, write=False)
+    address = min_address
+    info = MEMORY_BASIC_INFORMATION()
+    while address < max_address:
+        result = kernel32.VirtualQueryEx(handle, address, ctypes.byref(info), ctypes.sizeof(info))
+        if not result:
+            address += 0x10000
+            continue
+        base = int(info.BaseAddress)
+        size = int(info.RegionSize)
+        type_ok = type_filter is None or int(info.Type) == type_filter
+        protect_ok = is_readable_writable(info.Protect) if writable_only else is_readable(info.Protect)
+        if info.State == MEM_COMMIT and type_ok and protect_ok:
+            yield base, size, int(info.Protect), int(info.Type)
+        next_address = base + size
+        if next_address <= address:
+            break
+        address = next_address
 
 
 def is_user_pointer(value):
@@ -97,17 +102,15 @@ def is_user_pointer(value):
 def is_private_writable_address(pid, address):
     if not is_user_pointer(address):
         return False
-    handle = kernel32.OpenProcess(0x0410, False, pid)
-    if not handle:
-        return False
     try:
-        info = MEMORY_BASIC_INFORMATION()
-        result = kernel32.VirtualQueryEx(handle, address, ctypes.byref(info), ctypes.sizeof(info))
-        if not result:
-            return False
-        return info.State == MEM_COMMIT and is_readable_writable(info.Protect)
-    finally:
-        kernel32.CloseHandle(handle)
+        handle = open_process_handle(pid, write=False)
+    except (ProcessMemoryError, OSError):
+        return False
+    info = MEMORY_BASIC_INFORMATION()
+    result = kernel32.VirtualQueryEx(handle, address, ctypes.byref(info), ctypes.sizeof(info))
+    if not result:
+        return False
+    return info.State == MEM_COMMIT and is_readable_writable(info.Protect)
 
 
 def read_pointer(pid, address):
@@ -122,12 +125,6 @@ def read_float_pair(pid, address):
     if len(raw) != 8:
         return None
     return struct.unpack("ff", raw)
-
-
-def parse_int(value):
-    if value is None:
-        return None
-    return int(str(value), 0)
 
 
 def format_bytes(raw, width=16):
@@ -362,6 +359,7 @@ def load_update_code_patterns():
 
 
 def read_region(pid, base, size, max_size=256 * 1024 * 1024):
+    max_size = min(max_size, MAX_MEMORY_READ_BYTES)
     if size <= 0 or size > max_size:
         return b""
     try:
@@ -1405,7 +1403,12 @@ def main():
     parser.add_argument("--auto-locate", action="store_true", help="Find a FH6 count/table pair from the current --layer-count.")
     parser.add_argument("--inspect-layers", type=int, default=12, help="Number of table entries to inspect.")
     parser.add_argument("--inspect-start", type=int, default=0, help="First table entry index for --inspect-table.")
-    parser.add_argument("--blob-size", type=parse_int, default=0x140, help="Layer blob bytes to read per pointer.")
+    parser.add_argument(
+        "--blob-size",
+        type=parse_int,
+        default=0x140,
+        help="Layer blob bytes to read per pointer.",
+    )
     parser.add_argument("--inspect-radius", type=parse_int, default=0x300, help="Bytes before/after count address to inspect.")
     parser.add_argument("--save-count-snapshot", default=None, help="Save all raw addresses currently containing --layer-count.")
     parser.add_argument("--compare-count-snapshot", default=None, help="Compare current --layer-count addresses with a previous snapshot.")
@@ -1419,6 +1422,12 @@ def main():
     parser.add_argument("--max-seconds", type=int, default=120, help="Stop after this many seconds.")
     parser.add_argument("--progress-every", type=int, default=64, help="Print progress every N scanned MB.")
     args = parser.parse_args()
+    if args.blob_size > MAX_LAYER_BLOB_BYTES:
+        print(
+            f"Clamping blob size from 0x{args.blob_size:x} to 0x{MAX_LAYER_BLOB_BYTES:x} for safety.",
+            flush=True,
+        )
+        args.blob_size = MAX_LAYER_BLOB_BYTES
 
     profile = get_profile(args.game)
     snapshot_modes = [
@@ -1492,4 +1501,7 @@ if __name__ == "__main__":
     if sys.maxsize <= 2**32:
         print("Use 64-bit Python.")
         sys.exit(1)
-    main()
+    try:
+        main()
+    finally:
+        release_process()

@@ -15,6 +15,22 @@ runtime/
 dist/
 build/
 
+# Local runtime artifacts (do not commit)
+forza-painter-*-log-*.txt
+forza-painter-startup-crash.txt
+imgs/luma-bands/
+imgs/filter-previews/
+imgs/**/*.png
+!docs/screenshots/**
+!assets/**
+*.preview*.png
+runtime/previews/
+runtime/settings/
+runtime/custom-settings/
+
+# Fetched at build/dev time (see scripts/fetch_librehardwaremonitor.ps1)
+bin/librehardwaremonitor/*.dll
+
 # Large/volatile FH6 diagnostics
 *count-*.json
 *memory-count-*.jsonl

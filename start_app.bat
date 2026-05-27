@@ -1,27 +1,42 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 set "ROOT=%~dp0"
 cd /d "%ROOT%" || (
     echo Cannot enter app folder: "%ROOT%"
     pause
     exit /b 1
 )
+
+:: Re-launch elevated once (UAC prompt) so FH6 memory access works without manual "Run as administrator"
+net session >nul 2>&1
+if errorlevel 1 (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "Start-Process -FilePath '%~f0' -Verb RunAs -WorkingDirectory '%ROOT%' -WindowStyle Hidden"
+    exit /b 0
+)
+
 set "PYTHONDONTWRITEBYTECODE=1"
-set "VENV_PYTHON=%ROOT%.venv\Scripts\python.exe"
+set "VENV_PYTHON=%ROOT%.venv\Scripts\pythonw.exe"
+set "VENV_PYTHON_CONSOLE=%ROOT%.venv\Scripts\python.exe"
 set "BOOTSTRAP=%ROOT%scripts\ensure_venv.bat"
 if not exist "%BOOTSTRAP%" (
     echo Required startup file is missing:
     echo "%BOOTSTRAP%"
-    echo.
-    echo Extract the whole release ZIP first, then run start_app.bat from the extracted folder.
     pause
     exit /b 1
 )
+
+:: Dependency setup may flash a console briefly on first run
 call "%BOOTSTRAP%"
 if errorlevel 1 (
     pause
     exit /b 1
 )
-"%VENV_PYTHON%" src\app.py
-pause
-exit /b %errorlevel%
+
+if not exist "%VENV_PYTHON%" (
+    set "VENV_PYTHON=%VENV_PYTHON_CONSOLE%"
+)
+
+:: Launch GUI without a lingering command window
+start "" /MIN "%VENV_PYTHON%" "%ROOT%src\app.py"
+exit /b 0
