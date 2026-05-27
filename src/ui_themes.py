@@ -1,21 +1,42 @@
 """
-UI color themes for the desktop app.
+Centralized UI color themes for the desktop app.
 
-The desktop UI is locked to dark mode for readable text and inputs.
-Other palettes remain in this module for a possible future UI overhaul.
+Themes are token palettes consumed via module-level COLOR_* globals on ``app``
+and ttk style configuration. Add a new ``Palette`` entry and i18n label to
+extend the set without touching individual widgets.
 """
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, Literal
 
-ThemeId = Literal["system", "dark", "light", "sakura", "elite"]
+ThemeId = Literal[
+    "eurocorp",
+    "elite",
+    "red_phosphorous",
+    "y2k",
+    "spirit_of_horizon",
+]
 
-THEME_IDS: tuple[str, ...] = ("system", "dark", "light", "sakura", "elite")
-APP_THEME_ID: ThemeId = "dark"
+THEME_IDS: tuple[str, ...] = (
+    "eurocorp",
+    "elite",
+    "red_phosphorous",
+    "y2k",
+    "spirit_of_horizon",
+)
+
+DEFAULT_THEME_ID: ThemeId = "eurocorp"
+
+# Maps persisted legacy ids to the current catalog.
+_LEGACY_THEME_IDS: dict[str, str] = {
+    "dark": "eurocorp",
+    "system": "eurocorp",
+    "light": "y2k",
+    "sakura": "spirit_of_horizon",
+}
 
 
 @dataclass(frozen=True)
@@ -40,121 +61,177 @@ class Palette:
     preview_fg: str
     select_fg: str = "#ffffff"
     button_active_fg: str = ""
+    frame_light: str = ""
+    frame_dark: str = ""
+    sash: str = ""
 
 
-# Desktop “tactical HUD” dark: deep charcoal, neon green + electric blue accents
-# (Steam/Discord legibility + Syndicate-style mission readout flourishes).
-DARK = Palette(
-    bg="#07070b",
-    panel="#101018",
-    panel_alt="#17171f",
-    input="#0d0f14",
-    text="#eef1f8",
-    muted="#8f96a8",
-    accent="#38b6ff",
-    accent_dark="#1e7db8",
-    warn="#ffc14d",
-    border="#2a3142",
-    button="#1e2533",
-    button_active="#283040",
-    hint="#e0b24a",
-    info="#5cc8ff",
-    success="#41ff9c",
-    error="#ff6b6b",
-    preview_bg="#141820",
-    preview_fg="#eef1f8",
-)
+def _with_frame_tokens(
+    palette: Palette,
+    *,
+    frame_light: str,
+    frame_dark: str,
+    sash: str,
+) -> Palette:
+    return replace(
+        palette,
+        frame_light=frame_light,
+        frame_dark=frame_dark,
+        sash=sash,
+    )
 
-LIGHT = Palette(
-    bg="#eef1f6",
-    panel="#ffffff",
-    panel_alt="#e2e8f0",
-    input="#ffffff",
-    text="#0f1419",
-    muted="#3d4f5f",
-    accent="#0969da",
-    accent_dark="#0550ae",
-    warn="#6b4a00",
-    border="#8b9cb3",
-    button="#d8e0ea",
-    button_active="#bcc8d6",
-    hint="#6b4a00",
-    info="#0550ae",
-    success="#116329",
-    error="#a40e26",
-    preview_bg="#c8d2dc",
-    preview_fg="#0f1419",
-    select_fg="#ffffff",
-    button_active_fg="#0f1419",
-)
 
-SAKURA = Palette(
-    bg="#ffe8ee",
-    panel="#ffffff",
-    panel_alt="#ffd6e2",
-    input="#fff8fa",
-    text="#14060c",
-    muted="#4a2230",
-    accent="#9b1530",
-    accent_dark="#c41e3a",
-    warn="#6b0f28",
-    border="#c76b82",
-    button="#ffc8d6",
-    button_active="#ffadc2",
-    hint="#6b0f28",
-    info="#9b1530",
-    success="#1b5e40",
-    error="#8b1028",
-    preview_bg="#1f0c12",
-    preview_fg="#ffe8ee",
-    select_fg="#ffffff",
-    button_active_fg="#14060c",
+# Current default appearance (formerly "dark").
+EUROCORP = _with_frame_tokens(
+    Palette(
+        bg="#07070b",
+        panel="#101018",
+        panel_alt="#17171f",
+        input="#0d0f14",
+        text="#eef1f8",
+        muted="#8f96a8",
+        accent="#38b6ff",
+        accent_dark="#1e7db8",
+        warn="#ffc14d",
+        border="#2a3142",
+        button="#1e2533",
+        button_active="#283040",
+        hint="#e0b24a",
+        info="#5cc8ff",
+        success="#41ff9c",
+        error="#ff6b6b",
+        preview_bg="#141820",
+        preview_fg="#eef1f8",
+    ),
+    frame_light="#3d4a5c",
+    frame_dark="#1a1f2a",
+    sash="#1f2633",
 )
 
 ELITE = Palette(
-    bg="#000000",
-    panel="#000000",
-    panel_alt="#0a0a0a",
-    input="#1a1a1a",
-    text="#ff9d00",
-    muted="#d48200",
-    accent="#ff9d00",
-    accent_dark="#ff9d00",
-    warn="#ff9d00",
-    border="#ff9d00",
-    button="#1a1a1a",
-    button_active="#ff9d00",
+    bg="#0a0a0a",
+    panel="#111111",
+    panel_alt="#1a0f00",
+    input="#1a0f00",
+    text="#ffa040",
+    muted="#cc7700",
+    accent="#ff8c00",
+    accent_dark="#ff6a00",
+    warn="#ffb347",
+    border="#cc5500",
+    button="#1a1208",
+    button_active="#ff7a00",
     hint="#ff9d00",
-    info="#ff9d00",
-    success="#ff9d00",
+    info="#ff8c00",
+    success="#ffb84d",
     error="#ff6a3d",
-    preview_bg="#000000",
-    preview_fg="#ff9d00",
-    select_fg="#000000",
-    button_active_fg="#000000",
+    preview_bg="#0a0a0a",
+    preview_fg="#ffa040",
+    select_fg="#0a0a0a",
+    button_active_fg="#0a0a0a",
+    frame_light="#cc5500",
+    frame_dark="#1a0f00",
+    sash="#1a0f00",
 )
 
+RED_PHOSPHOROUS = Palette(
+    bg="#0d0000",
+    panel="#110000",
+    panel_alt="#1a0000",
+    input="#1a0000",
+    text="#ff4444",
+    muted="#cc3333",
+    accent="#ff1a1a",
+    accent_dark="#cc0000",
+    warn="#ff6666",
+    border="#800000",
+    button="#1a0000",
+    button_active="#cc0000",
+    hint="#ff6666",
+    info="#ff1a1a",
+    success="#ff5555",
+    error="#ff3333",
+    preview_bg="#0d0000",
+    preview_fg="#ff4444",
+    select_fg="#0d0000",
+    button_active_fg="#0d0000",
+    frame_light="#800000",
+    frame_dark="#1a0000",
+    sash="#1a0000",
+)
 
-def detect_system_dark_mode() -> bool:
-    """True when the OS shell is using a dark appearance."""
-    if os.name == "nt":
-        try:
-            import winreg
+Y2K = Palette(
+    bg="#e8f4f8",
+    panel="#ffffff",
+    panel_alt="#d0eaf5",
+    input="#ffffff",
+    text="#003344",
+    muted="#336677",
+    accent="#00aaff",
+    accent_dark="#00cc66",
+    warn="#007799",
+    border="#66ccff",
+    button="#d0eaf5",
+    button_active="#b8e0f0",
+    hint="#008866",
+    info="#00aaff",
+    success="#00cc66",
+    error="#cc3366",
+    preview_bg="#c8e8f4",
+    preview_fg="#003344",
+    select_fg="#ffffff",
+    button_active_fg="#003344",
+    frame_light="#99ddff",
+    frame_dark="#b0d8ec",
+    sash="#b8e0f0",
+)
 
-            with winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
-            ) as key:
-                value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-                return int(value) == 0
-        except OSError:
-            pass
-    return True
+SPIRIT_OF_HORIZON = Palette(
+    bg="#f9f5f5",
+    panel="#ffffff",
+    panel_alt="#fff0f2",
+    input="#ffffff",
+    text="#1a1a1a",
+    muted="#5c4a4e",
+    accent="#e8002d",
+    accent_dark="#c40024",
+    warn="#b80028",
+    border="#f4a7b9",
+    button="#fff0f2",
+    button_active="#ffd6de",
+    hint="#f4a7b9",
+    info="#0099e6",
+    success="#e8002d",
+    error="#c40024",
+    preview_bg="#fff0f2",
+    preview_fg="#1a1a1a",
+    select_fg="#ffffff",
+    button_active_fg="#1a1a1a",
+    frame_light="#f4a7b9",
+    frame_dark="#ffd6de",
+    sash="#ffd6de",
+)
+
+_PALETTES: dict[str, Palette] = {
+    "eurocorp": EUROCORP,
+    "elite": ELITE,
+    "red_phosphorous": RED_PHOSPHOROUS,
+    "y2k": Y2K,
+    "spirit_of_horizon": SPIRIT_OF_HORIZON,
+}
+
+
+def normalize_theme_id(theme_id: str | None) -> str:
+    raw = (theme_id or "").strip().lower()
+    if not raw:
+        return DEFAULT_THEME_ID
+    if raw in _PALETTES:
+        return raw
+    return _LEGACY_THEME_IDS.get(raw, DEFAULT_THEME_ID)
 
 
 def resolve_palette(theme_id: str | None = None) -> Palette:
-    """Return the palette used by the desktop app (always dark)."""
-    return DARK
+    return _PALETTES[normalize_theme_id(theme_id)]
 
 
 def theme_settings_path(root: Path) -> Path:
@@ -162,16 +239,24 @@ def theme_settings_path(root: Path) -> Path:
 
 
 def load_saved_theme_id(root: Path) -> str:
-    return APP_THEME_ID
+    path = theme_settings_path(root)
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return DEFAULT_THEME_ID
+    return normalize_theme_id(raw)
 
 
 def save_theme_id(root: Path, theme_id: str) -> None:
     path = theme_settings_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(APP_THEME_ID + "\n", encoding="utf-8")
+    path.write_text(normalize_theme_id(theme_id) + "\n", encoding="utf-8")
 
 
 def palette_to_color_globals(palette: Palette) -> Dict[str, str]:
+    frame_light = palette.frame_light or palette.border
+    frame_dark = palette.frame_dark or palette.panel_alt
+    sash = palette.sash or palette.button
     return {
         "COLOR_BG": palette.bg,
         "COLOR_PANEL": palette.panel,
@@ -193,4 +278,7 @@ def palette_to_color_globals(palette: Palette) -> Dict[str, str]:
         "COLOR_PREVIEW_BG": palette.preview_bg,
         "COLOR_PREVIEW_FG": palette.preview_fg,
         "COLOR_SELECT_FG": palette.select_fg,
+        "COLOR_FRAME_LIGHT": frame_light,
+        "COLOR_FRAME_DARK": frame_dark,
+        "COLOR_SASH": sash,
     }

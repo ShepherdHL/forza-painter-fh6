@@ -117,12 +117,14 @@ def header_rule(parent: tk.Widget, *, height: int, bg: str, line: str) -> tk.Can
     """Single-pixel divider under the header cluster."""
     c = tk.Canvas(parent, height=height, bg=bg, highlightthickness=0, bd=0)
     c._chrome_bg = bg  # type: ignore[attr-defined] — read by app theme walker
+    c._chrome_line = line  # type: ignore[attr-defined]
     c.pack(fill=tk.X)
 
     def _draw(_event=None) -> None:
         c.delete("rule")
         w = max(1, c.winfo_width())
-        c.create_line(0, height // 2, w, height // 2, fill=line, width=1, tags="rule")
+        stroke = getattr(c, "_chrome_line", line)
+        c.create_line(0, height // 2, w, height // 2, fill=stroke, width=1, tags="rule")
 
     c.bind("<Configure>", _draw, add="+")
     return c

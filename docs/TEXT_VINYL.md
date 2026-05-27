@@ -11,7 +11,11 @@ fonts like SimSun may list as [SC] but will not draw Korean reliably.
 
 ## In the app
 
-Open the **Text vinyl** tab. Use the script sub-tabs:
+Open the **Text vinyl** tab (a dedicated workspace: settings and script tabs on the left,
+reference image + JSON previews on the right). Generated JSON stays on this tab until you
+click **Add to Import Final**, then continue in the **Import Final JSON** tab as usual.
+
+Use the script sub-tabs:
 
 | Tab | Use for | Font list |
 |-----|---------|-----------|
@@ -31,7 +35,8 @@ Each tab keeps its own text, font choice, and **Search fonts** filter. Shared op
 5. Set **Trace shape mode** (see table below) and match your FH6 template before import.
 6. Adjust **font size** and **trace cell size** (larger cell → fewer layers, less detail).
 7. Click **Generate from text**.
-8. Open **Import**, use the new JSON, and import as usual.
+8. Preview the JSON on the right, then click **Add to Import Final** when ready.
+9. Open **Import Final JSON** and import as usual.
 
 Default font priority favors Simplified Chinese faces (Microsoft YaHei, SimHei, Noto Sans SC), then Traditional Chinese, Japanese, and Korean fonts.
 
@@ -58,20 +63,6 @@ FH6 import only supports **rectangles** and **rotated ellipses** in geometry JSO
 
 This traces the pixels you see—not the in-game font—so complex custom logos work.
 
-### OCR (optional)
-
-1. Select a reference image.
-2. Click **Read text from image (OCR)** to fill the text box.
-3. Edit if needed, then **Generate from text**, or use **Trace from image** to keep the visual style.
-
-Install OCR support:
-
-```bat
-pip install -r requirements-text-ocr.txt
-```
-
-Install [Tesseract](https://github.com/tesseract-ocr/tesseract) with **Chinese (Simplified)** and **Japanese** language packs.
-
 ## Command line
 
 ```bat
@@ -81,7 +72,6 @@ python text_to_json.py --text "你好" --font "Microsoft YaHei [SC]" --output ..
 python text_to_json.py --text "カタカナ" --shape-mode ellipses --output ..\runtime\text-vinyl\katakana.json
 python text_to_json.py --text "ソニック" --shape-mode mixed --cell-size 3 --output ..\runtime\text-vinyl\sonic.json
 python text_to_json.py --image word.png --shape-mode rectangles --output ..\runtime\text-vinyl\traced.json --cell-size 3
-python text_to_json.py --image sign.png --ocr --output ..\runtime\text-vinyl\sign.json
 ```
 
 `--shape-mode` choices: `rectangles`, `squares`, `ellipses`, `circles`, `triangles`, `mixed`.
@@ -94,7 +84,7 @@ python text_to_json.py --image sign.png --ocr --output ..\runtime\text-vinyl\sig
 | Sharper edges | cell size 2–3, accept more layers |
 | Softer Japanese curves | **ellipses** or **circles**, sphere template |
 | Angular katakana | **triangles** or **mixed**, sphere template |
-| Custom font look | Trace from image, do not re-type after OCR |
+| Custom font look | Trace from image |
 | Rare hanzi missing | Browse a fuller font (Noto Sans SC CJK, Source Han Sans SC) |
 | Korean (Hangul) | Pick a **[KR]** font (Malgun Gothic); avoid SC-only faces like SimSun |
 | Template size | FH needs JSON drawable layers + 4 boundary layers |

@@ -11,6 +11,7 @@
 <p align="center">
   <a href="README.md">English</a> ·
   <a href="README.zh-CN.md">中文</a> ·
+  <a href="README.ja-JP.md">日本語</a> ·
   <a href="README.ko-KR.md">한국어</a>
 </p>
 
@@ -99,9 +100,7 @@ One image can generate multiple checkpoint JSON files. Prefer the highest-layer 
 Use the **Text vinyl** tab when in-game lettering cannot show your script (Mandarin, katakana, other CJK). 
 Text Vinyl's are identified from fonts stored on your machine (ex. Settings>Personalization>Fonts). 
 Pick an installed font or insert characters directly from the GB2312 library. 
-If your text is derived from an image, you can also trace text from reference images. 
-
-Optional OCR: `pip install -r requirements-text-ocr.txt` — see `docs/TEXT_VINYL.md`.
+If your text is derived from an image, use **Trace from image** on the reference panel (see `docs/TEXT_VINYL.md`).
 
 ## Import JSON
 
@@ -208,11 +207,11 @@ This project is a derivative of the Forza Painter workflow and retains upstream 
 | Sam Twidale | [samcodes.co.uk](https://samcodes.co.uk/) | geometrize-lib; original geometry approximation work credited by upstream licenses. |
 | Michael Fogleman | [fogleman/primitive](https://github.com/fogleman/primitive) | Primitive library; original primitive-based image approximation credited by upstream licenses. |
 | Omar Cornut | [ocornut/imgui](https://github.com/ocornut/imgui) | Dear ImGui; GUI framework used by the original forza-painter. |
-| DxBang | [Bang's Forza Color Converter](https://bang.systems/forza-colors/) | Forza H/S/B color conversion used on the Colors tab. |
+| DxBang | [Bang's Forza Color Converter](https://bang.systems/forza-colors/) | Forza H/S/B color conversion used in Tools → Color Picker. |
 | bvzrays | [bvzrays/forza-painter-fh6](https://github.com/bvzrays/forza-painter-fh6) | FH6-focused desktop fork: UI, importer/locator behavior, app packaging, and workflow ideas for Forza Horizon 6. |
 | Kloudy (heyitshestia) | [kloudys-fh6-painter](https://github.com/heyitshestia/kloudys-fh6-painter) | FH6 painter fork: launcher workflow, style presets, Luma Prep, Edge Repair, finalized-run browser, updater flow, release packaging, and handmade/universal importer work. |
 | zjl88858 | [forza-painter-geometrize-gpu](https://github.com/zjl88858/forza-painter-geometrize-gpu) | GPU/OpenCL geometrize generator lineage used by the bundled generator workflow. |
-| LibreHardwareMonitor | [LibreHardwareMonitor/LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) | Hardware monitoring backend for the Resource Monitor tab. |
+| LibreHardwareMonitor | [LibreHardwareMonitor/LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) | Hardware monitoring backend for the header resource telemetry panel. |
 | H3XDaemon | [H3XDaemon](https://github.com/H3XDaemon) | Contributor to this repository. |
 | MaccLochlainn | [MaccLochlainn](https://github.com/MaccLochlainn) | Contributor to this repository. |
 | ree9622 | [ree9622](https://github.com/ree9622) | Korean localization contributor in upstream history. |

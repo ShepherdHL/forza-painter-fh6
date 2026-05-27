@@ -4,7 +4,6 @@ CLI: generate Forza geometry JSON from typed CJK text or a text image.
 Examples:
   python text_to_json.py --text "ソニック" --output sonic.json
   python text_to_json.py --image katakana.png --output traced.json --cell-size 3
-  python text_to_json.py --image sign.png --ocr --output sign.json
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ from text_geometry import (
     write_geometry_json,
 )
 from text_fonts import discover_cjk_fonts, find_cjk_font, format_missing_chars, resolve_font_path, validate_text_coverage
-from text_ocr import ocr_available, read_combined_text, try_easyocr_lines
 
 
 def parse_color(value: str):
@@ -57,12 +55,6 @@ def main(argv=None):
     parser.add_argument("--color", type=parse_color, default="255,255,255,255", help="Shape color R,G,B,A.")
     parser.add_argument("--invert", action="store_true", help="Invert --image before tracing (light text on dark).")
     parser.add_argument("--threshold", type=int, default=128, help="Binarization threshold for --image.")
-    parser.add_argument(
-        "--ocr",
-        action="store_true",
-        help="Run OCR on --image and print detected text (also writes traced geometry from image).",
-    )
-    parser.add_argument("--ocr-only", action="store_true", help="Only print OCR text, do not write JSON.")
     args = parser.parse_args(argv)
 
     if args.list_fonts:
@@ -86,25 +78,8 @@ def main(argv=None):
     print(template_hint_for_shape_mode(shape_mode))
 
     if args.image:
-        image_path = Path(args.image)
-        if args.ocr or args.ocr_only:
-            detected = ""
-            easy_lines = try_easyocr_lines(image_path)
-            if easy_lines is not None:
-                detected = "".join(line.text for line in easy_lines)
-                print("EasyOCR:", detected or "(empty)")
-            elif ocr_available():
-                detected = read_combined_text(image_path)
-                print("Tesseract:", detected or "(empty)")
-            else:
-                print(
-                    "OCR not available. Install requirements-text-ocr.txt and Tesseract with Japanese.",
-                    file=sys.stderr,
-                )
-            if args.ocr_only:
-                return 0 if detected else 1
         payload = build_geometry_from_text_image(
-            image_path,
+            Path(args.image),
             color=args.color,
             cell_size=args.cell_size,
             invert=args.invert,

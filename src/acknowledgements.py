@@ -21,11 +21,11 @@ FH6 lineage
 
 Tools and libraries
 • DxBang — https://bang.systems/forza-colors/
-  Bang's Forza Color Converter; Forza H/S/B color conversion used on the Colors tab.
+  Bang's Forza Color Converter; Forza H/S/B color conversion used in Tools → Color Picker.
 • zjl88858 — https://github.com/zjl88858/forza-painter-geometrize-gpu
   GPU/OpenCL geometrize generator lineage used by the bundled generator workflow.
 • LibreHardwareMonitor — https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
-  Hardware monitoring backend for the Resource Monitor tab.
+  Hardware monitoring backend for the header resource telemetry panel.
 
 Contributors to this repository
 • H3XDaemon — https://github.com/H3XDaemon
@@ -54,7 +54,7 @@ FH6 分支与延续
 
 工具与库
 • DxBang — https://bang.systems/forza-colors/
-  Bang's Forza Color Converter；「取色」标签页使用的 Forza H/S/B 颜色转换。
+  Bang's Forza Color Converter；「工具 → 取色器」使用的 Forza H/S/B 颜色转换。
 • zjl88858 — https://github.com/zjl88858/forza-painter-geometrize-gpu
   内置 GPU 生成器所采用的 GPU/OpenCL geometrize 生成器谱系。
 • LibreHardwareMonitor — https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
@@ -99,6 +99,39 @@ FH6 계보
 • ree9622 — https://github.com/ree9622
   상류 기록의 한국어 현지화 기여자.
 전체 기여자 목록: https://github.com/ShepherdHL/forza-painter-fh6/graphs/contributors
+""",
+    "ja": """このプロジェクトは Forza Painter ワークフローを基にした派生プロジェクトであり、上流の MIT ライセンス表記を保持しています。
+
+オリジナル Forza Painter
+• the_adawg (AE) — https://github.com/forza-painter/forza-painter
+  オリジナル Forza Painter：MIT ライセンスの FH インポートワークフロー、メモリ書き込み／インポート基盤、ジオメトリ→ビニール手法。
+• Sam Twidale — https://samcodes.co.uk/
+  geometrize-lib；上流ライセンスでクレジットされるジオメトリ近似の原典。
+• Michael Fogleman — https://github.com/fogleman/primitive
+  Primitive ライブラリ；上流ライセンスでクレジットされるプリミティブベース画像近似。
+• Omar Cornut — https://github.com/ocornut/imgui
+  Dear ImGui；オリジナル forza-painter で使用された GUI フレームワーク。
+
+FH6 系譜
+• bvzrays — https://github.com/bvzrays/forza-painter-fh6
+  FH6 向けデスクトップフォーク：UI、インポーター／ロケーター動作、アプリパッケージング、Forza Horizon 6 向けワークフロー。
+• Kloudy (heyitshestia) — https://github.com/heyitshestia/kloudys-fh6-painter
+  FH6 ペインターフォーク：ランチャー、スタイルプリセット、Luma Prep、Edge Repair、完成チェックポイントブラウザ、更新フロー、リリースパッケージング、handmade／汎用インポーター。
+
+ツールとライブラリ
+• DxBang — https://bang.systems/forza-colors/
+  Bang's Forza Color Converter；「色」タブで使用する Forza H/S/B 色変換。
+• zjl88858 — https://github.com/zjl88858/forza-painter-geometrize-gpu
+  同梱 GPU 生成器が使用する GPU/OpenCL geometrize 生成器系譜。
+• LibreHardwareMonitor — https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
+  「リソースモニター」タブのハードウェア監視バックエンド。
+
+このリポジトリの貢献者
+• H3XDaemon — https://github.com/H3XDaemon
+• MaccLochlainn — https://github.com/MaccLochlainn
+• ree9622 — https://github.com/ree9622
+  上流履歴における韓国語ローカライズ貢献者。
+貢献者一覧：https://github.com/ShepherdHL/forza-painter-fh6/graphs/contributors
 """,
 }
 

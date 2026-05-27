@@ -1,7 +1,7 @@
 @echo off
 setlocal
 color 0F
-title forza-painter FH6
+title Forza Painter 1.6.X (Experimental)
 set "PYTHONDONTWRITEBYTECODE=1"
 
 set "ROOT=%~dp0"

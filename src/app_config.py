@@ -27,9 +27,3 @@ UPDATE_CHECK_TIMEOUT_SECONDS = 8
 UPDATE_CHANGELOG_URL = "https://raw.githubusercontent.com/ShepherdHL/forza-painter-fh6/main/CHANGELOG.md"
 UPDATE_RELEASE_URL = "https://github.com/ShepherdHL/forza-painter-fh6/releases/latest"
 
-
-# UI copy
-RESOURCE_MONITOR_DESCRIPTION = """
-Long JSON generation and FH6 import runs can push CPU/GPU load and temperatures.
-This tab shows live usage so you can pause or stop before throttling or instability.
-""".strip()

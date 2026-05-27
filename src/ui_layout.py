@@ -10,8 +10,9 @@ DEFAULT_PANE_RATIOS: Dict[str, float] = {
     "main_vertical": 0.74,
     "generate_horizontal": 0.58,
     "import_horizontal": 0.52,
+    "text_horizontal": 0.58,
     "text_vertical": 0.78,
-    "colors_vertical": 0.62,
+    "tools_color_horizontal": 0.62,
 }
 
 
