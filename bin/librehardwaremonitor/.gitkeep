@@ -1,1 +1,1 @@
-# LibreHardwareMonitorLib.dll and HidSharp.dll are fetched by scripts/fetch_librehardwaremonitor.ps1
+# LibreHardwareMonitor is not bundled (WinRing0 / Defender). See docs/HARDWARE_MONITORING.md.

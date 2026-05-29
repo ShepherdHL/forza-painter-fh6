@@ -1,4 +1,7 @@
+# DEPRECATED: Not used by install or release builds. Loading LHM triggers
+# Windows Defender VulnerableDriver:WinNT/Winring0. See docs/HARDWARE_MONITORING.md.
 $ErrorActionPreference = "Stop"
+Write-Warning "This script is deprecated and not run by default. See docs/HARDWARE_MONITORING.md."
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = Split-Path -Parent $ScriptDir

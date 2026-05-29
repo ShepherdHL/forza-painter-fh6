@@ -5,9 +5,8 @@ layers from traced glyph masks using **selectable primitives** (rectangles, squa
 ellipses, circles, triangle-style diamonds, or mixed) so readable Mandarin, katakana,
 hiragana, **Korean (Hangul)**, and other CJK scripts can be imported.
 
-**Korean:** Type or paste Hangul directly (the hanzi library is GB2312 only). Choose a
-font tagged **[KR]** in the dropdown, such as **Malgun Gothic** (`malgun`). Simplified-Chinese-only
-fonts like SimSun may list as [SC] but will not draw Korean reliably.
+**Korean:** Use the Hangul syllable picker or type/paste directly. Choose a font tagged
+**[KR]** in the dropdown, such as **Malgun Gothic** (`malgun`).
 
 ## In the app
 
@@ -19,18 +18,18 @@ Use the script sub-tabs:
 
 | Tab | Use for | Font list |
 |-----|---------|-----------|
-| **Universal (Latin)** | English, numbers, Western punctuation | [LATIN] fonts (Segoe UI, Arial, …) |
-| **Japanese** | Hiragana, katakana, kanji | [JP] / [CJK] fonts |
-| **Korean** | Hangul | [KR] fonts |
-| **Chinese** | Simplified/traditional hanzi + GB2312 picker | [SC] / [TC] / [CJK] fonts |
+| **Universal (Latin)** | English, numbers, Western punctuation | [LATIN] fonts; **Latin extended** character grid |
+| **Japanese** | Hiragana, katakana, kanji | [JP] / [CJK] fonts; sub-tabs **Hiragana**, **Katakana**, **Kanji (JIS)** grids |
+| **Korean** | Hangul | [KR] fonts; **Hangul syllables** grid (paginated) |
+| **Chinese** | Simplified/traditional hanzi | [SC] / [TC] / [CJK] fonts; **GB2312 hanzi** grid |
 
-Each tab keeps its own text, font choice, and **Search fonts** filter. Shared options (size, shape mode, color) apply to whichever tab is active.
+Each tab keeps its own text, font choice, and **Search fonts** filter. Below the text field, use the **character grid** (click a cell to insert; search and page through large sets). Scroll down for **Generation options** (size, shape mode, color). Any font on your PC can be used—**Browse font file** if it does not appear in the list.
 
 ### Typed text (cleanest workflow)
 
 1. Open the tab for your script and enter text (examples: `SONIC`, `ソニック`, `안녕`, `你好世界`).
 2. Use **Search fonts** to filter the dropdown, or **Browse font file** for any `.ttf` / `.ttc` / `.otf`.
-3. Use the **Mandarin character library** to search and insert GB2312 Level-1 hanzi (3755 characters).
+3. Click characters in the script’s **character grid** to insert symbols (or type/paste directly).
 4. Check the coverage line under the options — it reports missing glyphs for the selected font.
 5. Set **Trace shape mode** (see table below) and match your FH6 template before import.
 6. Adjust **font size** and **trace cell size** (larger cell → fewer layers, less detail).

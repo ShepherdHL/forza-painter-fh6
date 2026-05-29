@@ -7,14 +7,8 @@ cd /d "%ROOT%" || (
     exit /b 1
 )
 
-:: Re-launch elevated once (UAC prompt) so FH6 memory access works without manual "Run as administrator"
-net session >nul 2>&1
-if errorlevel 1 (
-    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-      "Start-Process -FilePath '%~f0' -Verb RunAs -WorkingDirectory '%ROOT%' -WindowStyle Hidden"
-    exit /b 0
-)
-
+:: Development launcher — does not auto-elevate. Use Import in the app to trigger
+:: administrator access when FH6 memory attach is required.
 set "PYTHONDONTWRITEBYTECODE=1"
 set "VENV_PYTHON=%ROOT%.venv\Scripts\pythonw.exe"
 set "VENV_PYTHON_CONSOLE=%ROOT%.venv\Scripts\python.exe"

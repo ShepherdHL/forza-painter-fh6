@@ -1,6 +1,65 @@
+<p align="center">
+  <a href="README.md">README</a> ·
+  <a href="FAQ.md">FAQ</a> ·
+  <a href="ACKNOWLEDGEMENTS.md">Acknowledgements</a> ·
+  <a href="CHANGELOG.md"><strong>Changelog</strong></a> ·
+  <a href="LICENSE">License</a>
+</p>
+
 # Changelog
 
+Release notes for Forza Painter FH6. The in-app update prompt reads from this file.
+
 ## Unreleased
+
+### Generate presets
+
+- **Experimental tailored preset (slot 0, opt-in):** after Image Preview analyzes an image, the app writes `runtime/image-profiles/tailored-active.ini` with `stopAt`, checkpoints, samples, and resolution derived from the complexity estimate. Bundled presets Eco–Maximum Power are renumbered 1–7. **Normal remains the default** — tailored is not auto-selected after analysis; pick slot 0 when you want it.
+
+### UI themes
+
+- **Centralized theme engine:** new `ThemeManager` + semantic `ThemeTokens` drive all tk/ttk styling; legacy `COLOR_*` globals stay synced for migration.
+- **CryNet theme:** replaces Spirit of Horizon (Crysis HUD-inspired black + cyan palette); saved `spirit_of_horizon` / `sakura` ids migrate automatically.
+- **New Eden theme:** light-mode option (white surfaces, cherry-red accents); replaces Y2K / Mirror's Edge naming. Saved `y2k`, `light`, and `mirrors_edge` ids migrate automatically.
+- **Theme dropdown order:** New Eden and Red Phosphorous remain at the bottom of the list.
+- **Interactive state layer:** new `theme_states` module normalizes selection, emphasis, validation, and indicator styling; ttk notebooks/scrollbars refresh on theme switch.
+- **Eurocorp palette:** refined toward Syndicate (2012) — matte black and steel surfaces, restrained tactical orange accents, muted steel-blue info and instrument-gray telemetry (replacing generic cyan/neon defaults).
+- **CryNet palette:** refined toward Crysis 2 / CryNet Systems HUD — near-black layered surfaces, cool readable body text, restrained ice-cyan holographic accents; new HUD semantic tokens (`surface_hud`, `overlay_glass`, `border_illuminated`, `accent_holographic`, `text_technical`, `interactive_glow`).
+- **UNATCO theme:** government-terminal aesthetic — pure black field, navy title chrome, holo-green layered panels, lime status accents and cyan instrumentation; saved `deus_ex` id migrates automatically. Renamed from “Deus Ex” display label.
+
+### Trust & transparency
+
+- **Import-only elevation:** the GUI no longer requests Administrator rights at launch; UAC is prompted when you start import, export, or FH6 memory diagnostics.
+- **Pre-memory consent dialog** with link to `docs/SAFETY.md`; consent may be remembered via `runtime/settings/memory_work_consent.flag`.
+- **Helper visibility:** user log shows which helper task started (same application, helper mode) with redacted command line.
+- **Privilege indicator** in the process bar (Standard user / Administrator).
+- **Permission-denied retry:** offers to restart elevated when Windows blocks `OpenProcess`.
+- **Transparency pack:** `SECURITY.md`, `docs/SAFETY.md`, `docs/ENVIRONMENT.md`, `docs/RELEASE_CHECKLIST.md`, README trust section.
+- **`start_app.bat`:** no longer auto-elevates hidden on dev launch.
+- **Tests:** `tests/test_security_policy.py` for address/session/network limits.
+- **Fix:** `trust_workflow.is_windows_admin()` uses `IsUserAnAdmin` (startup crash on launch).
+- **UI:** 🛡 prefix on import/export/FH6 memory buttons when running as standard user; status bar explains marked actions.
+
+### UI hubs (Phase 3)
+
+- **4 hub tabs:** Create (Preview, Generate, Text vinyl), Import (Final, Handmade, Export), Tools, Dev Tools (FH6 memory diagnostics).
+- **Help menu** (header): Tutorial, Acknowledgements, Safety guide — no longer top-level tabs.
+- **Compact telemetry** by default (higher threshold for full donut layout).
+
+### First-run & release (Phases 4–5)
+
+- **First-run welcome** dialog (`ui/first_run.py`); preference stored in `runtime/settings/ui_preferences.json`.
+- **`scripts/publish_release.ps1`:** build EXE + SHA-256 + GitHub release notes snippet.
+- **`src/ui/views/`** package stub for incremental extraction from `app.py`.
+- Source ZIP release includes `SECURITY.md` (`scripts/make_release.ps1`).
+- **Safety guide:** in-app viewer with language picker (EN / 中文 / 日本語 / 한국어); no longer opens `.md` in Visual Studio.
+- **Developer Tools** hub tab pinned to the far right of the main tab bar (FH6 diagnostics; replaces developer-mode checkbox).
+- **Fix:** hub tabs (Create / Import / Tools / Developer Tools) render at the top of the workspace again, not below content.
+- **Text vinyl:** color field uses Color Picker–style hex/RGB/alpha/Forza values instead of a single `R,G,B,A` text box.
+- **Text vinyl:** paginated character grids on every script tab (Latin, Hiragana/Katakana/Kanji, Hangul, GB2312); scroll hint moved to top.
+- **Fix:** missing `X` import in Text vinyl UI (same startup `NameError` class as hub navigation).
+- **Tests:** `tests/test_tk_constant_imports.py` fails CI if a module uses `fill=X` / `side=LEFT` without importing the constant.
+- **Header:** new product line copy, build version row with italic *Experimental*, and updated subtitle.
 
 ### Core / upstream merge
 
@@ -15,6 +74,10 @@
 
 ### Generation & preprocess
 
+- **Eco cool GPU (experimental)** preset: lower `randomSamples`, resolution, and layer cap for reduced GPU load; optional **GPU cooldown between images** (waits for ≤75°C or fixed pause when sensors unavailable).
+- Renamed bundled quality presets (0–6): Eco, Maximum Speed, Fast, Normal, Slow (Conserve Shapes), Maximum Quality, Maximum Power.
+- **Image Preview** preset panel: shows selected Generate preset, projected layer count vs cap, downscale note, GPU load tier, and approximation disclaimer (no JSON required).
+- Block mouse wheel from changing Combobox/Listbox selections unless the control is focused; wheel still scrolls the nearest panel when hovering dropdowns.
 - **Image Preview** tab: compare preprocess filters and estimated layer cost before generating.
 - **Preprocess filter** dropdown on Generate: Original, Luma Bands, Bilateral, Posterize, CLAHE, Mild Blur, Soft Cel Shading, Heavy Ink Cel Shading.
 - Source/result compare panels on Generate when a filter is active.

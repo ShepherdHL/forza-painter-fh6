@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import cv2
@@ -9,6 +8,7 @@ import numpy as np
 from app_paths import ROOT
 from utils import PreprocessError
 
+# Legacy global folder (no longer written by default; cleared on exit).
 PREVIEW_EXPORT_ROOT = ROOT / "imgs" / "filter-previews"
 LUMA_BANDS_ROOT = PREVIEW_EXPORT_ROOT
 
@@ -27,7 +27,10 @@ def read_bgra(image_path: Path) -> np.ndarray:
 
 
 def atomic_cv2_write(output_path: Path, image: np.ndarray) -> None:
+    import os
+
     tmp_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     if not cv2.imwrite(str(tmp_path), image):
         try:
             tmp_path.unlink(missing_ok=True)

@@ -9,6 +9,7 @@ from typing import Dict
 DEFAULT_PANE_RATIOS: Dict[str, float] = {
     "main_vertical": 0.74,
     "generate_horizontal": 0.58,
+    "preview_horizontal": 0.58,
     "import_horizontal": 0.52,
     "text_horizontal": 0.58,
     "text_vertical": 0.78,

@@ -43,6 +43,9 @@ class ToolPanel:
     def on_language_changed(self) -> None:
         pass
 
+    def on_theme_changed(self) -> None:
+        pass
+
 
 def build_tool_hint(parent: Frame, app: Any, key: str) -> Label:
     hint = app._label(parent, key, anchor="w", justify="left", theme_role="hint")
@@ -63,20 +66,20 @@ def build_resource_card(
     on_open: Callable[[], None] | None = None,
 ) -> Frame:
     """Recommendation / external-tool card with title, description, and launch action."""
-    import app as app_module
+    tokens = app.themes.tokens
 
     card = Frame(
         parent,
-        bg=app_module.COLOR_PANEL,
-        highlightbackground=app_module.COLOR_BORDER,
+        bg=tokens.panel,
+        highlightbackground=tokens.border,
         highlightthickness=1,
     )
     card.pack(fill=X, pady=(0, 8))
 
-    body = Frame(card, bg=app_module.COLOR_PANEL)
+    body = Frame(card, bg=tokens.panel)
     body.pack(fill=X, padx=12, pady=10)
 
-    header = Frame(body, bg=app_module.COLOR_PANEL)
+    header = Frame(body, bg=tokens.panel)
     header.pack(fill=X)
     from app import tr
 
@@ -84,8 +87,8 @@ def build_resource_card(
         header,
         text=tr(app.lang, title_key),
         anchor="w",
-        bg=app_module.COLOR_PANEL,
-        fg=app_module.COLOR_TEXT,
+        bg=tokens.panel,
+        fg=tokens.text,
         font=("Segoe UI", 10, "bold"),
     )
     title.pack(side=LEFT)
@@ -95,8 +98,8 @@ def build_resource_card(
             header,
             text=tr(app.lang, badge_key).upper(),
             anchor="e",
-            bg=app_module.COLOR_PANEL_ALT,
-            fg=app_module.COLOR_INFO,
+            bg=tokens.panel_alt,
+            fg=tokens.info,
             font=("Segoe UI", 8, "bold"),
             padx=6,
             pady=2,
@@ -110,15 +113,15 @@ def build_resource_card(
         anchor="w",
         justify="left",
         wraplength=520,
-        bg=app_module.COLOR_PANEL,
-        fg=app_module.COLOR_MUTED,
+        bg=tokens.panel,
+        fg=tokens.muted,
         font=("Segoe UI", 9),
     )
     desc.pack(fill=X, pady=(6, 8))
     app.translated.append((desc, desc_key, "text"))
     app._bind_wraplength(desc, body)
 
-    actions = Frame(body, bg=app_module.COLOR_PANEL)
+    actions = Frame(body, bg=tokens.panel)
     actions.pack(fill=X)
     open_cmd = on_open if on_open is not None else (lambda u=url: app.root.after(0, lambda: __import__("webbrowser").open(u)))
     btn = app._button(actions, action_key, open_cmd)

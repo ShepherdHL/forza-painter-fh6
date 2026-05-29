@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 
+from asset_workspace import variant_image_path
 from preprocess.common import LUMA_BANDS_ROOT, atomic_cv2_write, read_bgra
 from utils import PreprocessError
 
@@ -56,23 +57,30 @@ def apply_luma_bands_rgba(rgba: np.ndarray) -> np.ndarray:
 
 def build_luma_bands_file(source: Path, output_dir: Path | None = None) -> Path:
     source = Path(source)
-    output_dir = Path(output_dir or LUMA_BANDS_ROOT)
+    if output_dir is None:
+        output_path = variant_image_path(source, "luma_band")
+    else:
+        output_dir = Path(output_dir)
+        bgra = read_bgra(source)
+        processed = apply_luma_bands_bgra(bgra)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", source.stem).strip("._") or "image"
+        candidate = output_dir / f"{safe_stem}.luma-bands.png"
+        index = 2
+        while candidate.exists():
+            candidate = output_dir / f"{safe_stem}.luma-bands-v{index}.png"
+            index += 1
+        atomic_cv2_write(candidate, processed)
+        return candidate
     bgra = read_bgra(source)
     processed = apply_luma_bands_bgra(bgra)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", source.stem).strip("._") or "image"
-    candidate = output_dir / f"{safe_stem}.luma-bands.png"
-    index = 2
-    while candidate.exists():
-        candidate = output_dir / f"{safe_stem}.luma-bands-v{index}.png"
-        index += 1
-    atomic_cv2_write(candidate, processed)
-    return candidate
+    atomic_cv2_write(output_path, processed)
+    return output_path
 
 
 def luma_band(image_path: str | Path) -> Path:
     image_path = Path(image_path)
-    output_path = image_path.with_name(f"{image_path.stem}.luma_band{image_path.suffix}")
+    output_path = variant_image_path(image_path, "luma_band")
     bgra = read_bgra(image_path)
     processed = apply_luma_bands_bgra(bgra)
     atomic_cv2_write(output_path, processed)

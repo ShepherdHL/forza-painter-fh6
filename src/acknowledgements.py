@@ -24,9 +24,6 @@ Tools and libraries
   Bang's Forza Color Converter; Forza H/S/B color conversion used in Tools → Color Picker.
 • zjl88858 — https://github.com/zjl88858/forza-painter-geometrize-gpu
   GPU/OpenCL geometrize generator lineage used by the bundled generator workflow.
-• LibreHardwareMonitor — https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
-  Hardware monitoring backend for the header resource telemetry panel.
-
 Contributors to this repository
 • H3XDaemon — https://github.com/H3XDaemon
 • MaccLochlainn — https://github.com/MaccLochlainn
@@ -57,8 +54,6 @@ FH6 分支与延续
   Bang's Forza Color Converter；「工具 → 取色器」使用的 Forza H/S/B 颜色转换。
 • zjl88858 — https://github.com/zjl88858/forza-painter-geometrize-gpu
   内置 GPU 生成器所采用的 GPU/OpenCL geometrize 生成器谱系。
-• LibreHardwareMonitor — https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
-  「资源监控」标签页的硬件监控后端。
 
 本仓库贡献者
 • H3XDaemon — https://github.com/H3XDaemon
@@ -90,8 +85,6 @@ FH6 계보
   Bang's Forza Color Converter; 색상 탭에서 사용하는 Forza H/S/B 색상 변환.
 • zjl88858 — https://github.com/zjl88858/forza-painter-geometrize-gpu
   번들 생성기가 사용하는 GPU/OpenCL geometrize 생성기 계보.
-• LibreHardwareMonitor — https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
-  리소스 모니터 탭의 하드웨어 모니터링 백엔드.
 
 이 저장소 기여자
 • H3XDaemon — https://github.com/H3XDaemon
@@ -123,8 +116,6 @@ FH6 系譜
   Bang's Forza Color Converter；「色」タブで使用する Forza H/S/B 色変換。
 • zjl88858 — https://github.com/zjl88858/forza-painter-geometrize-gpu
   同梱 GPU 生成器が使用する GPU/OpenCL geometrize 生成器系譜。
-• LibreHardwareMonitor — https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
-  「リソースモニター」タブのハードウェア監視バックエンド。
 
 このリポジトリの貢献者
 • H3XDaemon — https://github.com/H3XDaemon

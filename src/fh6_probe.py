@@ -696,6 +696,18 @@ def serialize_samples(samples):
 
 
 def auto_locate_count_table(pid, profile, layer_count, limit_mb, max_matches, progress_every, radius, output_path=None, max_seconds=None):
+    try:
+        from defender_audit import CATEGORY_MEMORY_QUERY, log_event
+
+        log_event(
+            CATEGORY_MEMORY_QUERY,
+            "auto_locate_count_table",
+            target_pid=pid,
+            layer_count=layer_count,
+            limit_mb=limit_mb,
+        )
+    except Exception:
+        pass
     print(f"Process: {psutil.Process(pid).name()} pid={pid}")
     print(f"Base: 0x{get_base_address(pid):x}")
     print(f"Auto-locating FH6 layer count/table for count {layer_count}...")

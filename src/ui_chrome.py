@@ -40,13 +40,8 @@ class DonutGauge(tk.Canvas):
         self._text_color = text_color
         self._muted = muted_color
         self._ring_width = ring_width
-        self._text_id = self.create_text(
-            size // 2,
-            size // 2,
-            text="—",
-            fill=muted_color,
-            font=("Segoe UI Semibold", 11),
-        )
+        self._has_pct = False
+        self._last_pct: float | None = None
 
     def set_scheme(
         self,
@@ -63,8 +58,12 @@ class DonutGauge(tk.Canvas):
         self.configure(bg=bg_color)
         self._text_color = text_color
         self._muted = muted_color
+        if self._has_pct:
+            self.set_value(self._last_pct)
 
     def set_value(self, pct: float | None) -> None:
+        self._has_pct = True
+        self._last_pct = pct
         self.delete("ring")
         pad = max(10, self._size // 7)
         x0, y0 = pad, pad
@@ -99,9 +98,8 @@ class DonutGauge(tk.Canvas):
                 width=w,
                 tags="ring",
             )
-            self.itemconfigure(self._text_id, text=f"{p:.0f}%", fill=self._text_color)
         except (TypeError, ValueError):
-            self.itemconfigure(self._text_id, text="—", fill=self._muted)
+            pass
 
 
 def hud_badge(parent: tk.Widget, text: str, *, bg: str, fg: str, border: str, font: tuple[str, ...]) -> tk.Frame:

@@ -4,9 +4,18 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from preset_preview import preset_badge_prefix, preset_label_with_badge
 from typing import Iterable
 
 from app_paths import RESOURCE_ROOT, ROOT
+from asset_workspace import (
+    IMAGE_WORKSPACE_ROOT,
+    generator_json_output_base,
+    generator_live_preview_path,
+    image_workspace,
+    json_search_roots,
+)
 from geometry_json import drawable_shape_count
 from preprocess.filters import (
     PREPROCESS_LUMA,
@@ -159,6 +168,7 @@ class SettingProfile:
     label: str
     description: str = ""
     values: dict[str, str] = field(default_factory=dict)
+    badge_prefix: str = ""
 
     def __getitem__(self, key: str):
         try:
@@ -171,6 +181,43 @@ class SettingProfile:
 
     def __contains__(self, key: str) -> bool:
         return hasattr(self, key)
+
+
+def _preset_sort_key(path: Path) -> tuple[int, str]:
+    match = re.match(r"^(\d+)", path.stem)
+    if match:
+        return int(match.group(1)), path.stem.lower()
+    return 9999, path.stem.lower()
+
+
+def _preset_index_from_path(path: Path) -> int | None:
+    match = re.match(r"^(\d+)", path.stem)
+    return int(match.group(1)) if match else None
+
+
+def _preset_stem_name(path: Path) -> str:
+    name = re.sub(r"^\d+[.)]\s*", "", path.stem, flags=re.IGNORECASE)
+    return name.replace(" - ", " / ")
+
+
+def preset_display_name(path: Path, values: dict[str, str], *, source: str) -> str:
+    display = str(values.get("displayName", "")).strip()
+    if display:
+        return display
+    name = _preset_stem_name(path)
+    if source == "user":
+        return f"User / {name}"
+    return name
+
+
+def default_preset_label(profiles: list[SettingProfile]) -> str:
+    for item in profiles:
+        if str(item.values.get("displayName", "")).strip() == "Normal":
+            return item.label
+    if not profiles:
+        return ""
+    index = min(3, len(profiles) - 1)
+    return profiles[index].label
 
 
 def setting_description(path: Path) -> str:
@@ -225,23 +272,35 @@ def _settings_paths():
 
 
 def load_settings() -> list[SettingProfile]:
-    profiles: list[SettingProfile] = []
-    for index, (source, path) in enumerate(_settings_paths(), start=1):
-        name = re.sub(r"^[a-z0-9]+[.)]\s*", "", path.stem, flags=re.IGNORECASE)
-        name = name.replace(" - ", " / ")
-        if source == "user":
-            name = f"User / {name}"
-        profiles.append(
+    from image_tailored_preset import (
+        load_tailored_setting_profile,
+        renumber_bundled_profile_label,
+        tailored_placeholder_profile,
+    )
+
+    bundled: list[SettingProfile] = []
+    ordered = sorted(_settings_paths(), key=lambda item: _preset_sort_key(item[1]))
+    for fallback_index, (source, path) in enumerate(ordered, start=1):
+        values = parse_settings(path)
+        preset_index = _preset_index_from_path(path)
+        display = preset_display_name(path, values, source=source)
+        label_index = preset_index if preset_index is not None else fallback_index
+        base_label = f"{label_index}. {display}"
+        badge = preset_badge_prefix(path, values, preset_index=preset_index)
+        bundled.append(
             SettingProfile(
-                index=index,
+                index=fallback_index,
                 source=source,
                 path=path,
-                label=f"{index}. {name}",
+                label=preset_label_with_badge(base_label, badge),
                 description=setting_description(path),
-                values=parse_settings(path),
+                values=values,
+                badge_prefix=badge,
             )
         )
-    return profiles
+    bundled = [renumber_bundled_profile_label(profile) for profile in bundled]
+    tailored = load_tailored_setting_profile() or tailored_placeholder_profile()
+    return [tailored, *bundled]
 
 
 def write_custom_settings(base_setting, custom_values):
@@ -367,27 +426,46 @@ def checkpoints_for_image(image_path, *, luma=None, preprocess_mode=None):
 def generated_jsons(image_path: str | Path) -> list[Path]:
     image_path = Path(image_path)
     candidates: list[Path] = []
-    output_base = generator_output_base(image_path)
-    folders = {
-        image_path.parent / image_path.stem,
-        output_base.parent / output_base.name,
-    }
-    for folder in folders:
+    for folder in json_search_roots(image_path):
         if folder.exists():
-            candidates.extend(folder.rglob("*.json"))
+            try:
+                if folder.is_dir():
+                    candidates.extend(folder.rglob("*.json"))
+                elif folder.suffix.lower() == ".json":
+                    candidates.append(folder)
+            except OSError:
+                continue
+    legacy_base = image_path.with_name(_name_without_suffix(image_path))
+    legacy_folders = {
+        image_path.parent / image_path.stem,
+        legacy_base.parent / legacy_base.name,
+    }
+    for folder in legacy_folders:
+        if folder.exists():
+            try:
+                candidates.extend(folder.rglob("*.json"))
+            except OSError:
+                continue
     prefixes = {
         image_path.stem,
         image_path.name,
-        output_base.name,
+        legacy_base.name,
         image_path.stem.split(".", 1)[0],
-        output_base.name.split(".", 1)[0],
+        legacy_base.name.split(".", 1)[0],
     }
     patterns = {f"{prefix}*.json" for prefix in prefixes if prefix}
     for pattern in patterns:
-        candidates.extend(image_path.parent.glob(pattern))
-        if output_base.parent != image_path.parent:
-            candidates.extend(output_base.parent.glob(pattern))
-    return sorted(set(candidates), key=lambda p: p.stat().st_mtime, reverse=True)
+        try:
+            candidates.extend(image_path.parent.glob(pattern))
+        except OSError:
+            pass
+    unique: dict[str, Path] = {}
+    for path in candidates:
+        try:
+            unique[str(path.resolve()).lower()] = path
+        except OSError:
+            unique[str(path).lower()] = path
+    return sorted(unique.values(), key=lambda p: p.stat().st_mtime, reverse=True)
 
 
 def geometry_shape_count(path: str | Path) -> int:
@@ -413,26 +491,26 @@ def best_geometry_jsons(paths: Iterable[str | Path]) -> list[Path]:
 
 
 def generator_preview_path(image_path: str | Path) -> Path:
-    PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
     image_path = Path(image_path)
-    return PREVIEW_DIR / f"{_name_without_suffix(image_path)}.preview.png"
+    paths = image_workspace(image_path).ensure()
+    paths.preview_generation.parent.mkdir(parents=True, exist_ok=True)
+    return paths.preview_generation
 
 
 def generated_preview_files(image_path: str | Path) -> list[Path]:
     image_path = Path(image_path)
-    if not PREVIEW_DIR.exists():
-        return []
-    stem = _name_without_suffix(image_path)
-    return sorted(
-        PREVIEW_DIR.glob(f"{stem}.preview*.png"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
+    candidates: list[Path] = []
+    workspace_preview = generator_live_preview_path(image_path)
+    if workspace_preview.is_file():
+        candidates.append(workspace_preview)
+    if PREVIEW_DIR.exists():
+        stem = _name_without_suffix(image_path)
+        candidates.extend(PREVIEW_DIR.glob(f"{stem}.preview*.png"))
+    return sorted(set(candidates), key=lambda p: p.stat().st_mtime, reverse=True)
 
 
 def generator_output_base(image_path: str | Path) -> Path:
-    image_path = Path(image_path)
-    return image_path.with_name(_name_without_suffix(image_path))
+    return generator_json_output_base(image_path)
 
 
 GENERATED_RUN_ROOTS = ("imgs/generated", "generated")
@@ -455,27 +533,46 @@ def discover_generated_run_folders(repo_root: str | Path) -> list[Path]:
     repo_root = Path(repo_root)
     seen: set[str] = set()
     runs: list[Path] = []
+
+    def _add_run(folder: Path) -> None:
+        if not folder.is_dir() or folder.name.startswith("."):
+            return
+        try:
+            key = str(folder.resolve()).lower()
+        except OSError:
+            key = str(folder).lower()
+        if key in seen:
+            return
+        try:
+            has_json = any(folder.rglob("*.json"))
+        except OSError:
+            has_json = False
+        if not has_json:
+            return
+        seen.add(key)
+        runs.append(folder)
+
+    if IMAGE_WORKSPACE_ROOT.is_dir():
+        for workspace in sorted(IMAGE_WORKSPACE_ROOT.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+            if not workspace.is_dir():
+                continue
+            for candidate in (
+                workspace / "json",
+                workspace / "json" / "finals",
+            ):
+                _add_run(candidate)
+            for child in workspace.glob("json/*"):
+                _add_run(child)
+
     for root in generated_run_search_roots(repo_root):
         try:
             children = sorted(root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
         except OSError:
             continue
         for child in children:
-            if not child.is_dir() or child.name.startswith("."):
-                continue
             if root.name == "imgs" and child.name in {"filter-previews", "luma-bands"}:
                 continue
-            key = str(child.resolve()).lower()
-            if key in seen:
-                continue
-            try:
-                has_json = any(child.rglob("*.json"))
-            except OSError:
-                has_json = False
-            if not has_json:
-                continue
-            seen.add(key)
-            runs.append(child)
+            _add_run(child)
     return runs
 
 
@@ -506,7 +603,22 @@ def _name_without_suffix(path: Path) -> str:
     return path.stem
 
 
+def generator_available() -> bool:
+    try:
+        from build_profile import generator_disabled
+
+        if generator_disabled():
+            return False
+    except Exception:
+        pass
+    return GENERATOR_EXE.is_file()
+
+
 def build_generator_command(image_path: str | Path, setting) -> list[str]:
+    if not generator_available():
+        raise RuntimeError(
+            f"GPU generator is disabled or missing: {GENERATOR_EXE}"
+        )
     image_path = Path(image_path)
     return [
         str(GENERATOR_EXE),

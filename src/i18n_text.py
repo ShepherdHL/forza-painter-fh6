@@ -3,7 +3,11 @@ from __future__ import annotations
 TEXT_PATCHES = {
     "zh-tw": {
         "title": None,  # filled at runtime from existing app title
-        "subtitle": "產生 geometry JSON 並匯入 Forza Horizon 貼紙編輯器。",
+        "subtitle": "將圖像轉換為 .JSON 檔案，並匯入 Forza Horizon 貼紙編輯器。",
+        "header_kicker": "Forza Painter - 貼紙匯入/匯出套件",
+        "header_build_prefix": "建置版本 - {version} (",
+        "header_build_experimental": "實驗版",
+        "header_build_suffix": "); {date}",
         "language": "語言",
         "layer_count": "模板圖層數",
         "layer_count_required": "請填寫模板圖層數。輸入遊戲中顯示的精確圖層數。",

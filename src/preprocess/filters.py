@@ -6,7 +6,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from preprocess.common import PREVIEW_EXPORT_ROOT, atomic_cv2_write, read_bgra
+from asset_workspace import (
+    filter_preview_path,
+    legacy_preprocessed_path,
+    variant_image_path,
+)
+from preprocess.common import atomic_cv2_write, read_bgra
 from preprocess.complexity import estimate_layers_from_bgra
 from preprocess.luma import apply_luma_bands_bgra
 from utils import PreprocessError
@@ -83,16 +88,24 @@ def is_preprocess_mode(mode: str | None) -> bool:
 
 def is_preprocess_variant_path(path: str | Path) -> bool:
     stem = Path(path).stem.lower()
+    parent_name = Path(path).parent.name.lower()
+    if parent_name == "variants":
+        return True
     for mode_id in PREPROCESS_MODE_IDS:
         if mode_id == PREPROCESS_NONE:
             continue
-        if f".{mode_id}" in stem:
+        if f".{mode_id}" in stem or stem == mode_id:
             return True
     return ".luma-bands" in stem or ".luma_band" in stem
 
 
 def preprocess_mode_for_path(path: str | Path) -> str | None:
-    stem = Path(path).stem.lower()
+    path = Path(path)
+    stem = path.stem.lower()
+    if path.parent.name.lower() == "variants":
+        for mode_id in PREPROCESS_MODE_IDS:
+            if mode_id != PREPROCESS_NONE and stem == mode_id:
+                return mode_id
     for mode_id in PREPROCESS_MODE_IDS:
         if mode_id != PREPROCESS_NONE and f".{mode_id}" in stem:
             return mode_id
@@ -106,15 +119,25 @@ def preprocessed_image_path(image_path: str | Path, mode: str) -> Path:
     mode = normalize_preprocess_mode(mode)
     if mode == PREPROCESS_NONE:
         return image_path
-    return image_path.with_name(f"{image_path.stem}.{mode}{image_path.suffix}")
+    return variant_image_path(image_path, mode)
+
+
+def _legacy_preprocessed_exists(image_path: Path, mode: str) -> bool:
+    path = legacy_preprocessed_path(image_path, mode)
+    try:
+        return path.is_file()
+    except OSError:
+        return False
 
 
 def preprocessed_image_exists(image_path: str | Path, mode: str) -> bool:
     path = preprocessed_image_path(image_path, mode)
     try:
-        return path.is_file()
+        if path.is_file():
+            return True
     except OSError:
-        return False
+        pass
+    return _legacy_preprocessed_exists(Path(image_path), mode)
 
 
 def apply_preprocess_bgra(bgra: np.ndarray, mode: str) -> np.ndarray:
@@ -197,13 +220,16 @@ def preprocess_image_file(image_path: str | Path, mode: str) -> Path:
 
 
 def preview_cache_path(source: Path, mode: str) -> Path:
-    source = Path(source)
-    PREVIEW_EXPORT_ROOT.mkdir(parents=True, exist_ok=True)
-    safe_stem = source.stem.replace(" ", "_")[:80] or "image"
-    return PREVIEW_EXPORT_ROOT / f"{safe_stem}.{normalize_preprocess_mode(mode)}.png"
+    return filter_preview_path(source, mode)
 
 
-def build_preview_payload(source: Path, *, max_dim: int = 760) -> dict[str, dict]:
+def build_preview_payload(
+    source: Path,
+    *,
+    max_dim: int = 760,
+    write_to_disk: bool = True,
+) -> dict[str, dict]:
+    """Build Image Preview filter cards. Thumbnails live in the per-image workspace (session cache)."""
     source = Path(source)
     bgra = read_bgra(source)
     height, width = bgra.shape[:2]
@@ -219,9 +245,14 @@ def build_preview_payload(source: Path, *, max_dim: int = 760) -> dict[str, dict
     for mode_id in PREPROCESS_MODE_IDS:
         processed = apply_preprocess_bgra(bgra, mode_id)
         cache_path = preview_cache_path(source, mode_id)
-        atomic_cv2_write(cache_path, processed)
+        if write_to_disk:
+            atomic_cv2_write(cache_path, processed)
         payload[mode_id] = {
             "path": cache_path,
             "estimate": estimate_layers_from_bgra(processed),
         }
     return payload
+
+
+def preview_output_folder(source: str | Path) -> Path:
+    return filter_preview_path(source, PREPROCESS_NONE).parent

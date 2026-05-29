@@ -32,6 +32,13 @@ _HEX_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]+$|^[0-9a-fA-F]+$")
 
 
 def updates_enabled() -> bool:
+    try:
+        from build_profile import networking_disabled
+
+        if networking_disabled():
+            return False
+    except Exception:
+        pass
     value = os.environ.get("FORZA_PAINTER_CHECK_UPDATES", "").strip().lower()
     return value in ("1", "true", "yes", "on")
 
@@ -96,6 +103,15 @@ def validate_geometry_path(path: Any) -> Path:
 
 
 def validate_fetch_url(url: str) -> str:
+    try:
+        from build_profile import networking_disabled
+
+        if networking_disabled():
+            raise ValueError("Networking is disabled for this build profile")
+    except ValueError:
+        raise
+    except Exception:
+        pass
     parsed = urlparse(url)
     if parsed.scheme != "https":
         raise ValueError(f"Only HTTPS URLs are allowed (got {url!r})")

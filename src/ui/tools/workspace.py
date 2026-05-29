@@ -8,7 +8,6 @@ from tkinter import BOTH, Frame, ttk
 
 from ui.tools.background_removal_panel import BackgroundRemovalToolPanel
 from ui.tools.color_picker_panel import ColorPickerToolPanel
-from ui.tools.fh6_diagnostics_panel import Fh6DiagnosticsToolPanel
 from ui.tools.panel_base import ToolPanel
 
 
@@ -18,14 +17,30 @@ class ToolsWorkspace:
     def __init__(self, app: Any) -> None:
         self.app = app
         self.panels: list[ToolPanel] = [
-            ColorPickerToolPanel(app),
-            BackgroundRemovalToolPanel(app),
-            Fh6DiagnosticsToolPanel(app),
+            ColorPickerToolPanel(self.app),
+            BackgroundRemovalToolPanel(self.app),
         ]
         self._notebook: ttk.Notebook | None = None
         self._panel_frames: dict[str, Frame] = {}
+        self._host: Frame | None = None
 
     def build(self, tab: Frame) -> None:
+        self._host = tab
+        self._rebuild()
+
+    def rebuild(self) -> None:
+        if self._host is not None:
+            self._rebuild()
+
+    def _rebuild(self) -> None:
+        tab = self._host
+        if tab is None:
+            return
+        for child in list(tab.winfo_children()):
+            child.destroy()
+        self._notebook = None
+        self._panel_frames.clear()
+
         app = self.app
         outer = Frame(tab)
         outer.pack(fill=BOTH, expand=True)
@@ -45,6 +60,15 @@ class ToolsWorkspace:
             self._notebook.add(panel_frame, text=self._tr(panel.tab_key))
             self._panel_frames[panel.panel_id] = panel_frame
             panel.build(panel_frame)
+
+        if hasattr(app, "_prune_stale_translated_widgets"):
+            app._prune_stale_translated_widgets()
+        if hasattr(app, "_apply_theme_recursive"):
+            app._apply_theme_recursive(tab)
+        if hasattr(app, "_apply_ui_fonts"):
+            app._apply_ui_fonts()
+        if hasattr(app, "_restore_ready_pane_layouts"):
+            app.root.after(50, app._restore_ready_pane_layouts)
 
     def _tr(self, key: str) -> str:
         from app import tr
@@ -81,3 +105,7 @@ class ToolsWorkspace:
             except Exception:
                 pass
             panel.on_language_changed()
+
+    def on_theme_changed(self) -> None:
+        for panel in self.panels:
+            panel.on_theme_changed()

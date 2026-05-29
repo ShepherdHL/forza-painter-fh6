@@ -8,9 +8,8 @@
 import sys
 import argparse
 import importlib
-import ctypes, sys
+import sys
 import psutil
-import ctypes
 import struct
 import subprocess
 #from geometrize.geometrize import geometrize_image
@@ -42,13 +41,6 @@ import os
 from utils import load_cv2, parse_int
 
 FH6_DISCOVERED_TABLE_POINTER_DELTA = 0x1E
-
-
-def is_admin():
-    try:
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except OSError:
-        return False
 
 
 def _validate_layer_table_before_write(pid, profile, table_address, layer_count):
@@ -509,20 +501,22 @@ def main(args):
     #     geometrize_image(path)
 
 if __name__ == "__main__":
-    if is_admin() or os.environ.get("FORZA_PAINTER_NO_ELEVATE") == "1":
-        # Capture any exceptions
-        try:
-            main(sys.argv)
-        except BaseException:
-            import sys
-            print(sys.exc_info()[0])
-            import traceback
-            print(traceback.format_exc())
-        finally:
-            #ThreadManager.ensure_all_threads_killed()
-            if os.environ.get("FORZA_PAINTER_NO_PAUSE") != "1":
-                print("Press Enter to continue ...")
-                input()
-    else:
-        # Run as admin
-        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, subprocess.list2cmdline(sys.argv), None, 1)
+    # CLI importer: elevation is requested by the GUI (prepare_memory_work) before memory
+    # work — not at helper/CLI startup. See trust_workflow.request_admin_restart.
+    try:
+        from defender_audit import log_startup
+
+        log_startup(sys.argv)
+    except Exception:
+        pass
+    try:
+        main(sys.argv)
+    except BaseException:
+        print(sys.exc_info()[0])
+        import traceback
+
+        print(traceback.format_exc())
+    finally:
+        if os.environ.get("FORZA_PAINTER_NO_PAUSE") != "1":
+            print("Press Enter to continue ...")
+            input()

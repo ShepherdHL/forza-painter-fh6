@@ -16,6 +16,14 @@
 </p>
 
 <p align="center">
+  <a href="README.md">README</a> ·
+  <a href="FAQ.md">FAQ</a> ·
+  <a href="ACKNOWLEDGEMENTS.md">Acknowledgements</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
+  <a href="LICENSE">License</a>
+</p>
+
+<p align="center">
   <code>v1.6.6</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>One-file EXE</code>
 </p>
 
@@ -23,17 +31,18 @@ PNG/JPG/BMP 이미지를 Forza Horizon 6 비닐 그룹 레이어로 변환합니
 
 > **EXE 다운로드:** [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases)에서 `forza-painter-fh6-v1.6.6.exe`를 내려받아 바로 실행하세요.
 
-> **결과가 흐릿하면:** 먼저 `Random samples` 값을 높이세요. **200000** 이상부터 품질 차이가 크게 보이는 경우가 많습니다.
+> **결과가 흐릿하면:** 먼저 **Random samples** 값을 높이세요. **200000** 이상부터 품질 차이가 크게 보이는 경우가 많습니다.
 
-> **가져오기는 시간이 걸릴 수 있습니다:** v1.4.1부터 여러 FH6 템플릿 위치 찾기 방식을 시도하며 최대 5분 정도 걸릴 수 있습니다. FH6를 Vinyl Group Editor에 그대로 두고 메뉴를 바꾸지 마세요.
+> **가져오기는 시간이 걸릴 수 있습니다:** 여러 FH6 템플릿 위치 찾기 방식을 시도하며 최대 5분 정도 걸릴 수 있습니다. FH6를 Vinyl Group Editor에 그대로 두고 메뉴를 바꾸지 마세요.
 
 | 기능 | 설명 |
 | --- | --- |
 | JSON 생성 | 내장 GPU/OpenCL 생성기로 이미지를 geometry JSON으로 변환합니다. |
 | 이미지 미리보기 | 생성 전에 전처리 필터(luma, 양방향, 포스터라이즈, 셀 셰이딩 등)를 비교합니다. |
-| Final JSON 가져오기 | 생성된 geometry JSON을 FH6로 가져옵니다(실행 폴더, 최적 final 선택). |
-| 수작업 JSON 가져오기 | FH6 타입코드/수작업 JSON(사각형, 원, 삼각형 등)을 가져옵니다. |
-| 게임 JSON보내기 | 열린 FH6 비닐 그룹을 수작업 JSON으로보냅니다. |
+| 텍스트 비닐 | GB2312 문자 라이브러리와 시스템 글꼴로 CJK 입력, 또는 참조 이미지 추적. |
+| Final JSON 가져오기 | 생성된 geometry JSON을 FH6로 가져옵니다. |
+| 수작업 JSON 가져오기 | FH6 타입코드/수작업 JSON을 가져옵니다. |
+| 게임 JSON 내보내기 | 열린 FH6 비닐 그룹을 수작업 JSON으로 내보냅니다. |
 | 안전한 쓰기 | 쓰기 전에 편집 가능한 레이어 테이블을 자동으로 찾고 검증합니다. |
 | 업데이트 확인 | 시작 시 새 버전을 확인하고 변경 내역을 표시합니다. |
 
@@ -41,9 +50,9 @@ PNG/JPG/BMP 이미지를 Forza Horizon 6 비닐 그룹 레이어로 변환합니
 
 1. [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases)에서 `forza-painter-fh6-v1.6.6.exe`를 다운로드합니다.
 2. EXE를 쓰기 가능한 일반 폴더에 둡니다. 예: `Desktop\forza-painter-fh6`.
-3. EXE를 더블 클릭합니다. FH6 가져오기에서 Windows가 프로세스 접근을 막으면 관리자 권한으로 실행하세요.
+3. EXE를 더블 클릭합니다. **가져오기 또는 내보내기** 시 동의를 요청하고 필요하면 UAC(관리자) 프롬프트가 표시됩니다.
 4. FH6에서 `Create Vinyl Group` / `Vinyl Group Editor`를 열고 sphere 템플릿을 불러온 뒤 `Ungroup`합니다.
-5. 앱에서 JSON을 생성하고 **Final JSON 가져오기** 탭에서 실제 템플릿 레이어 수를 입력한 뒤 가져오기를 실행합니다.
+5. 앱 **Create**에서 JSON을 생성하고 **Import → Import Final JSON**에서 **정확한 템플릿 레이어 수**를 입력한 뒤 가져옵니다. 헤더 **Help**에서 튜토리얼과 안전 가이드를 열 수 있습니다.
 
 개발 목적이 아니라면 GitHub의 자동 `Source code` ZIP을 받을 필요가 없습니다. 일반 사용자는 `.exe`만 사용하세요.
 
@@ -72,173 +81,24 @@ PNG/JPG/BMP 이미지를 Forza Horizon 6 비닐 그룹 레이어로 변환합니
   </tr>
 </table>
 
-## JSON 생성
+## 품질 프리셋 (요약)
 
-1. `Generate JSON` 페이지를 엽니다.
-2. `Add images`를 클릭하고 PNG/JPG/BMP 이미지를 선택합니다.
-3. 품질 프리셋을 선택합니다.
-4. 필요하면 `Use custom settings`를 켜고 출력 레이어, 해상도, 무작위 샘플, 변형 샘플을 조정합니다.
-5. 하단의 `Start generating` 버튼을 클릭합니다.
-6. 미리보기와 로그가 업데이트될 때까지 기다립니다.
-
-생성된 파일은 원본 이미지 옆에 저장됩니다. 예: `image.500.json`, `image.1000.json`, `image.3000.json`.
-
-템플릿 레이어 수와 가장 잘 맞는 높은 레이어 JSON을 사용하는 것이 좋습니다. 3000 레이어 템플릿에는 `image.3000.json` 또는 최종 `image.json`을 사용하세요.
-
-| 프리셋 | 출력 레이어 | 무작위 샘플 | 용도 |
+| 프리셋 | 레이어 | 무작위 샘플 | 비고 |
 | --- | ---: | ---: | --- |
-| extremely fast | 500 | 30000 | 빠른 구도 확인 |
-| fast | 1000 | 60000 | 빠른 초안 |
-| balanced | 1800 | 120000 | 기본 권장값 |
-| slow | 2500 | 220000 | 완성용 품질 |
-| super slow | 3000 | 350000 | 가장 선명하지만 매우 느림 |
+| 0. Tailored (실험) | 이미지별 | 이미지별 | 선택 사항. Image Preview 분석 후 생성. **Normal(4)이 기본값.** |
+| 1. Eco (실험) | 1500 | 90000 | 낮은 GPU 부하 |
+| 4. Normal | 1800 | 120000 | 권장 기본값 |
+| 7. Maximum Power | 2900 | 1000000 | 최고 품질, 가장 느림 |
 
-## JSON 가져오기
+전체 프리셋 표, 작업 흐름, 문제 해결, 안전 FAQ: **[FAQ.md](FAQ.md)** (영어)
 
-### Final JSON 가져오기 (생성된 geometry)
+## 추가 문서
 
-1. FH6를 실행하고 `Vinyl Group Editor`를 열어 둡니다.
-2. 단순한 sphere 레이어가 많은 템플릿을 불러오거나 만듭니다.
-3. 템플릿을 `Ungroup`하고 게임에 표시되는 실제 레이어 수를 확인합니다.
-4. **Final JSON 가져오기**에서 `Refresh`를 누르고 `forzahorizon6.exe`를 선택합니다.
-5. 실제 템플릿 레이어 수를 입력합니다.
-6. 생성 실행 폴더를 선택하거나 `.json`을 추가 / 생성 출력을 사용합니다.
-7. **Final JSON을 FH6에 가져오기**를 클릭합니다(고급 주소는 보통 비워 둡니다).
-
-### 수작업 JSON 가져오기 (타입코드 도형)
-
-1. 동일한 게임 연결과 템플릿 레이어 수를 사용합니다.
-2. **수작업 JSON 가져오기**에서 수작업/타입코드 `.json`을 추가하고 지원/미지원 도형 수를 확인합니다.
-3. 가져온 뒤 FH6에서 **저장 후 비닐 그룹을 다시 불러오세요**.
-
-### 게임 JSON보내기
-
-1. FH6에서보낼 비닐 그룹을 연 상태로 **게임 JSON보내기**에서보냅니다(`runtime/typecode-export/`).
-
-FH는 커버 저장과 적용 범위를 위해 4개의 추가 경계 레이어가 필요합니다. 예: 1000 레이어 JSON에는 최소 1004 레이어 템플릿을 사용하는 것이 좋습니다.
-
-## 중요 규칙
-
-- 템플릿은 반드시 Ungroup되어 있어야 합니다.
-- 앱에 입력한 레이어 수는 게임과 정확히 같아야 합니다.
-- 가져오기 중에는 게임 메뉴를 전환하지 마세요.
-- FH6를 다시 시작하거나 템플릿을 다시 불러온 경우 새 레이어 수로 다시 가져오세요.
-- JSON 레이어가 템플릿보다 적으면 남는 템플릿 레이어는 숨겨집니다.
-- JSON 레이어가 템플릿보다 많으면 초과 shape는 잘립니다.
-- 투명 PNG 배경은 보이는 배경색으로 가져오지 않습니다.
-
-## 런타임 파일 위치
-
-단일 EXE는 내부 파일을 임시로 풀고 일반 런타임 데이터는 EXE 밖에 저장합니다. 정확한 위치는 시작 로그와 `Tools` 페이지에서 확인할 수 있습니다.
-
-EXE 옆에 생길 수 있는 외부 폴더:
-
-- `runtime/`: 로그, 세션 데이터, 임시 파일.
-- `webui-data/`: 로컬 브라우저/UI 캐시.
-
-앱을 닫은 뒤 이 폴더를 삭제하면 로컬 런타임 데이터를 초기화할 수 있습니다.
-
-## 문제 해결
-
-- **FH6 가져오기가 안 됨:** 앱을 닫고 EXE를 관리자 권한으로 실행하세요.
-- **GPU/OpenCL 오류:** NVIDIA/AMD/Intel 그래픽 드라이버를 업데이트하세요. 내장 생성기는 OpenCL을 사용합니다.
-- **템플릿을 찾을 수 없음:** Vinyl Group Editor에 있는지, 템플릿이 Ungroup되었는지, 레이어 수가 정확한지 확인하세요.
-- **가져온 결과가 흐림:** 더 높은 레이어 JSON을 사용하거나 `Output layers` / `Random samples`를 높이세요.
-- **디버깅이 필요함:** 앱에서 `Export detailed log`를 실행하고 로그를 이슈에 첨부하세요.
-
-## 리소스
-
-- 가져오기 참고 영상: https://www.bilibili.com/video/BV1hG5Z6nENZ
-- 내장 GPU 생성기 출처/참고: https://github.com/zjl88858/forza-painter-geometrize-gpu
-- 전체 변경 기록: [CHANGELOG.md](CHANGELOG.md)
-
-## 감사의 글
-
-이 프로젝트는 Forza Painter 워크플로를 기반으로 한 파생 프로젝트이며, 상류 MIT 라이선스 고지를 유지합니다.
-
-| 개인 / 프로젝트 | 링크 | 기여 |
-| --- | --- | --- |
-| the_adawg (AE) | [forza-painter/forza-painter](https://github.com/forza-painter/forza-painter) | 원조 Forza Painter: MIT 라이선스 FH 가져오기 워크플로, 메모리 쓰기/가져오기 기반, 기하→비닐 접근 방식. |
-| Sam Twidale | [samcodes.co.uk](https://samcodes.co.uk/) | geometrize-lib; 상류 라이선스에 기인한 기하 근사 원작. |
-| Michael Fogleman | [fogleman/primitive](https://github.com/fogleman/primitive) | Primitive 라이브러리; 상류 라이선스에 기인한 프리미티브 기반 이미지 근사. |
-| Omar Cornut | [ocornut/imgui](https://github.com/ocornut/imgui) | Dear ImGui; 원조 forza-painter GUI 프레임워크. |
-| DxBang | [Bang's Forza Color Converter](https://bang.systems/forza-colors/) | 색상 탭에서 사용하는 Forza H/S/B 색상 변환. |
-| bvzrays | [bvzrays/forza-painter-fh6](https://github.com/bvzrays/forza-painter-fh6) | FH6 중심 데스크톱 포크: UI, 가져오기/로케이터 동작, 앱 패키징, Forza Horizon 6 워크플로 아이디어. |
-| Kloudy (heyitshestia) | [kloudys-fh6-painter](https://github.com/heyitshestia/kloudys-fh6-painter) | FH6 페인터 포크: 런처 워크플로, 스타일 프리셋, Luma Prep, Edge Repair, 완료 체크포인트 브라우저, 업데이트 흐름, 릴리스 패키징, 수작업/범용 가져오기 작업. |
-| zjl88858 | [forza-painter-geometrize-gpu](https://github.com/zjl88858/forza-painter-geometrize-gpu) | 번들 생성기가 사용하는 GPU/OpenCL geometrize 생성기 계보. |
-| LibreHardwareMonitor | [LibreHardwareMonitor/LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) | 리소스 모니터 탭의 하드웨어 모니터링 백엔드. |
-| H3XDaemon | [H3XDaemon](https://github.com/H3XDaemon) | 이 저장소 기여자. |
-| MaccLochlainn | [MaccLochlainn](https://github.com/MaccLochlainn) | 이 저장소 기여자. |
-| ree9622 | [ree9622](https://github.com/ree9622) | 상류 기록의 한국어 현지화 기여자. |
-
-전체 기여자 목록은 [contributors 페이지](https://github.com/ShepherdHL/forza-painter-fh6/graphs/contributors)를 참고하세요.
-
-## 변경 기록
-
-여기에는 버전 번호가 있는 릴리스만 남깁니다. 앱 업데이트 안내에 쓰이는 전체 기록은 [CHANGELOG.md](CHANGELOG.md)를 참고하세요.
-
-### v1.6.1 / 2026-05-24
-
-- 앱 버전을 `v1.6.1`로 업데이트했습니다. 릴리스 파일은 이제 `forza-painter-fh6-v1.6.1.exe`를 사용합니다.
-- 기본 제공 프리셋에서 `luma_band` 전처리를 기본 비활성화했습니다.
-- 가져오기 시 `webui-data`의 오래된 FH6 세션 위치 데이터를 재사용하지 않고, 쓰기 전에 현재 템플릿을 다시 찾습니다.
-- JSON 미리보기는 패키징 환경별 타원 왜곡 차이를 줄이기 위해 안정적인 단일 렌더러 경로를 사용합니다.
-
-### v1.6.0 / 2026-05-24
-
-- 앱 버전을 `v1.6.0`으로 업데이트했습니다. 릴리스 파일은 이제 `forza-painter-fh6-v1.6.0.exe`를 사용합니다.
-- 내장 GPU 생성기를 upstream `canary-26052401`로 업데이트했습니다.
-- upstream `errorGridSize` 프리셋 지원을 반영했습니다.
-- 투명 영역으로 도형이 넘치는 것을 줄이는 upstream 알고리즘 조정을 반영했습니다.
-- 투명 이미지 하단의 큰 타원 생성 품질이 크게 개선되었습니다.
-
-### v1.5.4 / 2026-05-23
-
-- 고해상도 원본 이미지, 생성기 미리보기 PNG, JSON 미리보기가 현재 미리보기 패널에 맞게 비율을 유지하며 표시되도록 수정했습니다.
-- JSON 미리보기에서 type 16 회전 타원이 납작해지거나 잘못 회전되어 보이던 문제를 수정했습니다.
-
-### v1.5.3 / 2026-05-22
-
-- 단일 EXE용 사용자 프리셋 가져오기, 이미지/JSON 목록 제거, checkpoint 재사용, 출력 이름 수정, Pillow 미리보기 fallback을 추가했습니다.
-
-### v1.5.2 / 2026-05-22
-
-- 일반 사용자가 Python, `.venv`, helper 파일 없이 사용할 수 있는 단일 EXE를 추가했습니다.
-- GUI EXE가 가져오기와 FH6 메모리 탐색을 위해 숨겨진 helper 모드로 자기 자신을 다시 실행할 수 있습니다.
-- Tools 페이지와 시작 로그에 외부 런타임/캐시 위치를 표시합니다.
-
-### v1.5.1 / 2026-05-22
-
-- 프로젝트 `.venv`에 `pip`가 없는 경우 의존성 설치가 실패하던 문제를 수정했습니다.
-- 소스 패키지의 누락 파일 진단 메시지를 개선했습니다.
-
-### v1.5.0 / 2026-05-22
-
-- 내장 GPU/OpenCL 생성기를 upstream `canary-26052102`로 업데이트했습니다.
-- upstream PR #4의 work-group evaluation 알고리즘을 추가했습니다.
-- 시작 시 업데이트 확인, 루트 `CHANGELOG.md`, 어두운 데스크톱 UI를 추가했습니다.
-
-### v1.4.1 / 2026-05-21
-
-- FH6 템플릿 자동 찾기가 v1.3 및 v1.4 스캔 방식을 모두 시도합니다.
-- RTTI vtable fallback을 추가하고 자동 찾기 대기 시간을 늘렸습니다.
-
-### v1.4.0 / 2026-05-21
-
-- 50000자 제한의 자세한 로그 내보내기를 추가했습니다.
-- 큰 쓰기 가능 메모리 영역에 대한 FH6 템플릿 자동 찾기를 개선했습니다.
-
-### v1.3.0 / 2026-05-21
-
-- 내장 GPU/OpenCL 생성기를 upstream `canary-26052101`로 업데이트했습니다.
-- GPU 선택 수정과 선택된 OpenCL 장치 로그를 추가했습니다.
-
-### v1.2.0 / 2026-05-20
-
-- 내장 GPU/OpenCL 생성기를 upstream `canary-26052001`로 업데이트했습니다.
-- 내장 및 사용자 생성 설정에 `forceOpaqueShapes = true`를 명시했습니다.
-
-### v1.1.1 / 2026-05-20
-
-- 앱 창, CLI, 릴리스 패키지 이름에 중앙 버전 관리를 추가했습니다.
-- 저장소 구조와 릴리스 패키징을 정리했습니다.
+| 문서 | 내용 |
+| --- | --- |
+| [FAQ.md](FAQ.md) | 작업 흐름, 규칙, 문제 해결 (영어) |
+| [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) | 감사 및 상류 프로젝트 |
+| [CHANGELOG.md](CHANGELOG.md) | 버전 기록 (앱 내 업데이트도 참조) |
+| [SECURITY.md](SECURITY.md) | 보안 정책 |
+| [docs/SAFETY.ko.md](docs/SAFETY.ko.md) | 안전 가이드 (한국어) |
+| [docs/TEXT_VINYL.md](docs/TEXT_VINYL.md) | 텍스트 비닐 참고 |

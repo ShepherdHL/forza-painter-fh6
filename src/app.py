@@ -22,11 +22,10 @@ import faulthandler
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from tkinter import BOTH, BOTTOM, END, HORIZONTAL, LEFT, RIGHT, TOP, TclError, VERTICAL, X, Y, Button, Canvas, Checkbutton, Entry, Frame, Label, Listbox, PhotoImage, StringVar, Text, Tk, Toplevel, filedialog, messagebox, ttk
+from tkinter import BOTH, BOTTOM, END, HORIZONTAL, LEFT, RIGHT, TOP, TclError, VERTICAL, X, Y, Button, Canvas, Checkbutton, Entry, Frame, Label, Listbox, Menu, PhotoImage, StringVar, Text, Tk, Toplevel, filedialog, messagebox, ttk
 
 import psutil
 
-from acknowledgements import get_acknowledgements
 from app_paths import ROOT
 from app_config import (
     APP_DIR,
@@ -36,6 +35,10 @@ from app_config import (
     TYPECODE_IMPORT_DIR,
     MEMORY_SNAPSHOT_LIMIT_MB,
     PREVIEW_MAX,
+    PREVIEW_MAIN_MIN,
+    PREVIEW_FILTER_CARD_MIN,
+    PREVIEW_FILTER_THUMB_W,
+    PREVIEW_FILTER_THUMB_H,
     GENERATE_COMPARE_SOURCE_MIN,
     GENERATE_COMPARE_RESULT_MIN,
     DETAILED_LOG_OUTPUT_LIMIT,
@@ -45,6 +48,10 @@ from app_config import (
     UPDATE_CHANGELOG_URL,
     UPDATE_RELEASE_URL,
     UPDATE_CHECK_TIMEOUT_SECONDS,
+    ECO_GPU_COOLDOWN_MAX_WAIT_SECONDS,
+    ECO_GPU_COOLDOWN_POLL_SECONDS,
+    ECO_GPU_COOLDOWN_TARGET_C,
+    ECO_GPU_FIXED_PAUSE_SECONDS,
 )
 from game_profiles import PROFILES
 from geometry_json import RECTANGLE, ROTATED_ELLIPSE, load_normalized_geometry
@@ -53,6 +60,20 @@ from fh6_typecode_json import (
     load_typecode_shapes,
     typecode_shape_count,
     typecode_shape_summary,
+)
+from eco_generation import (
+    EcoGenerationSettings,
+    is_eco_experimental_preset,
+    load_eco_generation_settings,
+    save_eco_generation_settings,
+)
+from image_tailored_preset import (
+    build_tailored_values,
+    is_tailored_experimental_preset,
+    load_tailored_acknowledged,
+    normal_base_values,
+    save_tailored_acknowledged,
+    write_tailored_profile,
 )
 from generator_backend import (
     GENERATOR_EXE,
@@ -64,6 +85,7 @@ from generator_backend import (
     best_safe_final_json,
     build_generator_command,
     build_generator_env,
+    generator_available,
     checkpoints_for_image,
     discover_generated_run_folders,
     generated_jsons,
@@ -76,13 +98,25 @@ from generator_backend import (
     generated_preview_files,
     generator_preview_path,
     geometry_shape_count,
+    default_preset_label,
+    merged_settings_values,
     load_settings,
     preprocess_input_image,
     write_custom_settings,
     write_user_settings_preset,
 )
 from utils import load_cv2, load_pillow
-from preprocess.common import PREVIEW_EXPORT_ROOT
+from asset_workspace import ensure_image_workspace_source
+from file_management_settings import load_file_management_settings
+from preset_preview import (
+    effective_max_dimension,
+    gpu_load_tier,
+    preset_badge_prefix,
+    preset_setting_int,
+    preset_setting_name,
+    projected_layer_count,
+    read_image_dimensions,
+)
 from preprocess.filters import (
     PREPROCESS_FILTERS,
     PREPROCESS_MODE_IDS,
@@ -93,6 +127,7 @@ from preprocess.filters import (
     preprocessed_image_exists,
     preprocessed_image_path,
     preprocess_mode_for_path,
+    preview_output_folder,
 )
 from security_policy import (
     GITHUB_RELEASES_API,
@@ -102,6 +137,15 @@ from security_policy import (
     validate_fh6_session,
     parse_safe_hex_address,
 )
+from trust_workflow import (
+    action_requires_admin,
+    describe_helper_launch,
+    format_admin_action_label,
+    is_permission_error_text,
+    is_windows_admin,
+    prepare_memory_work,
+    request_admin_restart,
+)
 from ui_layout import (
     DEFAULT_PANE_RATIOS,
     apply_pane_ratio,
@@ -109,10 +153,34 @@ from ui_layout import (
     pane_ratio,
     save_ui_layout,
 )
-from ui.header_telemetry import HeaderTelemetryPanel
+from ui.preset_combobox import PresetCombobox
 from ui.text_vinyl_workspace import TextVinylWorkspace
+from ui.dev_tools import DevToolsWorkspace
+from ui.hub_navigation import HubBar
+from ui.theme_manager import ThemeManager
+from ui.theme_states import (
+    apply_entry_validation,
+    apply_frame_selection,
+    apply_label_emphasis,
+    apply_label_selection,
+    apply_update_indicator,
+)
 from ui.tools import ToolsWorkspace
-from ui_chrome import DonutGauge, header_rule
+from ui.file_management_workspace import FileManagementWorkspace
+from ui.first_run import show_first_run_welcome
+from ui.help_dialogs import show_acknowledgements_dialog, show_tutorial_dialog
+from ui.safety_viewer import show_safety_guide
+from ui_preferences import load_ui_preferences, save_ui_preferences
+from ui_chrome import header_rule
+from ui.header_telemetry import HeaderTelemetryPanel
+from resource_monitor import (
+    ResourceMonitorBackend,
+    ResourceSnapshot,
+    evaluate_heat_state,
+    load_settings as load_resource_monitor_settings,
+    unavailable_snapshot,
+)
+from msi_afterburner import read_gpu_temp_c
 from ui_themes import (
     DEFAULT_THEME_ID,
     THEME_IDS,
@@ -122,18 +190,21 @@ from ui_themes import (
     resolve_palette,
     save_theme_id,
 )
-from resource_monitor import (
-    ResourceMonitorBackend,
-    ResourceSnapshot,
-    evaluate_heat_state,
-    load_settings as load_resource_monitor_settings,
-)
 from i18n import LANGUAGES, eta_suffix, tr as tr_text, ui_font_name
 from i18n_ja import merge_japanese_text
 from i18n_ko_patch import merge_korean_patch
 from i18n_text import apply_text_patches
 from ui_language import language_display_name, resolve_initial_language_code, save_language_code
-from version import APP_DISPLAY_NAME, __version__, app_title, app_version_string
+from ui_input_guards import install_scroll_selection_guards
+from version import (
+    APP_DISPLAY_NAME,
+    APP_LINE_VERSION,
+    APP_SHORT_NAME,
+    BUILD_RELEASE_DATE,
+    __version__,
+    app_title,
+    app_version_string,
+)
 
 
 def _startup_crash_report_paths() -> list[Path]:
@@ -198,24 +269,59 @@ UI_LOG_FONT = ("Consolas", 10)
 
 TEXT = {
     "en": {
-        "title": app_title(),
-        "subtitle": "Generate geometry JSON and import it into Forza Horizon vinyl editor.",
-        "header_kicker": "FORZA PAINTER 1.6.X",
-        "header_audit": "Experimental build",
+        "title": APP_SHORT_NAME,
+        "subtitle": "Translate images into .JSON files, and import them into the Forza Horizon Vinyl Editor.",
+        "header_kicker": "Forza Painter - Vinyl Import/ Export Suite",
+        "header_build_prefix": "Build Version - {version} (",
+        "header_build_experimental": "Experimental",
+        "header_build_suffix": "); {date}",
         "language": "Language",
         "appearance": "Appearance",
         "layout_resize_hint": "Drag dividers to resize panels. Sizes are remembered.",
         "theme_label": "Themes",
         "theme_eurocorp": "Eurocorp",
         "theme_elite": "Elite",
+        "theme_crynet": "CryNet",
+        "theme_unatco": "UNATCO",
+        "theme_new_eden": "New Eden",
         "theme_red_phosphorous": "Red Phosphorous",
-        "theme_y2k": "Y2K",
-        "theme_spirit_of_horizon": "The Spirit of Horizon",
         "process": "Game process",
         "refresh": "Refresh",
+        "hub_create": "Create",
+        "hub_import": "Import",
+        "hub_tools": "Tools",
+        "hub_file_management": "Files",
+        "hub_dev_tools": "Developer Tools",
+        "help_menu": "Help",
+        "help_tutorial": "Tutorial",
+        "help_acknowledgements": "Acknowledgements",
+        "help_safety": "Safety guide",
+        "safety_pick_language_title": "Safety guide language",
+        "safety_pick_language_prompt": "Choose which language to read the safety guide in:",
+        "safety_lang_en": "English",
+        "safety_lang_zh": "中文",
+        "safety_lang_ja": "日本語",
+        "safety_lang_ko": "한국어",
+        "safety_pick_other_language": "Other language…",
+        "first_run_title": "Welcome to Forza Painter FH6",
+        "first_run_body": (
+            "Quick orientation:\n\n"
+            "• Create — generate JSON from images (no administrator rights).\n"
+            "• Import — write vinyls into FH6 (consent + Administrator when prompted).\n"
+            "• Tools — color picker and background removal.\n"
+            "• Dev Tools — FH6 memory diagnostics (not required for normal import).\n\n"
+            "Buttons marked with a shield need elevation for memory access.\n"
+            "Read docs/SAFETY.md before your first import."
+        ),
+        "first_run_continue": "Got it",
         "generate_tab": "Generate JSON",
         "text_tab": "Text vinyl",
-        "text_tab_hint": "Choose a script tab, enter text, pick a font (use search to filter), then generate. Use the right panel to preview reference images and generated JSON.",
+        "text_tab_hint": "Choose a script tab, enter text, and pick a font. Use the right panel to preview reference images and generated JSON.",
+        "text_scroll_options_hint": (
+            "Scroll down for Generation Options.\n"
+            "This tool can use any font from your machine. If the font is not found automatically, "
+            "try uploading it on this tab."
+        ),
         "text_outputs": "Text vinyl JSON",
         "text_outputs_hint": "JSON created on this tab. Add files manually or send a selection to Import Final when ready.",
         "text_reference_preview": "Reference image preview",
@@ -244,16 +350,27 @@ TEXT = {
         "text_shape_mode_hint": "Rectangles/squares use rectangle layers; ellipses/circles/triangles/mixed use sphere layers in FH6.",
         "text_template_hint": "FH6 template: {hint}",
         "text_cell_hint": "Larger cell = fewer vinyl layers, less fine detail.",
-        "text_color": "Color (R,G,B,A)",
+        "text_color": "Color",
+        "text_color_hint": "Edit hex or RGB; alpha 0–255 (255 = opaque). Forza H/S/B matches Bang's converter.",
+        "text_color_invalid": "Color values must be valid hex or 0–255 channels.",
         "text_coverage_ok": "All CJK characters are supported by the selected font.",
         "text_coverage_ok_korean": "Korean and other CJK characters are supported by the selected font.",
         "text_coverage_missing": "Missing {count} glyph(s) in selected font: {chars}",
         "text_coverage_missing_korean": "Korean needs a [KR] font (e.g. Malgun Gothic). Missing {count} glyph(s): {chars}",
         "text_coverage_suggest_kr": "Korean detected — select a [KR] font such as {font}.",
         "text_char_library": "Mandarin character library (GB2312 hanzi)",
+        "text_char_library_latin": "Latin extended & symbols",
+        "text_char_library_hiragana": "Hiragana",
+        "text_char_library_katakana": "Katakana",
+        "text_char_library_kanji": "Kanji (JIS)",
+        "text_char_library_hangul": "Hangul syllables",
+        "text_char_library_hanzi": "Hanzi (GB2312)",
         "text_char_search": "Search character",
         "text_char_insert": "Insert selected",
         "text_char_count": "{count} characters available",
+        "text_char_page_prev": "Previous page",
+        "text_char_page_next": "Next page",
+        "text_char_page_status": "Page {page} of {pages} · {shown} of {total}",
         "text_reference_image": "Reference image",
         "text_browse_image": "Browse",
         "text_generate_typed": "Generate from text",
@@ -297,7 +414,7 @@ TEXT = {
         "handmade_status_none": "Select a handmade JSON to inspect supported shapes.",
         "handmade_status_counts": "Shapes: total {total} · supported {supported} · unsupported {unsupported}",
         "preview_tab": "Image Preview",
-        "preview_tab_hint": "Compare preprocessing filters and approximate layer cost before generating. Layer counts are estimates only — lower often means fewer shapes. Click a card to select the filter used on the Generate tab.",
+        "preview_tab_hint": "Compare filters and layer estimates before generating. Choose an image on the left; pick a filter on the right. Layer counts are approximate.",
         "preview_choose_image": "Choose image",
         "preview_use_generate_image": "Use selected Generate image",
         "preview_apply_generate": "Open Generate tab",
@@ -307,7 +424,25 @@ TEXT = {
         "preview_output_folder": "Preview cache: {path}",
         "preview_estimate": "~{count} layers (est.)",
         "preview_estimate_unknown": "Estimate unavailable",
-        "preview_select_filter": "Click a filter card to select it for generation.",
+        "preview_estimate_projected": "~{count} layers projected",
+        "preview_estimate_projected_capped": "~{projected} projected (est. ~{raw}, capped by preset)",
+        "preview_select_filter": "Click a filter on the right to select it for generation.",
+        "preview_main_heading": "Selected preview",
+        "preview_filters_heading": "Filter options",
+        "preview_preset_heading": "Generate preset (from Generate tab)",
+        "preview_preset_none": "Select a quality preset on the Generate tab to see projected output.",
+        "preview_preset_summary": "Preset: {name} · cap {layers} layers · {samples} random samples · {resolution}px max",
+        "preview_preset_selected_filter": "Selected filter: {filter}",
+        "preview_preset_projection": "Projected output: ~{count} layers (complexity est. ~{raw} · preset cap {cap})",
+        "preview_preset_projection_simple": "Projected output: ~{count} layers",
+        "preview_preset_cap_exceeded": "Complexity est. ~{raw} exceeds preset cap ({cap}) — output may look capped or sparse on large templates.",
+        "preview_preset_cap_ok": "Complexity est. ~{raw} is within preset cap ({cap}).",
+        "preview_preset_resolution_downscale": "Source will downscale to about {width}×{height}px for generation (from {source_width}×{source_height}px).",
+        "preview_preset_gpu_light": "GPU load: light",
+        "preview_preset_gpu_moderate": "GPU load: moderate",
+        "preview_preset_gpu_heavy": "GPU load: heavy",
+        "preview_preset_gpu_extreme": "GPU load: extreme",
+        "preview_preset_disclaimer": "Projected layer count is an approximation, not a guarantee. Results may vary.",
         "filter_none": "Original",
         "filter_none_hint": "Uses your image as-is with no preprocessing. Best baseline for photos, soft gradients, hair, and skin when you do not want extra simplification.",
         "filter_luma": "Luma Bands",
@@ -345,7 +480,11 @@ TEXT = {
         "luma_saved": "Saved luma-band image: {path}",
         "luma_failed": "Luma Band Pass failed: {error}",
         "tools_tab": "Tools",
-        "tools_tab_hint": "Creative utilities for your convenience. If you're a future developer, please place any future tools in under this series of tabs.",
+        "tools_tab_hint": "Creative utilities for your convenience.",
+        "dev_tools_tab_hint": (
+            "FH6 memory diagnostics: snapshot, compare, and table inspection. "
+            "Requires Forza Horizon 6 with a valid session. Not required for normal import."
+        ),
         "tools_panel_color_picker": "Color Picker",
         "tools_panel_bg_remove": "Background Removal",
         "tools_panel_fh6": "FH6 Diagnostics",
@@ -380,6 +519,7 @@ TEXT = {
         "colors_click_hint": "Click the image to pick a color.",
         "colors_hex": "Hex",
         "colors_rgb": "RGB",
+        "colors_alpha": "Alpha",
         "colors_hsl": "HSL",
         "colors_hsb": "HSB",
         "colors_forza": "Forza H / S / B",
@@ -395,6 +535,7 @@ TEXT = {
         "add_images": "Add images",
         "remove_image": "Remove selected image",
         "quality": "Quality profile",
+        "quality_profile_dropdown_hint": "Click the field or ▾ to choose a preset",
         "import_preset": "Import preset",
         "open_preset_folder": "Open preset folder",
         "custom_settings": "Use custom settings",
@@ -440,6 +581,23 @@ TEXT = {
         "preview_image_already_on_generate": "Already on Generate image list: {name}",
         "generate_step_quality": "Step 2 - Choose Quality",
         "generate_step_quality_hint": "Fast profiles are quicker. Slow profiles use more GPU time and usually look cleaner.",
+        "preset_badge_legend": "▁▇ speed · ▁▇ detail · ▁▇ GPU · ❄ cool · ⚡ fastest · ⏩ fast · ★ default · ⚠ extreme",
+        "eco_preset_warning": "Experimental eco preset: lower GPU load and temperature, not the same quality as Slow or Maximum Quality. Optional cooldown below helps between queued images.",
+        "eco_gpu_cooldown": "Experimental GPU cooldown between images",
+        "eco_gpu_cooldown_hint": "After each image in a batch, waits until GPU is at or below 75°C when MSI Afterburner is running; otherwise pauses 30s. Install and keep MSI Afterburner open for temperature-aware cooldown.",
+        "resource_afterburner_recommend": "Install and run MSI Afterburner for CPU/GPU temperature readouts (msi.com/Landing/afterburner). Eco GPU cooldown also uses it when enabled.",
+        "eco_preset_confirm": "You selected the experimental eco / cool GPU preset.\n\nIt uses fewer random samples and a lower resolution than slow presets, so results may look softer. It does not guarantee a maximum GPU temperature.\n\nContinue with this preset?",
+        "eco_preset_active": "Experimental eco preset active: lower GPU settings than slow profiles.",
+        "tailored_preset_warning": "Experimental tailored preset (opt-in): built from Image Preview complexity. Normal is still the recommended default for most runs — use tailored when you want a per-image cap after preview.",
+        "tailored_preset_confirm": "You selected the experimental tailored preset.\n\nIt is generated from a quick image analysis and may not match final JSON layer counts. Results vary with filter choice and image content.\n\nContinue with this preset?",
+        "tailored_preset_active": "Experimental tailored preset active for the current analyzed image.",
+        "tailored_preset_updated": "Tailored preset ready for {name} (est. ~{estimate}, cap {cap} layers) — select slot 0 when you want it; Normal stays the default.",
+        "preview_estimate_uncapped": "~{raw} complexity est. (preset allows up to {cap})",
+        "eco_cooldown_waiting": "Experimental GPU cooldown: GPU {temp}°C — waiting until ≤ {target}°C before the next image…",
+        "eco_cooldown_status": "Cooling GPU ({temp}°C)…",
+        "eco_cooldown_ready": "GPU cooled to {temp}°C — continuing generation.",
+        "eco_cooldown_timeout": "GPU cooldown timed out after 5 minutes — continuing with the next image.",
+        "eco_cooldown_no_sensor": "GPU temperature unavailable — pausing {seconds}s before the next image (experimental cooldown).",
         "generate_step_run": "Step 3 - Generate",
         "generate_step_run_hint": "Click once and wait. Progress appears in Logs; generated JSON is added to the Import page automatically.",
         "scroll_hint": "Add image, choose a preset, then adjust custom settings if needed.",
@@ -498,7 +656,40 @@ TEXT = {
         "current_count": "Current layer count",
         "inspect_table": "Inspect table",
         "table_address": "Candidate table",
-        "admin_note": "This build requests administrator rights on startup for FH6 memory access.",
+        "admin_note": "Import, export, and FH6 memory tools request administrator rights when you use them—not at app launch. Generate JSON and previews work as a standard user.",
+        "privilege_standard": "Standard user",
+        "privilege_standard_shield": "🛡 Standard user — 🛡 buttons need Administrator",
+        "privilege_admin": "Administrator",
+        "memory_consent_title_import": "Confirm import into FH6",
+        "memory_consent_title_export": "Confirm export from FH6",
+        "memory_consent_title_diagnostics": "Confirm FH6 memory diagnostics",
+        "memory_consent_operation_import": "Import vinyl layer data from JSON into the game editor",
+        "memory_consent_operation_export": "Read vinyl layer data from the game editor and save JSON",
+        "memory_consent_operation_diagnostics": "Scan or inspect FH6 memory for support and debugging",
+        "memory_consent_body": (
+            "Target game: {game}\n"
+            "Process: {process} (PID {pid})\n"
+            "Action: {operation}\n\n"
+            "The application will attach to this process using Windows memory APIs. "
+            "Only vinyl / livery editor layer fields are modified (position, scale, rotation, color, shape, mask). "
+            "Gameplay values (speed, credits, stats, etc.) are not changed.\n\n"
+            "Administrator access may be required once so Windows allows OpenProcess on FH6.\n\n"
+            "Account risk: modifying game memory while FH6 is running may violate game terms or trigger anti-cheat. "
+            "See docs/SAFETY.md for details."
+        ),
+        "memory_consent_continue": "Continue",
+        "memory_consent_cancel": "Cancel",
+        "memory_consent_open_safety": "Open safety guide",
+        "elevate_prompt_title": "Administrator access required",
+        "elevate_prompt_message": (
+            "Windows needs administrator rights for this memory operation.\n\n"
+            "The app will restart with UAC elevation. After it reopens, run the same import or export again."
+        ),
+        "permission_denied_hint": (
+            "Windows denied access to the FH6 process. Restart as administrator when prompted, "
+            "then try import or export again. Close other memory tools if the problem continues."
+        ),
+        "permission_denied_offer": "Import/export needs administrator rights. Restart elevated now?",
         "no_game": "No supported game process detected",
         "ready": "Ready",
         "running": "Running",
@@ -534,10 +725,63 @@ TEXT = {
         "runtime_folder": "Runtime/cache folder",
         "open_runtime_folder": "Open runtime folder",
         "runtime_location": "Runtime/cache files are stored beside the app: {runtime}. FH6 probe cache: {probe}.",
+        "file_mgmt_tab_hint": (
+            "Control where generated files live and how caches are cleaned. "
+            "Recommended is the default for most users."
+        ),
+        "file_mgmt_preset_section": "Cleanup preset",
+        "file_mgmt_preset_hint": "Choose a preset or switch to Custom for individual options.",
+        "file_mgmt_preset_label": "Preset",
+        "file_mgmt_preset_recommended": "Recommended (default)",
+        "file_mgmt_preset_keep_all": "Keep everything between sessions",
+        "file_mgmt_preset_minimal_disk": "Minimal disk use",
+        "file_mgmt_preset_custom": "Custom",
+        "file_mgmt_clear_ephemeral": "Clear temporary files when the app closes",
+        "file_mgmt_clear_session": "Clear preview and preprocess cache when the app closes",
+        "file_mgmt_copy_images": "Copy imported images into the app workspace",
+        "file_mgmt_copy_trace": "Copy text-vinyl trace references into the app workspace",
+        "file_mgmt_keep_filter_previews": "Keep Image Preview filter thumbnails between sessions",
+        "file_mgmt_actions_section": "Manual cleanup",
+        "file_mgmt_actions_hint": (
+            "Temporary cache is safe to clear anytime. Filter preview thumbnails are session-only "
+            "by default and removed when the app closes unless you enable keeping them on the Files tab."
+        ),
+        "file_mgmt_clear_temp": "Clear temporary cache",
+        "file_mgmt_clear_session_btn": "Clear session cache",
+        "file_mgmt_clear_all_cache": "Clear all caches",
+        "file_mgmt_open_image_workspace": "Open image workspace",
+        "file_mgmt_open_text_workspace": "Open text-vinyl workspace",
+        "file_mgmt_remove_workspace": "Remove selected workspace",
+        "file_mgmt_overview_section": "Workspace overview",
+        "file_mgmt_overview_hint": "Organized output folders under runtime/workspace and runtime/text-vinyl.",
+        "file_mgmt_summary_placeholder": "",
+        "file_mgmt_summary": "{workspaces} workspace(s), {total} total",
+        "file_mgmt_kind_image": "Image",
+        "file_mgmt_kind_text": "Text vinyl",
+        "file_mgmt_preset_applied": "File management preset: {preset}",
+        "file_mgmt_cleared_temp": "Cleared temporary cache ({count} item(s)).",
+        "file_mgmt_cleared_session": "Cleared session cache ({count} item(s)).",
+        "file_mgmt_cleared_all": "Cleared all caches ({count} item(s)).",
+        "file_mgmt_no_workspace_selected": "No workspace selected.",
+        "file_mgmt_confirm_clear_title": "Clear all caches?",
+        "file_mgmt_confirm_clear_body": (
+            "This removes temporary and session cache files. "
+            "Final JSON outputs and workspace copies of your sources are kept."
+        ),
+        "file_mgmt_confirm_remove_title": "Remove workspace?",
+        "file_mgmt_confirm_remove_body": (
+            "Delete workspace \"{name}\" and all files inside it? "
+            "This cannot be undone."
+        ),
+        "file_mgmt_removed_workspace": "Removed workspace: {name}",
+        "file_mgmt_remove_failed": "Could not remove workspace: {name}",
+        "file_mgmt_cleared_workspace": "Cleared cache for workspace {name} ({count} item(s)).",
         "resource_monitor_title": "Resource monitor",
         "resource_cpu": "CPU",
         "resource_gpu": "GPU",
         "resource_temp_nominal": "Temperature nominal.",
+        "resource_temp_warning": "Temperature elevated.",
+        "resource_temp_critical": "Temperature critical.",
         "resource_unavailable": "Unavailable",
         "resource_heat_warning_banner": "/// WARNING! Significant Heat Detected! ///",
         "resource_heat_critical_banner": "/// TEMPERATURE CRITICAL. STOP THE PROGRAM. ///",
@@ -604,24 +848,31 @@ Notes
 """,
     },
     "zh": {
-        "title": app_title(),
-        "subtitle": "生成 geometry JSON，并导入到 Forza Horizon 的 Vinyl Group 编辑器。",
-        "header_kicker": "FORZA PAINTER 1.6.X",
-        "header_audit": "实验版",
+        "title": APP_SHORT_NAME,
+        "subtitle": "将图像转换为 .JSON 文件，并导入 Forza Horizon 贴膜编辑器。",
+        "header_kicker": "Forza Painter - 贴膜导入/导出套件",
+        "header_build_prefix": "构建版本 - {version} (",
+        "header_build_experimental": "实验版",
+        "header_build_suffix": "); {date}",
         "language": "语言",
         "appearance": "外观",
         "layout_resize_hint": "拖动分隔条可调整面板大小，设置会自动保存。",
         "theme_label": "主题",
         "theme_eurocorp": "Eurocorp",
         "theme_elite": "精英",
+        "theme_crynet": "CryNet",
+        "theme_unatco": "UNATCO",
+        "theme_new_eden": "New Eden",
         "theme_red_phosphorous": "红磷",
-        "theme_y2k": "Y2K",
-        "theme_spirit_of_horizon": "地平线之魂",
         "process": "游戏进程",
         "refresh": "刷新",
         "generate_tab": "生成 JSON",
         "text_tab": "文字贴膜",
-        "text_tab_hint": "选择文字体系标签页，输入文字并选择字体（可用搜索筛选），然后生成。右侧可预览参考图与生成的 JSON。",
+        "text_tab_hint": "选择文字体系标签页，输入文字并选择字体。右侧可预览参考图与生成的 JSON。",
+        "text_scroll_options_hint": (
+            "向下滚动查看「生成选项」。\n"
+            "本工具可使用本机任意字体；若未自动找到字体，请在本标签页上传字体文件。"
+        ),
         "text_outputs": "文字贴膜 JSON",
         "text_outputs_hint": "本标签页生成的 JSON。可手动添加文件，或选中后发送到「导入 Final JSON」。",
         "text_reference_preview": "参考图预览",
@@ -650,16 +901,27 @@ Notes
         "text_shape_mode_hint": "矩形/方块用矩形图层；椭圆/圆/三角/混合建议用球形模板。",
         "text_template_hint": "FH6 模板：{hint}",
         "text_cell_hint": "栅格越大，图层越少，细节越少。",
-        "text_color": "颜色 (R,G,B,A)",
+        "text_color": "颜色",
+        "text_color_hint": "可编辑 Hex 或 RGB；透明度 0–255（255 = 不透明）。Forza H/S/B 与 Bang 转换器一致。",
+        "text_color_invalid": "颜色须为有效 Hex 或 0–255 数值。",
         "text_coverage_ok": "当前字体支持输入中的所有 CJK 字符。",
         "text_coverage_ok_korean": "当前字体支持输入中的韩文及其他 CJK 字符。",
         "text_coverage_missing": "当前字体缺少 {count} 个字形：{chars}",
         "text_coverage_missing_korean": "韩文请选用 [KR] 字体（如 Malgun Gothic）。缺少 {count} 个字形：{chars}",
         "text_coverage_suggest_kr": "检测到韩文 — 请选择 [KR] 字体，例如 {font}。",
         "text_char_library": "简体字库（GB2312）",
-        "text_char_search": "搜索汉字",
-        "text_char_insert": "插入选中字",
+        "text_char_library_latin": "拉丁扩展与符号",
+        "text_char_library_hiragana": "平假名",
+        "text_char_library_katakana": "片假名",
+        "text_char_library_kanji": "汉字（JIS）",
+        "text_char_library_hangul": "韩文音节",
+        "text_char_library_hanzi": "汉字（GB2312）",
+        "text_char_search": "搜索字符",
+        "text_char_insert": "插入选中",
         "text_char_count": "可用 {count} 个字符",
+        "text_char_page_prev": "上一页",
+        "text_char_page_next": "下一页",
+        "text_char_page_status": "第 {page}/{pages} 页 · 显示 {shown}/{total}",
         "text_reference_image": "参考图片",
         "text_browse_image": "浏览",
         "text_generate_typed": "从文字生成",
@@ -682,6 +944,24 @@ Notes
         "text_dialog_add_json": "添加文字贴膜 JSON",
         "text_template_hint_sphere": "FH6 请使用未分组的球形模板（椭圆 / sphere 图层）。",
         "text_template_hint_rectangle": "FH6 请尽量使用未分组的矩形模板（图层更少）。",
+        "hub_create": "创建",
+        "hub_import": "导入",
+        "hub_tools": "工具",
+        "hub_file_management": "文件",
+        "hub_dev_tools": "开发工具",
+        "help_menu": "帮助",
+        "help_tutorial": "教程",
+        "help_acknowledgements": "致谢",
+        "help_safety": "安全说明",
+        "safety_pick_language_title": "安全指南语言",
+        "safety_pick_language_prompt": "选择要阅读的安全指南语言：",
+        "safety_lang_en": "English",
+        "safety_lang_zh": "中文",
+        "safety_lang_ja": "日本語",
+        "safety_lang_ko": "한국어",
+        "safety_pick_other_language": "其他语言…",
+        "first_run_title": "欢迎使用 Forza Painter FH6",
+        "first_run_continue": "知道了",
         "import_final_tab": "导入 Final JSON",
         "import_final_tab_hint": "导入本应用生成的最终几何 JSON（矩形与旋转椭圆）。选择生成运行文件夹或直接添加 JSON，然后导入到未分组的 FH6 模板。",
         "import_final_runs": "生成运行",
@@ -703,7 +983,7 @@ Notes
         "handmade_status_none": "选择手工 JSON 后可查看支持的形状数量。",
         "handmade_status_counts": "形状：总计 {total} · 支持 {supported} · 不支持 {unsupported}",
         "preview_tab": "图像预览",
-        "preview_tab_hint": "生成前对比预处理滤镜与预估层数。层数为估算值，越低通常形状越少。点击卡片后在「生成」页使用。",
+        "preview_tab_hint": "生成前对比滤镜与层数预估。左侧选图，右侧选滤镜。层数为估算值。",
         "preview_choose_image": "选择图片",
         "preview_use_generate_image": "使用「生成」页所选图片",
         "preview_apply_generate": "打开「生成」页",
@@ -713,7 +993,25 @@ Notes
         "preview_output_folder": "预览缓存：{path}",
         "preview_estimate": "约 {count} 层（预估）",
         "preview_estimate_unknown": "无法预估",
-        "preview_select_filter": "点击滤镜卡片以用于生成。",
+        "preview_estimate_projected": "约 {count} 层（预计输出）",
+        "preview_estimate_projected_capped": "约 {projected} 层预计输出（预估 ~{raw}，受预设上限限制）",
+        "preview_select_filter": "点击右侧滤镜以用于生成。",
+        "preview_main_heading": "当前预览",
+        "preview_filters_heading": "滤镜选项",
+        "preview_preset_heading": "生成预设（来自「生成 JSON」页）",
+        "preview_preset_none": "请在「生成 JSON」页选择品质预设以查看预计输出。",
+        "preview_preset_summary": "预设：{name} · 上限 {layers} 层 · {samples} 随机样本 · 最大 {resolution}px",
+        "preview_preset_selected_filter": "已选滤镜：{filter}",
+        "preview_preset_projection": "预计输出：约 {count} 层（复杂度预估 ~{raw} · 预设上限 {cap}）",
+        "preview_preset_projection_simple": "预计输出：约 {count} 层",
+        "preview_preset_cap_exceeded": "复杂度预估 ~{raw} 超过预设上限（{cap}）— 在大模板上可能显得偏空或被截断。",
+        "preview_preset_cap_ok": "复杂度预估 ~{raw} 在预设上限（{cap}）内。",
+        "preview_preset_resolution_downscale": "生成时将缩小至约 {width}×{height}px（原图 {source_width}×{source_height}px）。",
+        "preview_preset_gpu_light": "GPU 负载：低",
+        "preview_preset_gpu_moderate": "GPU 负载：中",
+        "preview_preset_gpu_heavy": "GPU 负载：高",
+        "preview_preset_gpu_extreme": "GPU 负载：极高",
+        "preview_preset_disclaimer": "预计层数为近似值，并非保证。实际结果可能有所不同。",
         "filter_none": "原图",
         "filter_none_hint": "不预处理，直接使用原图。适合照片、柔和渐变、头发和皮肤等不希望额外简化的素材。",
         "filter_luma": "亮度分带",
@@ -751,7 +1049,8 @@ Notes
         "luma_saved": "已保存亮度分带图片：{path}",
         "luma_failed": "亮度分带失败：{error}",
         "tools_tab": "工具",
-        "tools_tab_hint": "实验性创意工具（Forza Painter 1.6.X），与 JSON 生成流程分离。每个工具独立面板，后续可扩展，不影响生成或文字贴膜工作流。",
+        "tools_tab_hint": "创意实用工具（取色器、背景移除），与 JSON 生成流程分离。",
+        "dev_tools_tab_hint": "FH6 内存诊断：快照、对比与表检查。需要有效的 FH6 会话。正常导入不需要。",
         "tools_panel_color_picker": "取色器",
         "tools_panel_bg_remove": "去背景",
         "tools_panel_fh6": "FH6 诊断",
@@ -786,6 +1085,7 @@ Notes
         "colors_click_hint": "点击图片取色。",
         "colors_hex": "Hex",
         "colors_rgb": "RGB",
+        "colors_alpha": "透明度",
         "colors_hsl": "HSL",
         "colors_hsb": "HSB",
         "colors_forza": "Forza H / S / B",
@@ -801,6 +1101,7 @@ Notes
         "add_images": "添加图片",
         "remove_image": "移除选中图片",
         "quality": "品质配置",
+        "quality_profile_dropdown_hint": "点击字段或 ▾ 选择预设",
         "import_preset": "导入预设",
         "open_preset_folder": "打开预设目录",
         "custom_settings": "使用自定义参数",
@@ -848,6 +1149,23 @@ Notes
         "preview_image_already_on_generate": "已在生成图片列表中：{name}",
         "generate_step_quality": "第 2 步 - 选择品质",
         "generate_step_quality_hint": "快速配置耗时短；慢速配置会占用更多 GPU 时间，通常画面更干净。",
+        "preset_badge_legend": "▁▇ 速度 · ▁▇ 细节 · ▁▇ GPU · ❄ 低负载 · ⚡ 最快 · ⏩ 快速 · ★ 默认 · ⚠ 极限",
+        "eco_preset_warning": "实验性 eco 预设：GPU 负载和温度更低，画质不如 Slow 或 Maximum Quality。可在下方启用可选冷却（多图队列时生效）。",
+        "eco_gpu_cooldown": "实验性：多图之间 GPU 冷却",
+        "eco_gpu_cooldown_hint": "每张图完成后等待 GPU ≤75°C（MSI Afterburner 运行时）；否则固定暂停 30 秒。请安装并保持 MSI Afterburner 运行以启用温度冷却。",
+        "resource_afterburner_recommend": "请安装并运行 MSI Afterburner 以显示 CPU/GPU 温度（msi.com/Landing/afterburner）。启用 Eco GPU 冷却时也会使用它。",
+        "eco_preset_confirm": "您选择了实验性 eco / 低 GPU 负载预设。\n\n该预设的随机样本和分辨率低于 slow，效果可能更软，且不保证 GPU 最高温度。\n\n是否继续？",
+        "eco_preset_active": "实验性 eco 预设已启用：GPU 参数低于 slow 配置。",
+        "tailored_preset_warning": "实验性量身定制预设（可选）：由图像预览复杂度生成。大多数情况仍推荐 Normal 作为默认；需要按图上限时再选 slot 0。",
+        "tailored_preset_confirm": "您选择了实验性量身定制预设。\n\n该预设由快速图像分析生成，可能与最终 JSON 层数不一致。结果会随滤镜与图像内容变化。\n\n是否继续？",
+        "tailored_preset_active": "当前分析图像已启用实验性量身定制预设。",
+        "tailored_preset_updated": "已为 {name} 准备好量身定制预设（预估 ~{estimate}，上限 {cap} 层）— 需要时选 slot 0；默认仍为 Normal。",
+        "preview_estimate_uncapped": "复杂度预估 ~{raw}（预设上限 {cap}）",
+        "eco_cooldown_waiting": "实验性 GPU 冷却：当前 {temp}°C，等待降至 ≤ {target}°C 后再处理下一张…",
+        "eco_cooldown_status": "GPU 冷却中（{temp}°C）…",
+        "eco_cooldown_ready": "GPU 已降至 {temp}°C，继续生成。",
+        "eco_cooldown_timeout": "GPU 冷却等待超过 5 分钟，继续下一张。",
+        "eco_cooldown_no_sensor": "无法读取 GPU 温度，实验性冷却：暂停 {seconds} 秒后继续。",
         "generate_step_run": "第 3 步 - 开始生成",
         "generate_step_run_hint": "点击一次后等待。进度会显示在日志里，生成的 JSON 会自动加入导入页面。",
         "scroll_hint": "添加图片、选择预设；需要时直接修改下方自定义参数。",
@@ -906,7 +1224,38 @@ Notes
         "current_count": "当前层数",
         "inspect_table": "精查 table",
         "table_address": "候选 table",
-        "admin_note": "导入需要管理员权限。如果日志出现 OpenProcess 失败，请用管理员身份启动本程序。",
+        "admin_note": "导入、导出和 FH6 内存工具会在使用时请求管理员权限，不会在启动时请求。生成 JSON 和预览可使用普通用户权限。",
+        "privilege_standard": "普通用户",
+        "privilege_standard_shield": "🛡 普通用户 — 带 🛡 的按钮需要管理员权限",
+        "privilege_admin": "管理员",
+        "memory_consent_title_import": "确认导入到 FH6",
+        "memory_consent_title_export": "确认从 FH6 导出",
+        "memory_consent_title_diagnostics": "确认 FH6 内存诊断",
+        "memory_consent_operation_import": "将 JSON 中的贴膜图层数据写入游戏编辑器",
+        "memory_consent_operation_export": "从游戏编辑器读取贴膜图层并保存 JSON",
+        "memory_consent_operation_diagnostics": "扫描或检查 FH6 内存（支持与调试）",
+        "memory_consent_body": (
+            "目标游戏：{game}\n"
+            "进程：{process}（PID {pid}）\n"
+            "操作：{operation}\n\n"
+            "本程序将通过 Windows 内存 API 附加到此进程，仅修改贴膜/涂装编辑器图层字段"
+            "（位置、缩放、旋转、颜色、形状、遮罩），不会修改速度、点数、统计等游戏玩法数值。\n\n"
+            "可能需要一次管理员权限以便 Windows 允许 OpenProcess 访问 FH6。\n\n"
+            "账号风险：在 FH6 运行时修改内存可能违反条款或触发反作弊。详见 docs/SAFETY.md。"
+        ),
+        "memory_consent_continue": "继续",
+        "memory_consent_cancel": "取消",
+        "memory_consent_open_safety": "打开安全说明",
+        "elevate_prompt_title": "需要管理员权限",
+        "elevate_prompt_message": (
+            "此内存操作需要管理员权限。\n\n"
+            "应用将通过 UAC 以管理员身份重启。重启后请再次执行相同的导入或导出。"
+        ),
+        "permission_denied_hint": (
+            "Windows 拒绝访问 FH6 进程。请在提示时以管理员身份重启，然后重试导入或导出。"
+            "若仍失败，请关闭其他内存工具。"
+        ),
+        "permission_denied_offer": "导入/导出需要管理员权限。现在以管理员身份重启？",
         "no_game": "未检测到支持的游戏进程",
         "ready": "就绪",
         "running": "运行中",
@@ -942,10 +1291,51 @@ Notes
         "runtime_folder": "运行/缓存目录",
         "open_runtime_folder": "打开运行缓存目录",
         "runtime_location": "运行缓存文件会保存在软件旁边：{runtime}。FH6 定位缓存：{probe}。",
+        "file_mgmt_tab_hint": "管理生成文件的存放位置与缓存清理方式。推荐使用默认预设。",
+        "file_mgmt_preset_section": "清理预设",
+        "file_mgmt_preset_hint": "选择预设，或切换到「自定义」逐项设置。",
+        "file_mgmt_preset_label": "预设",
+        "file_mgmt_preset_recommended": "推荐（默认）",
+        "file_mgmt_preset_keep_all": "会话间保留全部缓存",
+        "file_mgmt_preset_minimal_disk": "最小磁盘占用",
+        "file_mgmt_preset_custom": "自定义",
+        "file_mgmt_clear_ephemeral": "关闭应用时清除临时文件",
+        "file_mgmt_clear_session": "关闭应用时清除预览与预处理缓存",
+        "file_mgmt_copy_images": "将导入图片复制到应用工作区",
+        "file_mgmt_copy_trace": "将文字贴膜描图参考复制到应用工作区",
+        "file_mgmt_keep_filter_previews": "会话之间保留图像预览滤镜缩略图",
+        "file_mgmt_actions_section": "手动清理",
+        "file_mgmt_actions_hint": "临时缓存可随时清除。会话缓存可重建但可能耗时。",
+        "file_mgmt_clear_temp": "清除临时缓存",
+        "file_mgmt_clear_session_btn": "清除会话缓存",
+        "file_mgmt_clear_all_cache": "清除全部缓存",
+        "file_mgmt_open_image_workspace": "打开图片工作区",
+        "file_mgmt_open_text_workspace": "打开文字贴膜工作区",
+        "file_mgmt_remove_workspace": "删除所选工作区",
+        "file_mgmt_overview_section": "工作区概览",
+        "file_mgmt_overview_hint": "输出目录位于 runtime/workspace 与 runtime/text-vinyl。",
+        "file_mgmt_summary_placeholder": "",
+        "file_mgmt_summary": "{workspaces} 个工作区，共 {total}",
+        "file_mgmt_kind_image": "图片",
+        "file_mgmt_kind_text": "文字贴膜",
+        "file_mgmt_preset_applied": "文件管理预设：{preset}",
+        "file_mgmt_cleared_temp": "已清除临时缓存（{count} 项）。",
+        "file_mgmt_cleared_session": "已清除会话缓存（{count} 项）。",
+        "file_mgmt_cleared_all": "已清除全部缓存（{count} 项）。",
+        "file_mgmt_no_workspace_selected": "未选择工作区。",
+        "file_mgmt_confirm_clear_title": "清除全部缓存？",
+        "file_mgmt_confirm_clear_body": "将删除临时与会话缓存。最终 JSON 与工作区内的源文件副本会保留。",
+        "file_mgmt_confirm_remove_title": "删除工作区？",
+        "file_mgmt_confirm_remove_body": "删除工作区「{name}」及其全部文件？此操作无法撤销。",
+        "file_mgmt_removed_workspace": "已删除工作区：{name}",
+        "file_mgmt_remove_failed": "无法删除工作区：{name}",
+        "file_mgmt_cleared_workspace": "已清除工作区 {name} 的缓存（{count} 项）。",
         "resource_monitor_title": "资源监控",
         "resource_cpu": "CPU",
         "resource_gpu": "GPU",
         "resource_temp_nominal": "温度读数正常。",
+        "resource_temp_warning": "温度偏高。",
+        "resource_temp_critical": "温度危险。",
         "resource_unavailable": "不可用",
         "resource_heat_warning_banner": "/// 警告！检测到明显高温！ ///",
         "resource_heat_critical_banner": "/// 温度危险。请停止程序。 ///",
@@ -1012,13 +1402,33 @@ Notes
 """,
     },
     "ko": {
-        "title": app_title(),
-        "subtitle": "geometry JSON을 생성하고 Forza Horizon 비닐 그룹 편집기로 가져옵니다.",
-        "header_kicker": "FORZA PAINTER 1.6.X",
-        "header_audit": "실험판",
+        "title": APP_SHORT_NAME,
+        "subtitle": "이미지를 .JSON 파일로 변환하여 Forza Horizon 비닐 편집기로 가져옵니다.",
+        "header_kicker": "Forza Painter - 비닐 가져오기/보내기 도구",
+        "header_build_prefix": "빌드 버전 - {version} (",
+        "header_build_experimental": "실험판",
+        "header_build_suffix": "); {date}",
         "language": "언어",
         "process": "게임 프로세스",
         "refresh": "새로고침",
+        "hub_create": "만들기",
+        "hub_import": "가져오기",
+        "hub_tools": "도구",
+        "hub_file_management": "파일",
+        "hub_dev_tools": "개발 도구",
+        "help_menu": "도움말",
+        "help_tutorial": "튜토리얼",
+        "help_acknowledgements": "감사의 글",
+        "help_safety": "안전 가이드",
+        "safety_pick_language_title": "안전 가이드 언어",
+        "safety_pick_language_prompt": "안전 가이드를 읽을 언어를 선택하세요:",
+        "safety_lang_en": "English",
+        "safety_lang_zh": "中文",
+        "safety_lang_ja": "日本語",
+        "safety_lang_ko": "한국어",
+        "safety_pick_other_language": "다른 언어…",
+        "first_run_title": "Forza Painter FH6에 오신 것을 환영합니다",
+        "first_run_continue": "확인",
         "generate_tab": "JSON 생성",
         "import_final_tab": "Final JSON 가져오기",
         "import_final_tab_hint": "이 앱에서 생성한 최종 geometry JSON(사각형·회전 타원)을 가져옵니다. 생성 실행 폴더를 고르거나 JSON을 직접 추가한 뒤 그룹 해제된 FH6 템플릿에 가져옵니다.",
@@ -1041,7 +1451,7 @@ Notes
         "handmade_status_none": "수작업 JSON을 선택하면 지원되는 도형 수를 확인할 수 있습니다.",
         "handmade_status_counts": "도형: 전체 {total} · 지원 {supported} · 미지원 {unsupported}",
         "preview_tab": "이미지 미리보기",
-        "preview_tab_hint": "생성 전에 필터와 예상 레이어를 비교하세요. 레이어 수는 추정치이며, 낮을수록 도형이 적을 수 있습니다. 카드를 클릭한 뒤 생성 탭에서 사용합니다.",
+        "preview_tab_hint": "생성 전 필터와 레이어 추정을 비교하세요. 왼쪽에서 이미지, 오른쪽에서 필터를 선택합니다. 레이어 수는 추정치입니다.",
         "preview_choose_image": "이미지 선택",
         "preview_use_generate_image": "생성 탭 선택 이미지 사용",
         "preview_apply_generate": "생성 탭 열기",
@@ -1051,7 +1461,25 @@ Notes
         "preview_output_folder": "미리보기 캐시: {path}",
         "preview_estimate": "약 {count} 레이어 (추정)",
         "preview_estimate_unknown": "추정 불가",
-        "preview_select_filter": "생성에 사용할 필터 카드를 클릭하세요.",
+        "preview_estimate_projected": "약 {count} 레이어 (예상 출력)",
+        "preview_estimate_projected_capped": "약 {projected} 레이어 예상 (추정 ~{raw}, 프리셋 상한 적용)",
+        "preview_select_filter": "오른쪽 필터를 클릭해 생성에 사용하세요.",
+        "preview_main_heading": "선택 미리보기",
+        "preview_filters_heading": "필터 옵션",
+        "preview_preset_heading": "생성 프리셋 (Generate JSON 탭 기준)",
+        "preview_preset_none": "예상 출력을 보려면 Generate JSON 탭에서 품질 프리셋을 선택하세요.",
+        "preview_preset_summary": "프리셋: {name} · 상한 {layers} 레이어 · {samples} 무작위 샘플 · 최대 {resolution}px",
+        "preview_preset_selected_filter": "선택한 필터: {filter}",
+        "preview_preset_projection": "예상 출력: 약 {count} 레이어 (복잡도 추정 ~{raw} · 프리셋 상한 {cap})",
+        "preview_preset_projection_simple": "예상 출력: 약 {count} 레이어",
+        "preview_preset_cap_exceeded": "복잡도 추정 ~{raw}이(가) 프리셋 상한({cap})을 초과 — 큰 템플릿에서 비어 보이거나 제한될 수 있습니다.",
+        "preview_preset_cap_ok": "복잡도 추정 ~{raw} — 프리셋 상한({cap}) 이내.",
+        "preview_preset_resolution_downscale": "생성 시 약 {width}×{height}px로 축소됩니다 (원본 {source_width}×{source_height}px).",
+        "preview_preset_gpu_light": "GPU 부하: 낮음",
+        "preview_preset_gpu_moderate": "GPU 부하: 보통",
+        "preview_preset_gpu_heavy": "GPU 부하: 높음",
+        "preview_preset_gpu_extreme": "GPU 부하: 매우 높음",
+        "preview_preset_disclaimer": "예상 레이어 수는 근사치이며 보장되지 않습니다. 결과는 달라질 수 있습니다.",
         "filter_none": "원본",
         "filter_none_hint": "전처리 없이 원본 이미지를 사용합니다. 사진, 부드러운 그라데이션, 머리카락·피부 등 추가 단순화를 원하지 않을 때 적합합니다.",
         "filter_luma": "루마 밴드",
@@ -1089,7 +1517,8 @@ Notes
         "luma_saved": "루마 밴드 이미지 저장됨: {path}",
         "luma_failed": "루마 밴드 실패: {error}",
         "tools_tab": "도구",
-        "tools_tab_hint": "실험용 크리에이티브 유틸리티(Forza Painter 1.6.X). JSON 생성과 분리됩니다. 각 도구는 독립 패널이며, 생성·텍스트 비닐 워크플로에는 영향을 주지 않습니다.",
+        "tools_tab_hint": "크리에이티브 유틸리티(색상 선택기, 배경 제거). JSON 생성과 분리됩니다.",
+        "dev_tools_tab_hint": "FH6 메모리 진단: 스냅샷, 비교, 테이블 검사. 유효한 FH6 세션 필요. 일반 가져오기에는 불필요.",
         "tools_panel_color_picker": "색상 선택기",
         "tools_panel_bg_remove": "배경 제거",
         "tools_panel_fh6": "FH6 진단",
@@ -1124,6 +1553,7 @@ Notes
         "colors_click_hint": "이미지를 클릭해 색을 선택하세요.",
         "colors_hex": "Hex",
         "colors_rgb": "RGB",
+        "colors_alpha": "알파",
         "colors_hsl": "HSL",
         "colors_hsb": "HSB",
         "colors_forza": "Forza H / S / B",
@@ -1139,6 +1569,7 @@ Notes
         "add_images": "이미지 추가",
         "remove_image": "선택한 이미지 제거",
         "quality": "품질 프로필",
+        "quality_profile_dropdown_hint": "필드 또는 ▾ 를 눌러 프리셋 선택",
         "import_preset": "프리셋 가져오기",
         "open_preset_folder": "프리셋 폴더 열기",
         "custom_settings": "사용자 설정 사용",
@@ -1186,6 +1617,23 @@ Notes
         "preview_image_already_on_generate": "이미 생성 이미지 목록에 있음: {name}",
         "generate_step_quality": "2단계 - 품질 선택",
         "generate_step_quality_hint": "빠른 프로필은 시간이 적게 걸립니다. 느린 프로필은 GPU 시간을 더 쓰지만 보통 더 깔끔합니다.",
+        "preset_badge_legend": "▁▇ 속도 · ▁▇ 디테일 · ▁▇ GPU · ❄ 저부하 · ⚡ 최고속 · ⏩ 빠름 · ★ 기본 · ⚠ 극한",
+        "eco_preset_warning": "실험적 eco 프리셋: GPU 부하·온도는 낮지만 Slow 또는 Maximum Quality와 동일한 품질이 아닙니다. 아래 실험적 냉각 옵션이 대기열 이미지 사이에 도움이 됩니다.",
+        "eco_gpu_cooldown": "실험적: 이미지 사이 GPU 냉각",
+        "eco_gpu_cooldown_hint": "각 이미지 후 GPU가 75°C 이하일 때까지 대기(MSI Afterburner 실행 시); 그렇지 않으면 30초 고정. 온도 기반 냉각을 위해 MSI Afterburner를 설치하고 실행하세요.",
+        "resource_afterburner_recommend": "CPU/GPU 온도 표시를 위해 MSI Afterburner를 설치하고 실행하세요(msi.com/Landing/afterburner). Eco GPU 냉각도 사용합니다.",
+        "eco_preset_confirm": "실험적 eco / 저 GPU 부하 프리셋을 선택했습니다.\n\nslow보다 샘플·해상도가 낮아 결과가 더 부드러울 수 있으며 최대 GPU 온도를 보장하지 않습니다.\n\n계속할까요?",
+        "eco_preset_active": "실험적 eco 프리셋 활성: slow보다 낮은 GPU 설정.",
+        "tailored_preset_warning": "실험적 맞춤 프리셋(선택): 미리보기 복잡도 기반. 대부분 Normal 권장 — 이미지별 상한이 필요할 때 slot 0.",
+        "tailored_preset_confirm": "실험적 맞춤 프리셋을 선택했습니다.\n\n빠른 이미지 분석으로 생성되며 최종 JSON 레이어 수와 일치하지 않을 수 있습니다.\n\n계속할까요?",
+        "tailored_preset_active": "분석된 이미지에 실험적 맞춤 프리셋이 활성화되었습니다.",
+        "tailored_preset_updated": "{name} 맞춤 프리셋 준비됨(추정 ~{estimate}, 상한 {cap}) — 필요 시 slot 0, 기본은 Normal.",
+        "preview_estimate_uncapped": "복잡도 추정 ~{raw}(프리셋 상한 {cap})",
+        "eco_cooldown_waiting": "실험적 GPU 냉각: GPU {temp}°C — 다음 이미지 전 {target}°C 이하까지 대기…",
+        "eco_cooldown_status": "GPU 냉각 중({temp}°C)…",
+        "eco_cooldown_ready": "GPU {temp}°C — 생성 계속.",
+        "eco_cooldown_timeout": "GPU 냉각 5분 초과 — 다음 이미지로 진행.",
+        "eco_cooldown_no_sensor": "GPU 온도를 읽을 수 없음 — 실험적 냉각: {seconds}초 후 계속.",
         "generate_step_run": "3단계 - 생성",
         "generate_step_run_hint": "한 번 클릭한 뒤 기다리세요. 진행 상황은 로그에 표시되고, 생성된 JSON은 가져오기 페이지에 자동으로 추가됩니다.",
         "scroll_hint": "이미지를 추가하고 프리셋을 선택한 뒤, 필요하면 사용자 설정을 조정하세요.",
@@ -1243,7 +1691,38 @@ Notes
         "current_count": "현재 레이어 수",
         "inspect_table": "테이블 검사",
         "table_address": "후보 테이블",
-        "admin_note": "가져오기는 관리자 권한이 필요합니다. OpenProcess 실패가 보이면 이 앱을 관리자 권한으로 실행하세요.",
+        "admin_note": "가져오기,보내기, FH6 메모리 도구는 사용 시에만 관리자 권한을 요청합니다. 시작 시에는 요청하지 않습니다. JSON 생성과 미리보기는 일반 사용자로 가능합니다.",
+        "privilege_standard": "일반 사용자",
+        "privilege_standard_shield": "🛡 일반 사용자 — 🛡 버튼은 관리자 권한 필요",
+        "privilege_admin": "관리자",
+        "memory_consent_title_import": "FH6 가져오기 확인",
+        "memory_consent_title_export": "FH6보내기 확인",
+        "memory_consent_title_diagnostics": "FH6 메모리 진단 확인",
+        "memory_consent_operation_import": "JSON 비닐 레이어 데이터를 게임 편집기에 쓰기",
+        "memory_consent_operation_export": "게임 편집기에서 비닐 레이어를 읽어 JSON으로 저장",
+        "memory_consent_operation_diagnostics": "지원 및 디버깅을 위해 FH6 메모리 스캔/검사",
+        "memory_consent_body": (
+            "대상 게임: {game}\n"
+            "프로세스: {process} (PID {pid})\n"
+            "작업: {operation}\n\n"
+            "이 앱은 Windows 메모리 API로 이 프로세스에 연결하며, 비닐/리버리 편집기 레이어 필드만 수정합니다. "
+            "게임플레이 수치(속도, 크레딧, 통계 등)는 변경하지 않습니다.\n\n"
+            "Windows가 FH6에 OpenProcess를 허용하도록 관리자 권한이 한 번 필요할 수 있습니다.\n\n"
+            "계정 위험: FH6 실행 중 메모리 수정은 약관 위반 또는 안티치트에 걸릴 수 있습니다. docs/SAFETY.md 참고."
+        ),
+        "memory_consent_continue": "계속",
+        "memory_consent_cancel": "취소",
+        "memory_consent_open_safety": "안전 가이드 열기",
+        "elevate_prompt_title": "관리자 권한 필요",
+        "elevate_prompt_message": (
+            "이 메모리 작업에는 관리자 권한이 필요합니다.\n\n"
+            "UAC로 관리자 권한으로 다시 시작됩니다. 다시 열린 후 동일한 가져오기/보내기를 실행하세요."
+        ),
+        "permission_denied_hint": (
+            "Windows가 FH6 프로세스 접근을 거부했습니다. 관리자로 다시 시작한 뒤 가져오기/보내기를 다시 시도하세요. "
+            "다른 메모리 도구를 종료하세요."
+        ),
+        "permission_denied_offer": "가져오기/보내기에 관리자 권한이 필요합니다. 지금 관리자로 다시 시작할까요?",
         "no_game": "지원되는 게임 프로세스를 찾지 못했습니다",
         "ready": "준비됨",
         "running": "실행 중",
@@ -1279,10 +1758,51 @@ Notes
         "runtime_folder": "런타임/캐시 폴더",
         "open_runtime_folder": "런타임 폴더 열기",
         "runtime_location": "런타임/캐시 파일은 앱 옆에 저장됩니다: {runtime}. FH6 probe cache: {probe}.",
+        "file_mgmt_tab_hint": "생성 파일 저장 위치와 캐시 정리 방식을 설정합니다. 초보자에게는 권장 프리셋이 기본입니다.",
+        "file_mgmt_preset_section": "정리 프리셋",
+        "file_mgmt_preset_hint": "프리셋을 선택하거나 사용자 지정으로 세부 옵션을 설정하세요.",
+        "file_mgmt_preset_label": "프리셋",
+        "file_mgmt_preset_recommended": "권장(기본)",
+        "file_mgmt_preset_keep_all": "세션 간 모두 유지",
+        "file_mgmt_preset_minimal_disk": "디스크 최소 사용",
+        "file_mgmt_preset_custom": "사용자 지정",
+        "file_mgmt_clear_ephemeral": "앱 종료 시 임시 파일 삭제",
+        "file_mgmt_clear_session": "앱 종료 시 미리보기·전처리 캐시 삭제",
+        "file_mgmt_copy_images": "가져온 이미지를 앱 작업 공간에 복사",
+        "file_mgmt_copy_trace": "텍스트 비닐 추적 참조를 앱 작업 공간에 복사",
+        "file_mgmt_keep_filter_previews": "세션 간 이미지 미리보기 필터 썸네일 유지",
+        "file_mgmt_actions_section": "수동 정리",
+        "file_mgmt_actions_hint": "임시 캐시는 언제든 안전하게 삭제할 수 있습니다. 세션 캐시는 재생성에 시간이 걸릴 수 있습니다.",
+        "file_mgmt_clear_temp": "임시 캐시 삭제",
+        "file_mgmt_clear_session_btn": "세션 캐시 삭제",
+        "file_mgmt_clear_all_cache": "모든 캐시 삭제",
+        "file_mgmt_open_image_workspace": "이미지 작업 공간 열기",
+        "file_mgmt_open_text_workspace": "텍스트 비닐 작업 공간 열기",
+        "file_mgmt_remove_workspace": "선택한 작업 공간 제거",
+        "file_mgmt_overview_section": "작업 공간 개요",
+        "file_mgmt_overview_hint": "runtime/workspace 및 runtime/text-vinyl 아래의 정리된 출력 폴더입니다.",
+        "file_mgmt_summary_placeholder": "",
+        "file_mgmt_summary": "작업 공간 {workspaces}개, 합계 {total}",
+        "file_mgmt_kind_image": "이미지",
+        "file_mgmt_kind_text": "텍스트 비닐",
+        "file_mgmt_preset_applied": "파일 관리 프리셋: {preset}",
+        "file_mgmt_cleared_temp": "임시 캐시를 삭제했습니다({count}개).",
+        "file_mgmt_cleared_session": "세션 캐시를 삭제했습니다({count}개).",
+        "file_mgmt_cleared_all": "모든 캐시를 삭제했습니다({count}개).",
+        "file_mgmt_no_workspace_selected": "선택한 작업 공간이 없습니다.",
+        "file_mgmt_confirm_clear_title": "모든 캐시를 삭제할까요?",
+        "file_mgmt_confirm_clear_body": "임시 및 세션 캐시가 삭제됩니다. 최종 JSON과 작업 공간의 원본 사본은 유지됩니다.",
+        "file_mgmt_confirm_remove_title": "작업 공간을 제거할까요?",
+        "file_mgmt_confirm_remove_body": "작업 공간 \"{name}\"과 내부 파일을 모두 삭제할까요? 되돌릴 수 없습니다.",
+        "file_mgmt_removed_workspace": "작업 공간을 제거했습니다: {name}",
+        "file_mgmt_remove_failed": "작업 공간을 제거하지 못했습니다: {name}",
+        "file_mgmt_cleared_workspace": "작업 공간 {name} 캐시를 삭제했습니다({count}개).",
         "resource_monitor_title": "리소스 모니터",
         "resource_cpu": "CPU",
         "resource_gpu": "GPU",
         "resource_temp_nominal": "온도 측정값 정상.",
+        "resource_temp_warning": "온도 상승.",
+        "resource_temp_critical": "온도 위험.",
         "resource_unavailable": "사용 불가",
         "resource_heat_warning_banner": "/// 경고! 심각한 고온이 감지되었습니다! ///",
         "resource_heat_critical_banner": "/// 온도 위험. 프로그램을 중지하세요. ///",
@@ -1312,8 +1832,8 @@ Notes
 """,
     },
     "zh-tw": {
-        "title": app_title(),
-        "subtitle": "產生 geometry JSON 並匯入 Forza Horizon 貼紙編輯器。",
+        "title": APP_SHORT_NAME,
+        "subtitle": "將圖像轉換為 .JSON 檔案，並匯入 Forza Horizon 貼紙編輯器。",
         "language": "語言",
         "layer_count": "模板圖層數",
         "layer_count_required": "請填寫模板圖層數。輸入遊戲中顯示的精確圖層數。",
@@ -1330,8 +1850,8 @@ Notes
     },
 }
 
-TEXT = apply_text_patches(TEXT, app_title_text=app_title())
-TEXT = merge_japanese_text(TEXT, app_title_text=app_title())
+TEXT = apply_text_patches(TEXT, app_title_text=APP_SHORT_NAME)
+TEXT = merge_japanese_text(TEXT, app_title_text=APP_SHORT_NAME)
 TEXT = merge_korean_patch(TEXT)
 
 
@@ -1359,27 +1879,14 @@ def parse_version_source(source):
     return match.group(1).strip()
 
 
-def is_windows_admin():
-    if os.name != "nt":
-        return True
-    try:
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except OSError:
-        return False
-
-
-def ensure_elevated_or_exit():
-    if os.name != "nt" or is_windows_admin():
-        return
-    if os.environ.get("FORZA_PAINTER_NO_ELEVATE") == "1":
-        return
-    params = subprocess.list2cmdline(sys.argv)
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, None, 0)
-    raise SystemExit(0)
-
-
 def fetch_text_url(url, timeout=UPDATE_CHECK_TIMEOUT_SECONDS, accept="text/plain,*/*"):
     validate_fetch_url(url)
+    try:
+        from defender_audit import log_network
+
+        log_network(url, purpose="fetch_text")
+    except Exception:
+        pass
     request = urllib.request.Request(
         url,
         headers={
@@ -1394,6 +1901,12 @@ def fetch_text_url(url, timeout=UPDATE_CHECK_TIMEOUT_SECONDS, accept="text/plain
 
 def fetch_latest_release_version(timeout=UPDATE_CHECK_TIMEOUT_SECONDS):
     validate_fetch_url(GITHUB_RELEASES_API)
+    try:
+        from defender_audit import log_network
+
+        log_network(GITHUB_RELEASES_API, purpose="update_check")
+    except Exception:
+        pass
     request = urllib.request.Request(
         GITHUB_RELEASES_API,
         headers={
@@ -1481,6 +1994,12 @@ def run_embedded_helper(helper_name, args):
 def game_processes():
     names = {name.lower(): key for key, profile in PROFILES.items() for name in profile.process_names}
     found = []
+    try:
+        from defender_audit import CATEGORY_PROCESS_ENUM, log_event
+
+        log_event(CATEGORY_PROCESS_ENUM, "psutil.process_iter for game PIDs")
+    except Exception:
+        pass
     for proc in psutil.process_iter(["pid", "name", "exe"]):
         try:
             name = proc.info.get("name") or ""
@@ -1868,6 +2387,7 @@ class App:
     def __init__(self, initial_images):
         ensure_dirs()
         self.root = Tk()
+        install_scroll_selection_guards(self.root)
         self.root.title(app_title())
         self.root.geometry("1420x900")
         self.root.minsize(1180, 780)
@@ -1888,6 +2408,8 @@ class App:
         self.eta_max_layer_seen = None
         self.eta_recycle_notice_active = False
         self.closed = False
+        self._saw_permission_error = False
+        self._admin_action_widgets: list[tuple] = []
         self.settings = load_settings()
         self.images = [Path(path) for path in initial_images if Path(path).exists()]
         self._last_generation_preprocess: dict[str, str] = {}
@@ -1895,6 +2417,7 @@ class App:
         self._preview_filter_payload: dict[str, dict] = {}
         self._preview_source_path: Path | None = None
         self._preview_render_jobs: dict[str, str | None] = {}
+        self._preview_main_render_job: str | None = None
         self._preview_compute_running = False
         self._preprocess_mode_labels: dict[str, str] = {}
         self.json_files = []
@@ -1935,17 +2458,26 @@ class App:
         self.use_best_safe_final = StringVar(value="1")
         self.inspect_table_value = StringVar()
         self.text_vinyl = TextVinylWorkspace(self)
+        self._ui_prefs = load_ui_preferences()
         self.tools_workspace = ToolsWorkspace(self)
+        self.file_management = FileManagementWorkspace(self)
+        self.dev_tools_workspace = DevToolsWorkspace(self)
         self.runtime_folder = StringVar(value=str(ROOT))
         self.advanced_visible = False
         self.theme_id = StringVar(value=load_saved_theme_id(ROOT))
-        self.palette = resolve_palette(self.theme_id.get())
+        self.themes = ThemeManager(self.root, ROOT, app=self)
+        self.root._app_ref = self  # type: ignore[attr-defined]
+        self.palette = self.themes.palette
         _install_color_globals(self.palette)
         self._layout_panes = {}
         self._ui_layout = load_ui_layout(ROOT)
         self._layout_save_job = None
         self._layout_restore_jobs: list[str] = []
         self._generate_compare_jobs: dict[str, str] = {}
+        self._eco_generation_settings = load_eco_generation_settings(ROOT)
+        self.eco_gpu_cooldown = StringVar(
+            value="1" if self._eco_generation_settings.cooldown_enabled else "0"
+        )
         self._resource_monitor_settings = load_resource_monitor_settings(ROOT)
         self._resource_monitor_backend = None
         self._resource_heat_state = "normal"
@@ -1956,7 +2488,7 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.refresh_processes()
         if self.settings:
-            self.selected_profile.set(self.settings[min(2, len(self.settings) - 1)]["label"])
+            self.selected_profile.set(default_preset_label(self.settings))
             self._update_setting_description()
         for image_path in list(self.images):
             self._load_existing_checkpoints_for_image(image_path)
@@ -1964,6 +2496,8 @@ class App:
         self.log_line(tr(self.lang, "runtime_location").format(runtime=ROOT / "runtime", probe=PROBE_DIR.parent))
         self._poll_queue()
         self._start_resource_monitor()
+        if not self._ui_prefs.get("first_run_complete"):
+            self.root.after(300, self._show_first_run_if_needed)
         self.root.after(1000, self.start_update_check)
 
     def _ui_font(self, size: int = 10, *, bold: bool = False) -> tuple:
@@ -1982,99 +2516,7 @@ class App:
                 pass
 
     def _configure_styles(self):
-        style = ttk.Style(self.root)
-        ui_font = ui_font_name(getattr(self, "lang", "en"))
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-        # ttk style calls occasionally differ across bundled Tcl/Tk builds in one-file EXEs.
-        # Keep startup resilient: if a style element is unsupported, skip that rule.
-        try:
-            style.configure(".", background=COLOR_BG, foreground=COLOR_TEXT, fieldbackground=COLOR_INPUT)
-            style.configure("TFrame", background=COLOR_BG)
-            style.configure("TNotebook", background=COLOR_BG, borderwidth=0)
-            style.configure("Primary.TNotebook", background=COLOR_BG, borderwidth=0, tabmargins=(0, 0, 0, 0))
-            style.configure(
-                "Primary.TNotebook.Tab",
-                padding=(22, 10),
-                font=(ui_font, 10, "bold"),
-                background=COLOR_PANEL_ALT,
-                foreground=COLOR_TEXT,
-                borderwidth=0,
-            )
-            style.map(
-                "Primary.TNotebook.Tab",
-                background=[("selected", COLOR_ACCENT_DARK), ("!selected", COLOR_PANEL_ALT)],
-                foreground=[("selected", COLOR_SELECT_FG), ("!selected", COLOR_MUTED)],
-            )
-            style.configure(
-                "Script.TNotebook",
-                background=COLOR_BG,
-                borderwidth=0,
-                tabmargins=(0, 0, 0, 0),
-            )
-            style.configure(
-                "Script.TNotebook.Tab",
-                padding=(14, 8),
-                font=(ui_font, 9, "bold"),
-                background=COLOR_PANEL_ALT,
-                foreground=COLOR_TEXT,
-                borderwidth=0,
-            )
-            style.map(
-                "Script.TNotebook.Tab",
-                background=[("selected", COLOR_ACCENT_DARK), ("!selected", COLOR_PANEL_ALT)],
-                foreground=[("selected", COLOR_SELECT_FG), ("!selected", COLOR_MUTED)],
-            )
-            style.configure(
-                "TLabelframe",
-                background=COLOR_PANEL,
-                foreground=COLOR_TEXT,
-                bordercolor=COLOR_BORDER,
-                lightcolor=COLOR_FRAME_LIGHT,
-                darkcolor=COLOR_FRAME_DARK,
-                relief="solid",
-            )
-            style.configure(
-                "TLabelframe.Label",
-                background=COLOR_PANEL,
-                foreground=COLOR_TEXT,
-                font=(ui_font, 10, "bold"),
-            )
-            style.configure(
-                "TCombobox",
-                fieldbackground=COLOR_INPUT,
-                background=COLOR_PANEL_ALT,
-                foreground=COLOR_TEXT,
-                arrowcolor=COLOR_TEXT,
-                bordercolor=COLOR_BORDER,
-                lightcolor=COLOR_BORDER,
-                darkcolor=COLOR_BORDER,
-            )
-            style.map(
-                "TCombobox",
-                fieldbackground=[("readonly", COLOR_INPUT)],
-                foreground=[("readonly", COLOR_TEXT)],
-                selectbackground=[("readonly", COLOR_ACCENT_DARK)],
-                selectforeground=[("readonly", COLOR_SELECT_FG)],
-            )
-            style.configure(
-                "TScrollbar",
-                background=COLOR_PANEL_ALT,
-                troughcolor=COLOR_BG,
-                bordercolor=COLOR_BORDER,
-                arrowcolor=COLOR_TEXT,
-            )
-            style.configure("TPanedwindow", background=COLOR_BORDER)
-        except Exception:
-            pass
-
-        try:
-            style.configure("Sash", sashthickness=5, gripcount=0, background=COLOR_SASH)
-            style.map("Sash", background=[("active", COLOR_ACCENT)])
-        except Exception:
-            pass
+        self.themes.configure_ttk()
 
     def _register_pane(self, paned, layout_key: str, orient: str) -> None:
         self._layout_panes[layout_key] = (paned, orient)
@@ -2188,6 +2630,12 @@ class App:
         with self.process_lock:
             if self.shutdown_event.is_set() or self.closed:
                 return None
+            try:
+                from defender_audit import log_subprocess
+
+                log_subprocess(cmd, purpose="Popen")
+            except Exception:
+                pass
             proc = subprocess.Popen(cmd, **kwargs)
             self.active_processes.add(proc)
             return proc
@@ -2201,8 +2649,15 @@ class App:
             return
         try:
             if os.name == "nt":
+                taskkill_cmd = ["taskkill", "/PID", str(proc.pid), "/T", "/F"]
+                try:
+                    from defender_audit import log_subprocess
+
+                    log_subprocess(taskkill_cmd, purpose="terminate child")
+                except Exception:
+                    pass
                 subprocess.run(
-                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                    taskkill_cmd,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     creationflags=subprocess.CREATE_NO_WINDOW,
@@ -2230,6 +2685,18 @@ class App:
         self.closed = True
         self.shutdown_event.set()
         self._terminate_active_processes()
+        try:
+            from asset_workspace import run_exit_cleanup
+            from file_management_settings import load_file_management_settings
+
+            settings = load_file_management_settings()
+            run_exit_cleanup(
+                clear_ephemeral=settings.effective_clear_ephemeral_on_exit(),
+                clear_session_cache=settings.effective_clear_session_cache_on_exit(),
+                clear_filter_previews=not settings.effective_keep_filter_previews(),
+            )
+        except Exception:
+            pass
         self.root.destroy()
 
     def _parent_bg(self, parent):
@@ -2239,15 +2706,7 @@ class App:
             return COLOR_PANEL
 
     def _theme_fg(self, role: str) -> str:
-        roles = {
-            "text": COLOR_TEXT,
-            "muted": COLOR_MUTED,
-            "hint": COLOR_HINT,
-            "info": COLOR_INFO,
-            "success": COLOR_SUCCESS,
-            "error": COLOR_ERROR,
-        }
-        return roles.get(role, COLOR_TEXT)
+        return self.themes.fg(role)
 
     def _label(self, parent, key, theme_role: str = "text", **kwargs):
         kwargs.setdefault("bg", self._parent_bg(parent))
@@ -2257,6 +2716,12 @@ class App:
         widget._theme_role = theme_role
         self.translated.append((widget, key, "text"))
         return widget
+
+    def _action_label_text(self, key: str) -> str:
+        base = tr(self.lang, key)
+        if action_requires_admin(key):
+            return format_admin_action_label(base, requires_admin=True)
+        return base
 
     def _button(self, parent, key, command, **kwargs):
         kwargs.setdefault("bg", COLOR_BUTTON)
@@ -2271,9 +2736,21 @@ class App:
         kwargs.setdefault("highlightcolor", COLOR_ACCENT)
         kwargs.setdefault("padx", 8)
         kwargs.setdefault("pady", 3)
-        widget = Button(parent, text=tr(self.lang, key), command=command, **kwargs)
-        self.translated.append((widget, key, "text"))
+        widget = Button(parent, text=self._action_label_text(key), command=command, **kwargs)
+        if action_requires_admin(key):
+            self._admin_action_widgets.append((widget, key))
+        else:
+            self.translated.append((widget, key, "text"))
         return widget
+
+    def _refresh_admin_action_labels(self) -> None:
+        for widget, key in list(self._admin_action_widgets):
+            if not self._widget_alive(widget):
+                continue
+            try:
+                widget.config(text=self._action_label_text(key))
+            except TclError:
+                pass
 
     def _bind_wraplength(self, label, container, padding=24, minimum=160):
         def _on_configure(event=None):
@@ -2346,108 +2823,73 @@ class App:
         role = getattr(widget, "_theme_role", None)
         if role:
             return self._theme_fg(role)
-        return COLOR_TEXT
+        return self.themes.tokens.text
 
     def _apply_theme_recursive(self, widget):
+        self.themes.apply_widget(widget)
+
+    def _refresh_update_indicator_theme(self) -> None:
+        status = getattr(self, "update_state", {}).get("status")
+        indicator = getattr(self, "update_indicator", None)
+        if indicator is None or not self._widget_alive(indicator):
+            return
+        if status == "available":
+            apply_update_indicator(indicator, "available", self.themes, text="!")
+        elif status == "failed":
+            apply_update_indicator(indicator, "failed", self.themes, text="!")
+        else:
+            apply_update_indicator(indicator, "hidden", self.themes, text="")
+            if indicator.winfo_ismapped():
+                indicator.pack_forget()
+
+    def _refresh_layer_count_entry_theme(self) -> None:
+        entry = getattr(self, "layer_count_entry", None)
+        if entry is None or not self._widget_alive(entry):
+            return
         try:
-            if isinstance(widget, Frame):
-                if getattr(widget, "_chrome_bg_locked", False):
-                    widget.configure(bg=COLOR_BG)
-                elif widget.master is self.root:
-                    widget.configure(bg=COLOR_BG)
-                else:
-                    widget.configure(bg=COLOR_PANEL)
-            elif isinstance(widget, Label):
-                if widget in (
-                    getattr(self, "generate_source_before_preview", None),
-                    getattr(self, "generate_source_after_preview", None),
-                    getattr(self, "generate_result_without_preview", None),
-                    getattr(self, "generate_result_with_preview", None),
-                    getattr(self, "import_preview_label", None),
-                ):
-                    widget.configure(bg=COLOR_PREVIEW_BG, fg=COLOR_PREVIEW_FG)
-                elif widget is getattr(self, "update_indicator", None):
-                    widget.configure(bg=COLOR_PANEL)
-                else:
-                    widget.configure(bg=self._parent_bg(widget.master), fg=self._label_fg_for_widget(widget))
-            elif isinstance(widget, Button):
-                widget.configure(
-                    bg=COLOR_BUTTON,
-                    fg=COLOR_TEXT,
-                    disabledforeground=COLOR_MUTED,
-                    activebackground=COLOR_BUTTON_ACTIVE,
-                    activeforeground=COLOR_BUTTON_ACTIVE_FG,
-                    relief="flat",
-                    bd=0,
-                    highlightbackground=COLOR_BORDER,
-                    highlightcolor=COLOR_ACCENT,
-                )
-            elif isinstance(widget, Checkbutton):
-                widget.configure(
-                    bg=self._parent_bg(widget.master),
-                    fg=COLOR_TEXT,
-                    disabledforeground=COLOR_MUTED,
-                    activebackground=self._parent_bg(widget.master),
-                    activeforeground=COLOR_TEXT,
-                    selectcolor=COLOR_INPUT,
-                    relief="flat",
-                    highlightbackground=COLOR_BORDER,
-                    highlightcolor=COLOR_ACCENT,
-                )
-            elif isinstance(widget, Entry):
-                widget.configure(
-                    bg=COLOR_INPUT,
-                    fg=COLOR_TEXT,
-                    insertbackground=COLOR_TEXT,
-                    disabledbackground=COLOR_PANEL_ALT,
-                    disabledforeground=COLOR_MUTED,
-                    readonlybackground=COLOR_INPUT,
-                    relief="flat",
-                    highlightthickness=1,
-                    highlightbackground=COLOR_BORDER,
-                    highlightcolor=COLOR_ACCENT,
-                    font=UI_INPUT_FONT,
-                )
-            elif isinstance(widget, Listbox):
-                widget.configure(
-                    bg=COLOR_INPUT,
-                    fg=COLOR_TEXT,
-                    selectbackground=COLOR_ACCENT_DARK,
-                    selectforeground=COLOR_SELECT_FG,
-                    highlightthickness=1,
-                    highlightbackground=COLOR_BORDER,
-                    relief="flat",
-                    font=UI_INPUT_FONT,
-                )
-            elif isinstance(widget, Text):
-                log_font = UI_LOG_FONT if widget in (getattr(self, "log", None),) else UI_INPUT_FONT
-                widget.configure(
-                    bg=COLOR_INPUT,
-                    fg=COLOR_TEXT,
-                    insertbackground=COLOR_TEXT,
-                    selectbackground=COLOR_ACCENT_DARK,
-                    selectforeground=COLOR_SELECT_FG,
-                    highlightthickness=1,
-                    highlightbackground=COLOR_BORDER,
-                    relief="flat",
-                    font=log_font,
-                )
-            elif isinstance(widget, DonutGauge):
-                fill = COLOR_SUCCESS if getattr(widget, "_donut_role", None) == "cpu" else COLOR_ACCENT
-                widget.set_scheme(
-                    track_color=COLOR_BORDER,
-                    fill_color=fill,
-                    bg_color=COLOR_BG if widget.master is self.root else self._parent_bg(widget.master),
-                    text_color=COLOR_TEXT,
-                    muted_color=COLOR_MUTED,
-                )
-            elif isinstance(widget, Canvas):
-                chrome_bg = getattr(widget, "_chrome_bg", None)
-                widget.configure(bg=chrome_bg or COLOR_PANEL, highlightthickness=0)
-        except (TclError, Exception):
+            thickness = int(entry.cget("highlightthickness") or 0)
+        except TclError:
+            thickness = 0
+        apply_entry_validation(entry, invalid=thickness > 0, manager=self.themes)
+
+    def _refresh_theme_dependent_ui(self) -> None:
+        """Legacy alias — interactive refresh is centralized in theme_states."""
+        pass
+
+    def _build_header_version_row(self, parent: Frame) -> Frame:
+        row = Frame(parent, bg=COLOR_BG)
+        row._chrome_bg_locked = True
+        base_font = ("Segoe UI", 9)
+        italic_font = ("Segoe UI", 9, "italic")
+        prefix = Label(row, anchor="w", fg=COLOR_MUTED, bg=COLOR_BG, font=base_font)
+        prefix._theme_role = "muted"
+        prefix.pack(side=LEFT)
+        experimental = Label(row, anchor="w", fg=COLOR_MUTED, bg=COLOR_BG, font=italic_font)
+        experimental._theme_role = "muted"
+        experimental.pack(side=LEFT)
+        suffix = Label(row, anchor="w", fg=COLOR_MUTED, bg=COLOR_BG, font=base_font)
+        suffix._theme_role = "muted"
+        suffix.pack(side=LEFT)
+        self._header_version_prefix = prefix
+        self._header_version_experimental = experimental
+        self._header_version_suffix = suffix
+        self._refresh_header_version_row()
+        return row
+
+    def _refresh_header_version_row(self) -> None:
+        if not hasattr(self, "_header_version_prefix"):
+            return
+        lang = self.lang
+        try:
+            self._header_version_prefix.config(
+                text=tr(lang, "header_build_prefix").format(version=APP_LINE_VERSION)
+            )
+            self._header_version_experimental.config(text=tr(lang, "header_build_experimental"))
+            self._header_version_suffix.config(
+                text=tr(lang, "header_build_suffix").format(date=BUILD_RELEASE_DATE)
+            )
+        except Exception:
             pass
-        for child in widget.winfo_children():
-            self._apply_theme_recursive(child)
 
     def _build(self):
         self._configure_styles()
@@ -2459,17 +2901,8 @@ class App:
         kicker = self._label(title_box, "header_kicker", anchor="w", font=("Segoe UI", 9, "bold"), fg=COLOR_INFO)
         kicker.pack(fill=X)
         self._label(title_box, "title", font=("Segoe UI", 21, "bold"), anchor="w").pack(fill=X, pady=(2, 0))
-        audit_label = Label(
-            title_box,
-            text=tr(self.lang, "header_audit").upper(),
-            anchor="w",
-            fg=COLOR_MUTED,
-            bg=COLOR_BG,
-            font=("Segoe UI", 9),
-        )
-        audit_label.pack(fill=X, pady=(1, 2))
-        audit_label._theme_role = "muted"
-        self.translated.append((audit_label, "header_audit", "text_upper"))
+        self._header_version_row = self._build_header_version_row(title_box)
+        self._header_version_row.pack(fill=X, pady=(1, 2))
         self._label(title_box, "subtitle", anchor="w", theme_role="muted", font=("Segoe UI", 10)).pack(fill=X)
 
         if self._resource_monitor_settings.enabled:
@@ -2489,6 +2922,8 @@ class App:
             pady=1,
         )
         self.update_indicator.bind("<Button-1>", self.show_update_status)
+        self.help_menu_button = self._button(right, "help_menu", self._show_help_menu)
+        self.help_menu_button.pack(anchor="e", pady=(0, 6))
         self._label(right, "theme_label").pack(anchor="e")
         self.theme_combo = ttk.Combobox(right, state="readonly", width=22)
         self._sync_theme_combo()
@@ -2513,6 +2948,17 @@ class App:
         status_label = Label(inner_bar, textvariable=self.status, anchor="e", bg=COLOR_PANEL, fg=COLOR_MUTED)
         status_label._theme_role = "muted"
         status_label.pack(side=RIGHT)
+        self.privilege_label = Label(
+            inner_bar,
+            text="",
+            anchor="e",
+            bg=COLOR_PANEL,
+            fg=COLOR_MUTED,
+            font=("Segoe UI", 9),
+        )
+        self.privilege_label._theme_role = "muted"
+        self.privilege_label.pack(side=RIGHT, padx=(0, 12))
+        self._refresh_privilege_status()
 
         self.main_pane = self._create_paned(
             self.root,
@@ -2534,66 +2980,109 @@ class App:
 
         self._init_workspace_tabs()
         self._build_log()
-        self.text_vinyl.refresh_mandarin_char_list()
+        self.text_vinyl.refresh_char_pickers()
         self.text_vinyl.refresh_fonts()
-        self._apply_theme()
+        self._register_theme_hooks()
+        self.themes.apply(self.theme_id.get())
+        self.palette = self.themes.palette
         self._bind_workspace_tab_events()
         self._schedule_layout_restore()
 
     def _init_workspace_tabs(self) -> None:
         self._workspace_bound_main = False
-        self.main_tabs = ttk.Notebook(self.workspace_body, style="Primary.TNotebook")
-        self.main_tabs.pack(fill=BOTH, expand=True, pady=(0, 4))
+        self.hub_shell = Frame(self.workspace_body)
+        self.hub_shell.pack(fill=BOTH, expand=True, pady=(0, 4))
+        self.hub_bar = HubBar(self)
+        hub_content = self.hub_bar.attach_content(self.hub_shell)
 
-        self.generate_tab = Frame(self.main_tabs)
-        self.import_final_tab = Frame(self.main_tabs)
-        self.handmade_tab = Frame(self.main_tabs)
-        self.export_game_tab = Frame(self.main_tabs)
-        self.preview_tab_frame = Frame(self.main_tabs)
-        self.text_tab = Frame(self.main_tabs)
-        self.tools_tab = Frame(self.main_tabs)
-        self.tutorial_tab = Frame(self.main_tabs)
-        self.acknowledgements_tab = Frame(self.main_tabs)
+        self.create_hub = Frame(hub_content)
+        self.import_hub = Frame(hub_content)
+        self.tools_hub = Frame(hub_content)
+        self.file_management_hub = Frame(hub_content)
+        self.dev_tools_hub = Frame(hub_content)
+        self.hub_bar.register(self.create_hub, "hub_create", align="left")
+        self.hub_bar.register(self.import_hub, "hub_import", align="left")
+        self.hub_bar.register(self.tools_hub, "hub_tools", align="left")
+        self.hub_bar.register(self.file_management_hub, "hub_file_management", align="left")
+        self.hub_bar.register(self.dev_tools_hub, "hub_dev_tools", align="right")
+
+        self.create_notebook = ttk.Notebook(self.create_hub, style="Script.TNotebook")
+        self.create_notebook.pack(fill=BOTH, expand=True, padx=8, pady=8)
+        self.preview_tab_frame = Frame(self.create_notebook)
+        self.generate_tab = Frame(self.create_notebook)
+        self.text_tab = Frame(self.create_notebook)
+
+        self.import_notebook = ttk.Notebook(self.import_hub, style="Script.TNotebook")
+        self.import_notebook.pack(fill=BOTH, expand=True, padx=8, pady=8)
+        self.import_final_tab = Frame(self.import_notebook)
+        self.handmade_tab = Frame(self.import_notebook)
+        self.export_game_tab = Frame(self.import_notebook)
+
+        self.tools_tab = Frame(self.tools_hub)
+        self.file_management_tab = Frame(self.file_management_hub)
+        self.dev_tools_tab = Frame(self.dev_tools_hub)
 
         self._build_image_preview_tab()
         self._build_generate_tab()
+        self._build_text_tab()
         self._build_import_final_tab()
         self._build_handmade_tab()
         self._build_export_game_tab()
-        self._build_text_tab()
         self._build_tools_tab()
-        self._build_tutorial_tab()
-        self._build_acknowledgements_tab()
+        self._build_file_management_tab()
+        self._build_dev_tools_tab()
 
-        for tab, key in self._workspace_tab_specs():
-            self.main_tabs.add(tab, text=tr(self.lang, key))
-        self.tabs = self.main_tabs
+        for frame, key in self._create_subtab_specs():
+            self.create_notebook.add(frame, text=tr(self.lang, key))
+        for frame, key in self._import_subtab_specs():
+            self.import_notebook.add(frame, text=tr(self.lang, key))
+
+        self.hub_bar.build(self.hub_shell)
 
         self._ensure_tab_strip()
         self._bind_workspace_tab_events()
         try:
-            self.main_tabs.select(0)
+            self.hub_bar.select(self.create_hub)
+            self.create_notebook.select(0)
         except Exception:
             pass
         self.workspace_body.update_idletasks()
 
     def _workspace_tab_specs(self):
         return (
+            (self.create_hub, "hub_create"),
+            (self.import_hub, "hub_import"),
+            (self.tools_hub, "hub_tools"),
+            (self.file_management_hub, "hub_file_management"),
+            (self.dev_tools_hub, "hub_dev_tools"),
+        )
+
+    def _create_subtab_specs(self):
+        return (
+            (self.preview_tab_frame, "preview_tab"),
             (self.generate_tab, "generate_tab"),
+            (self.text_tab, "text_tab"),
+        )
+
+    def _import_subtab_specs(self):
+        return (
             (self.import_final_tab, "import_final_tab"),
             (self.handmade_tab, "import_handmade_tab"),
             (self.export_game_tab, "export_game_tab"),
-            (self.preview_tab_frame, "preview_tab"),
-            (self.text_tab, "text_tab"),
-            (self.tools_tab, "tools_tab"),
-            (self.tutorial_tab, "tutorial_tab"),
-            (self.acknowledgements_tab, "acknowledgements_tab"),
         )
+
+    def _select_hub_subtab(self, hub, sub_notebook, sub_frame) -> None:
+        try:
+            self.hub_bar.select(hub)
+            sub_notebook.select(str(sub_frame))
+        except Exception:
+            pass
 
     def _ensure_tab_strip(self) -> None:
         if not hasattr(self, "_tab_strip_canvas") or not self._tab_strip_canvas.winfo_exists():
-            self._tab_strip_canvas = Canvas(self.workspace, height=18, bg=COLOR_BG, highlightthickness=0, bd=0)
-            setattr(self._tab_strip_canvas, "_chrome_bg", COLOR_BG)
+            t = self.themes.tokens
+            self._tab_strip_canvas = Canvas(self.workspace, height=18, bg=t.chrome_bg, highlightthickness=0, bd=0)
+            setattr(self._tab_strip_canvas, "_chrome_bg", t.chrome_bg)
             self._tab_strip_canvas.bind("<Configure>", lambda _e: self._paint_tab_strip())
         self._tab_strip_canvas.grid(row=1, column=0, sticky="ew", pady=(2, 4))
         self._paint_tab_strip()
@@ -2602,14 +3091,17 @@ class App:
         if not hasattr(self, "_tab_strip_canvas"):
             return
         c = self._tab_strip_canvas
-        c.delete("dots")
-        tabs = getattr(self, "main_tabs", None)
-        if tabs is None:
-            return
+        t = self.themes.tokens
         try:
-            sel = int(tabs.index(tabs.select()))
-        except Exception:
-            sel = 0
+            c.configure(bg=t.chrome_bg)
+            c._chrome_bg = t.chrome_bg  # type: ignore[attr-defined]
+        except TclError:
+            pass
+        c.delete("dots")
+        hub_bar = getattr(self, "hub_bar", None)
+        if hub_bar is None:
+            return
+        sel = hub_bar.active_index()
         n = len(self._workspace_tab_specs())
         w = max(1, c.winfo_width())
         dot_r = 4
@@ -2625,8 +3117,8 @@ class App:
                     cy - dot_r,
                     xc + dot_r,
                     cy + dot_r,
-                    fill=COLOR_ACCENT,
-                    outline=COLOR_SUCCESS,
+                    fill=t.accent,
+                    outline=t.success,
                     width=1,
                     tags="dots",
                 )
@@ -2637,26 +3129,44 @@ class App:
                     xc + dot_r - 1,
                     cy + dot_r - 1,
                     fill="",
-                    outline=COLOR_BORDER,
+                    outline=t.idle_border,
                     width=1,
                     tags="dots",
                 )
 
     def _bind_workspace_tab_events(self):
-        if getattr(self, "_workspace_bound_main", False) or self.main_tabs is None:
+        if getattr(self, "_workspace_bound_main", False):
             return
-        self.main_tabs.bind("<<NotebookTabChanged>>", self._on_main_tab_changed)
+        if hasattr(self, "create_notebook"):
+            self.create_notebook.bind("<<NotebookTabChanged>>", self._on_create_subtab_changed)
+        if hasattr(self, "import_notebook"):
+            self.import_notebook.bind("<<NotebookTabChanged>>", self._on_import_subtab_changed)
         self._workspace_bound_main = True
 
     def _is_text_tab_active(self) -> bool:
         try:
-            return self.main_tabs.select() == str(self.text_tab)
+            return (
+                self.hub_bar.is_active(self.create_hub)
+                and self.create_notebook.select() == str(self.text_tab)
+            )
         except Exception:
             return False
 
     def _is_tools_tab_active(self) -> bool:
         try:
-            return self.main_tabs.select() == str(self.tools_tab)
+            return self.hub_bar.is_active(self.tools_hub)
+        except Exception:
+            return False
+
+    def _is_file_management_tab_active(self) -> bool:
+        try:
+            return self.hub_bar.is_active(self.file_management_hub)
+        except Exception:
+            return False
+
+    def _is_dev_tools_tab_active(self) -> bool:
+        try:
+            return self.hub_bar.is_active(self.dev_tools_hub)
         except Exception:
             return False
 
@@ -2669,7 +3179,20 @@ class App:
             self.text_vinyl.on_tab_activated()
         if self._is_tools_tab_active():
             self.tools_workspace.on_tab_activated()
+        if self._is_file_management_tab_active():
+            self.file_management.on_tab_activated()
+        if self._is_dev_tools_tab_active():
+            self.dev_tools_workspace.on_tab_activated()
         self.root.after(50, self._restore_ready_pane_layouts)
+
+    def _on_create_subtab_changed(self, _event=None) -> None:
+        self._schedule_preview_refresh()
+        if self._is_text_tab_active():
+            self.text_vinyl.on_tab_activated()
+
+    def _on_import_subtab_changed(self, _event=None) -> None:
+        if self._is_import_final_tab_active():
+            self.refresh_generated_runs()
 
     def _theme_label_key(self, theme_id: str) -> str:
         return f"theme_{normalize_theme_id(theme_id)}"
@@ -2694,31 +3217,30 @@ class App:
             self.theme_combo.set(current)
 
     def _refresh_header_chrome(self) -> None:
-        rule = getattr(self, "_header_rule_canvas", None)
-        if rule is not None:
-            rule._chrome_bg = COLOR_BG  # type: ignore[attr-defined]
-            rule._chrome_line = COLOR_BORDER  # type: ignore[attr-defined]
-            try:
-                rule.configure(bg=COLOR_BG)
-                rule.event_generate("<Configure>")
-            except Exception:
-                pass
+        from ui.theme_manager import ThemeManager
 
-    def _apply_theme(self, theme_id: str | None = None) -> None:
-        tid = normalize_theme_id(theme_id or self.theme_id.get())
-        self.theme_id.set(tid)
-        self.palette = resolve_palette(tid)
-        _install_color_globals(self.palette)
-        save_theme_id(ROOT, tid)
-        self.root.configure(bg=COLOR_BG)
-        self._configure_styles()
-        self._apply_theme_recursive(self.root)
+        ThemeManager._refresh_header_chrome(self)
+
+    def _register_theme_hooks(self) -> None:
+        if getattr(self, "_theme_hooks_registered", False):
+            return
+        self._theme_hooks_registered = True
+        self.themes.register(self._on_theme_manager_applied)
+
+    def _on_theme_manager_applied(self, _manager) -> None:
+        self.palette = self.themes.palette
+        self._sync_theme_combo()
+        self._refresh_privilege_status()
+        self._refresh_admin_action_labels()
         if self._header_telemetry is not None:
             self._header_telemetry.apply_theme_recursive(self._apply_theme_recursive)
         self._refresh_header_chrome()
-        self._paint_tab_strip()
-        self._sync_theme_combo()
-        self.text_vinyl.update_theme_hints()
+
+    def _apply_theme(self, theme_id: str | None = None) -> None:
+        if theme_id is not None:
+            self.theme_id.set(normalize_theme_id(theme_id))
+        self.themes.apply(self.theme_id.get())
+        self.palette = self.themes.palette
 
     def _on_theme(self, _event=None) -> None:
         self._apply_theme(self._theme_id_from_display(self.theme_combo.get()))
@@ -2764,17 +3286,37 @@ class App:
         self.translated.append((step2, "generate_step_quality", "text"))
         step2.pack(fill=X, pady=(0, 6))
         profile_row = Frame(step2)
-        profile_row.pack(fill=X, padx=10, pady=(8, 4))
+        profile_row.pack(fill=X, padx=10, pady=(8, 2))
         self._label(profile_row, "quality").pack(side=LEFT)
-        self.profile_combo = ttk.Combobox(
+        self.profile_combo = PresetCombobox(
             profile_row,
-            values=[item["label"] for item in self.settings],
-            textvariable=self.selected_profile,
-            state="readonly",
-            width=32,
+            self.selected_profile,
+            on_select=self._update_setting_description,
+            font=UI_INPUT_FONT,
+            bg=COLOR_PANEL,
         )
         self.profile_combo.pack(side=LEFT, fill=X, expand=True, padx=(8, 0))
-        self.profile_combo.bind("<<ComboboxSelected>>", self._update_setting_description)
+        self.profile_combo.set_profiles(self.settings)
+        self.profile_combo.apply_theme(
+            panel_bg=COLOR_PANEL,
+            input_bg=COLOR_INPUT,
+            text_fg=COLOR_TEXT,
+            select_bg=COLOR_ACCENT_DARK,
+            select_fg=COLOR_SELECT_FG,
+            border_fg=COLOR_BORDER,
+            muted_fg=COLOR_MUTED,
+        )
+        profile_dropdown_hint = self._label(
+            step2, "quality_profile_dropdown_hint", anchor="w", justify=LEFT, theme_role="hint"
+        )
+        profile_dropdown_hint.pack(fill=X, padx=10, pady=(0, 4))
+        self._bind_wraplength(profile_dropdown_hint, step2)
+        self.translated.append((profile_dropdown_hint, "quality_profile_dropdown_hint", "text"))
+        self.preset_badge_legend = self._label(
+            step2, "preset_badge_legend", anchor="w", justify=LEFT, theme_role="hint"
+        )
+        self.preset_badge_legend.pack(fill=X, padx=10, pady=(0, 4))
+        self._bind_wraplength(self.preset_badge_legend, step2)
         preset_actions = Frame(step2)
         preset_actions.pack(fill=X, padx=10, pady=(0, 6))
         self._button(preset_actions, "import_preset", self.import_preset).pack(side=LEFT)
@@ -2784,6 +3326,44 @@ class App:
         self.setting_description._theme_role = "muted"
         self.setting_description.pack(fill=X, padx=10, pady=(0, 4))
         self._bind_wraplength(self.setting_description, step2)
+        self.eco_preset_warning = Label(
+            step2,
+            text="",
+            anchor="w",
+            justify=LEFT,
+            fg=COLOR_WARN,
+            bg=COLOR_PANEL,
+            wraplength=360,
+        )
+        self.eco_preset_warning._theme_role = "warn"
+        self.tailored_preset_warning = Label(
+            step2,
+            text="",
+            anchor="w",
+            justify=LEFT,
+            fg=COLOR_WARN,
+            bg=COLOR_PANEL,
+            wraplength=360,
+        )
+        self.tailored_preset_warning._theme_role = "warn"
+        eco_cooldown_row = Frame(step2)
+        eco_cooldown_row.pack(fill=X, padx=10, pady=(0, 4))
+        self.eco_gpu_cooldown_toggle = Checkbutton(
+            eco_cooldown_row,
+            text=tr(self.lang, "eco_gpu_cooldown"),
+            variable=self.eco_gpu_cooldown,
+            onvalue="1",
+            offvalue="0",
+            command=self._on_eco_cooldown_toggle,
+        )
+        self.eco_gpu_cooldown_toggle.pack(anchor="w")
+        self.translated.append((self.eco_gpu_cooldown_toggle, "eco_gpu_cooldown", "text"))
+        self.eco_gpu_cooldown_hint = self._label(
+            step2, "eco_gpu_cooldown_hint", anchor="w", justify=LEFT, theme_role="hint"
+        )
+        self.eco_gpu_cooldown_hint.pack(fill=X, padx=10, pady=(0, 8))
+        self._bind_wraplength(self.eco_gpu_cooldown_hint, step2)
+        self._update_eco_preset_warning()
 
         filter_row = Frame(step2)
         filter_row.pack(fill=X, padx=10, pady=(0, 4))
@@ -2845,6 +3425,14 @@ class App:
         custom_actions = Frame(custom_section)
         custom_actions.pack(fill=X, padx=10, pady=(0, 8))
         self._button(custom_actions, "save_custom_preset", self.save_custom_preset).pack(side=LEFT)
+        for variable in (
+            self.custom_stop_at,
+            self.custom_max_resolution,
+            self.custom_random_samples,
+            self.custom_mutated_samples,
+            self.custom_save_at,
+        ):
+            variable.trace_add("write", lambda *_args: self._refresh_preview_preset_panel())
         self._sync_custom_state()
         self.root.after_idle(self._refresh_preprocess_mode_combo)
 
@@ -2940,7 +3528,10 @@ class App:
 
     def _is_import_final_tab_active(self) -> bool:
         try:
-            return self.main_tabs.select() == str(self.import_final_tab)
+            return (
+                self.hub_bar.is_active(self.import_hub)
+                and self.import_notebook.select() == str(self.import_final_tab)
+            )
         except Exception:
             return False
 
@@ -2999,6 +3590,11 @@ class App:
         self._update_compare_column_headers()
         if self._preview_filter_cards:
             self._highlight_preview_filter_cards()
+            self._refresh_preview_main_chrome()
+            self._schedule_preview_main_render()
+        self._refresh_preview_preset_panel()
+        if self._preview_filter_payload and is_tailored_experimental_preset(self._selected_setting()):
+            self._refresh_tailored_preset_for_image()
 
     def _on_preprocess_mode_combo(self, _event=None):
         mode_id = self._preprocess_mode_labels.get(self.preprocess_mode_combo.get(), PREPROCESS_NONE)
@@ -3114,14 +3710,14 @@ class App:
             is_next = uses_filter == is_filtered_column
             is_last = last is not None and (last != PREPROCESS_NONE) == is_filtered_column
             if is_next:
-                header.config(fg=COLOR_ACCENT)
-                preview.config(highlightbackground=COLOR_ACCENT, highlightthickness=3)
+                apply_label_emphasis(header, "accent", self.themes)
+                apply_label_selection(preview, "selected", self.themes)
             elif is_last:
-                header.config(fg=COLOR_WARN)
-                preview.config(highlightbackground=COLOR_WARN, highlightthickness=2)
+                apply_label_emphasis(header, "warn", self.themes)
+                apply_label_selection(preview, "selected", self.themes, secondary=True)
             else:
-                header.config(fg=COLOR_MUTED)
-                preview.config(highlightthickness=0)
+                apply_label_emphasis(header, "muted", self.themes)
+                apply_label_selection(preview, "none", self.themes)
 
     def _selected_generate_image(self):
         selection = self.image_list.curselection() if hasattr(self, "image_list") else ()
@@ -3654,10 +4250,12 @@ class App:
         if not layer_count:
             self.log_line(tr(self.lang, "layer_count_required"))
             if hasattr(self, "layer_count_entry"):
-                self.layer_count_entry.config(highlightbackground=COLOR_WARN, highlightthickness=1)
+                apply_entry_validation(self.layer_count_entry, invalid=True, manager=self.themes)
             return
         if hasattr(self, "layer_count_entry"):
-            self.layer_count_entry.config(highlightbackground=COLOR_BORDER, highlightthickness=0)
+            apply_entry_validation(self.layer_count_entry, invalid=False, manager=self.themes)
+        if not self._prepare_memory_work("import"):
+            return
         pid = self.ensure_live_game_pid()
         if not pid:
             return
@@ -3810,6 +4408,8 @@ class App:
         if not layer_count:
             self.log_line(tr(self.lang, "layer_count_required"))
             return
+        if not self._prepare_memory_work("import"):
+            return
         pid = self.ensure_live_game_pid()
         if not pid:
             return
@@ -3837,19 +4437,32 @@ class App:
         self.queue.put(("status", tr(self.lang, "done")))
 
     def _build_image_preview_tab(self):
-        body = Frame(self.preview_tab_frame)
-        body.pack(fill=BOTH, expand=True, padx=10, pady=10)
+        paned = self._create_paned(
+            self.preview_tab_frame,
+            orient=HORIZONTAL,
+            layout_key="preview_horizontal",
+            padx=10,
+            pady=10,
+        )
+        left_outer = Frame(paned)
+        right_outer = Frame(paned)
+        paned.add(left_outer, weight=3)
+        paned.add(right_outer, weight=2)
 
-        controls = ttk.LabelFrame(body, text=tr(self.lang, "preview_tab"))
+        left_hint = self._label(left_outer, "preview_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
+        left_hint.pack(fill=X, pady=(0, 6))
+        self._bind_wraplength(left_hint, left_outer)
+        self.translated.append((left_hint, "preview_tab_hint", "text"))
+
+        left_scroll, left = self._make_vertical_scroll(left_outer)
+        left_scroll.pack(fill=BOTH, expand=True)
+
+        controls = ttk.LabelFrame(left, text=tr(self.lang, "preview_tab"))
         self.translated.append((controls, "preview_tab", "text"))
-        controls.pack(fill=X, pady=(0, 10))
-
-        hint = self._label(controls, "preview_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
-        hint.pack(fill=X, padx=10, pady=(8, 6))
-        self._bind_wraplength(hint, controls)
+        controls.pack(fill=X, pady=(0, 8))
 
         actions = Frame(controls)
-        actions.pack(fill=X, padx=10, pady=(0, 8))
+        actions.pack(fill=X, padx=10, pady=(8, 8))
         self._button(actions, "preview_choose_image", self.choose_preview_image).pack(side=LEFT)
         self._button(actions, "preview_use_generate_image", self.use_generate_image_for_preview).pack(side=LEFT, padx=8)
         self._button(actions, "preview_apply_generate", self.apply_preview_filter_to_generate).pack(side=LEFT)
@@ -3857,32 +4470,148 @@ class App:
 
         self.preview_status_label = Label(
             controls,
-            text=tr(self.lang, "preview_output_folder").format(path=PREVIEW_EXPORT_ROOT),
+            text=tr(self.lang, "preview_output_folder").format(path=self._preview_folder_for_image()),
             anchor="w",
             justify=LEFT,
             bg=COLOR_PANEL,
             fg=COLOR_MUTED,
         )
         self.preview_status_label._theme_role = "muted"
-        self.preview_status_label.pack(fill=X, padx=10, pady=(0, 6))
+        self.preview_status_label.pack(fill=X, padx=10, pady=(0, 8))
         self._bind_wraplength(self.preview_status_label, controls)
 
-        select_hint = self._label(controls, "preview_select_filter", anchor="w", theme_role="hint")
-        select_hint.pack(fill=X, padx=10, pady=(0, 10))
-        self._bind_wraplength(select_hint, controls)
+        preset_panel = ttk.LabelFrame(left, text=tr(self.lang, "preview_preset_heading"))
+        self.translated.append((preset_panel, "preview_preset_heading", "text"))
+        preset_panel.pack(fill=X, pady=(0, 8))
+        self.preview_preset_summary = self._label(
+            preset_panel, "preview_preset_none", anchor="w", justify=LEFT, theme_role="hint"
+        )
+        self.preview_preset_summary.pack(fill=X, padx=10, pady=(8, 2))
+        self._bind_wraplength(self.preview_preset_summary, preset_panel)
+        self.preview_preset_filter = Label(
+            preset_panel,
+            text="",
+            anchor="w",
+            justify=LEFT,
+            bg=COLOR_PANEL,
+            fg=COLOR_MUTED,
+            wraplength=360,
+        )
+        self.preview_preset_filter._theme_role = "muted"
+        self.preview_preset_projection = Label(
+            preset_panel,
+            text="",
+            anchor="w",
+            justify=LEFT,
+            bg=COLOR_PANEL,
+            fg=COLOR_TEXT,
+            wraplength=360,
+        )
+        self.preview_preset_fit = Label(
+            preset_panel,
+            text="",
+            anchor="w",
+            justify=LEFT,
+            bg=COLOR_PANEL,
+            fg=COLOR_MUTED,
+            wraplength=360,
+        )
+        self.preview_preset_fit._theme_role = "muted"
+        self.preview_preset_resolution = Label(
+            preset_panel,
+            text="",
+            anchor="w",
+            justify=LEFT,
+            bg=COLOR_PANEL,
+            fg=COLOR_MUTED,
+            wraplength=360,
+        )
+        self.preview_preset_resolution._theme_role = "muted"
+        self.preview_preset_gpu = Label(
+            preset_panel,
+            text="",
+            anchor="w",
+            justify=LEFT,
+            bg=COLOR_PANEL,
+            fg=COLOR_MUTED,
+            wraplength=360,
+        )
+        self.preview_preset_gpu._theme_role = "muted"
+        self.preview_preset_disclaimer = self._label(
+            preset_panel,
+            "preview_preset_disclaimer",
+            anchor="w",
+            justify=LEFT,
+            theme_role="hint",
+        )
+        self.preview_preset_disclaimer.pack(fill=X, padx=10, pady=(4, 8))
+        self._bind_wraplength(self.preview_preset_disclaimer, preset_panel)
+        self.translated.append((self.preview_preset_disclaimer, "preview_preset_disclaimer", "text"))
 
-        scroll_area, grid_host = self._make_vertical_scroll(body)
-        scroll_area.pack(fill=BOTH, expand=True)
+        main_box = ttk.LabelFrame(left, text=tr(self.lang, "preview_main_heading"))
+        self.translated.append((main_box, "preview_main_heading", "text"))
+        main_box.pack(fill=BOTH, expand=True)
+        self.preview_main_title = Label(
+            main_box,
+            text="",
+            anchor="w",
+            bg=COLOR_PANEL,
+            fg=COLOR_TEXT,
+            font=("Segoe UI", 11, "bold"),
+        )
+        self.preview_main_title.pack(fill=X, padx=10, pady=(8, 2))
+        self.preview_main_estimate = Label(
+            main_box,
+            text="",
+            anchor="w",
+            bg=COLOR_PANEL,
+            fg=COLOR_MUTED,
+        )
+        self.preview_main_estimate.pack(fill=X, padx=10, pady=(0, 4))
+        self.preview_main_hint = Label(
+            main_box,
+            text="",
+            anchor="w",
+            justify=LEFT,
+            bg=COLOR_PANEL,
+            fg=COLOR_MUTED,
+            font=("Segoe UI", 9),
+            wraplength=420,
+        )
+        self.preview_main_hint.pack(fill=X, padx=10, pady=(0, 6))
+        self._bind_wraplength(self.preview_main_hint, main_box)
+        main_preview_row = Frame(main_box)
+        main_preview_row.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+        main_preview_row.rowconfigure(0, weight=1, minsize=PREVIEW_MAIN_MIN)
+        main_preview_row.columnconfigure(0, weight=1)
+        self._preview_main_container = Frame(main_preview_row, bg=COLOR_PREVIEW_BG)
+        self._preview_main_container.grid(row=0, column=0, sticky="nsew")
+        self.preview_main_preview = Label(
+            self._preview_main_container,
+            text=tr(self.lang, "luma_before_hint"),
+            bg=COLOR_PREVIEW_BG,
+            fg=COLOR_PREVIEW_FG,
+        )
+        self.preview_main_preview.place(relx=0.5, rely=0.5, anchor="center")
+        self._preview_main_container.bind("<Configure>", lambda _e: self._schedule_preview_main_render())
+
+        filters_box = ttk.LabelFrame(right_outer, text=tr(self.lang, "preview_filters_heading"))
+        self.translated.append((filters_box, "preview_filters_heading", "text"))
+        filters_box.pack(fill=BOTH, expand=True)
+        select_hint = self._label(filters_box, "preview_select_filter", anchor="w", theme_role="hint")
+        select_hint.pack(fill=X, padx=10, pady=(8, 6))
+        self._bind_wraplength(select_hint, filters_box)
+        self.translated.append((select_hint, "preview_select_filter", "text"))
+
+        scroll_area, grid_host = self._make_vertical_scroll(filters_box)
+        scroll_area.pack(fill=BOTH, expand=True, padx=6, pady=(0, 8))
         self.preview_filter_grid = Frame(grid_host)
         self.preview_filter_grid.pack(fill=BOTH, expand=True)
-        preview_row_count = (len(PREPROCESS_FILTERS) + 1) // 2
-        for row_index in range(preview_row_count):
-            self.preview_filter_grid.rowconfigure(row_index, weight=1, minsize=340)
-        for column in range(2):
-            self.preview_filter_grid.columnconfigure(column, weight=1)
+        self.preview_filter_grid.columnconfigure(0, weight=1)
+        for row_index in range(len(PREPROCESS_FILTERS)):
+            self.preview_filter_grid.rowconfigure(row_index, weight=0, minsize=PREVIEW_FILTER_CARD_MIN + 88)
 
         for index, spec in enumerate(PREPROCESS_FILTERS):
-            row, column = divmod(index, 2)
             card = Frame(
                 self.preview_filter_grid,
                 bg=COLOR_PANEL_ALT,
@@ -3890,9 +4619,9 @@ class App:
                 highlightbackground=COLOR_BORDER,
                 cursor="hand2",
             )
-            card.grid(row=row, column=column, sticky="nsew", padx=6, pady=6)
+            card.grid(row=index, column=0, sticky="ew", padx=2, pady=4)
             card.columnconfigure(0, weight=1)
-            card.rowconfigure(3, weight=1, minsize=260)
+            card.rowconfigure(2, weight=0, minsize=PREVIEW_FILTER_CARD_MIN)
 
             title = Label(
                 card,
@@ -3903,56 +4632,280 @@ class App:
                 font=("Segoe UI", 10, "bold"),
                 cursor="hand2",
             )
-            title.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 2))
+            title.grid(row=0, column=0, sticky="ew", padx=8, pady=(6, 0))
             estimate = Label(card, text="", anchor="w", bg=COLOR_PANEL_ALT, fg=COLOR_MUTED, cursor="hand2")
             estimate.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 2))
-            card_hint = Label(
-                card,
-                text=tr(self.lang, spec.hint_key),
-                anchor="w",
-                justify=LEFT,
-                wraplength=280,
-                bg=COLOR_PANEL_ALT,
-                fg=COLOR_MUTED,
-                font=("Segoe UI", 9),
-                cursor="hand2",
-            )
-            card_hint.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 4))
+            thumb_host = Frame(card, bg=COLOR_PREVIEW_BG, height=PREVIEW_FILTER_THUMB_H)
+            thumb_host.grid(row=2, column=0, sticky="ew", padx=8, pady=(0, 6))
+            thumb_host.grid_propagate(False)
             preview = Label(
-                card,
+                thumb_host,
                 text=tr(self.lang, "luma_before_hint"),
                 bg=COLOR_PREVIEW_BG,
                 fg=COLOR_PREVIEW_FG,
                 cursor="hand2",
             )
-            preview.grid(row=3, column=0, sticky="nsew", padx=8, pady=(0, 8))
-            preview.bind("<Configure>", lambda _e, mid=spec.mode_id: self._schedule_preview_filter_render(mid))
+            preview.place(relx=0.5, rely=0.5, anchor="center")
 
             def _select(_e=None, mode_id=spec.mode_id):
                 self._set_preprocess_mode(mode_id, refresh_ui=True)
 
-            for widget in (card, title, estimate, card_hint, preview):
+            for widget in (card, title, estimate, thumb_host, preview):
                 widget.bind("<Button-1>", _select)
             self._preview_filter_cards[spec.mode_id] = {
                 "card": card,
                 "title": title,
                 "estimate": estimate,
-                "hint": card_hint,
                 "preview": preview,
                 "spec": spec,
             }
 
         self._highlight_preview_filter_cards()
+        self._refresh_preview_main_chrome()
 
-    def _preview_card_bounds(self, label):
+    def _preview_setting_values(self) -> dict[str, str] | None:
+        setting = self._selected_setting()
+        if not setting:
+            return None
+        custom = self._custom_values() if self.use_custom_settings.get() == "1" else {}
+        if custom:
+            return merged_settings_values(setting, custom)
+        return dict(setting.get("values", {}) or {})
+
+    def _preview_card_estimate_text(self, mode_id: str) -> str:
+        entry = self._preview_filter_payload.get(mode_id)
+        raw = int(entry["estimate"]) if entry and entry.get("estimate") else None
+        if raw is None:
+            return tr(self.lang, "preview_estimate_unknown")
+        values = self._preview_setting_values()
+        if not values:
+            return tr(self.lang, "preview_estimate").format(count=raw)
+        stop_at = preset_setting_int(values, "stopAt")
+        projected = projected_layer_count(raw, stop_at)
+        if projected is None:
+            return tr(self.lang, "preview_estimate_unknown")
+        if projected < raw:
+            return tr(self.lang, "preview_estimate_projected_capped").format(projected=projected, raw=raw)
+        if is_tailored_experimental_preset(self._selected_setting()):
+            return tr(self.lang, "preview_estimate_projected").format(count=projected)
+        return tr(self.lang, "preview_estimate_uncapped").format(raw=raw, cap=stop_at)
+
+    def _preview_gpu_load_text(self, values: dict[str, str], setting=None) -> str:
+        tier = gpu_load_tier(
+            preset_setting_int(values, "randomSamples"),
+            preset_setting_int(values, "maxResolution"),
+        )
+        gpu_text = tr(self.lang, f"preview_preset_gpu_{tier}")
+        badge = ""
+        if setting is not None:
+            badge = str(setting.get("badge_prefix", "") if hasattr(setting, "get") else setting["badge_prefix"]).strip()
+            if not badge:
+                badge = preset_badge_prefix(setting=setting).strip()
+        if badge:
+            return f"{badge}  {gpu_text}"
+        return gpu_text
+
+    def _refresh_preview_preset_panel(self):
+        if not hasattr(self, "preview_preset_summary"):
+            return
+        values = self._preview_setting_values()
+        setting = self._selected_setting()
+        if not values or not setting:
+            self.preview_preset_summary.config(text=tr(self.lang, "preview_preset_none"))
+            for widget in (
+                self.preview_preset_filter,
+                self.preview_preset_projection,
+                self.preview_preset_fit,
+                self.preview_preset_resolution,
+                self.preview_preset_gpu,
+            ):
+                widget.config(text="")
+                widget.pack_forget()
+            return
+
+        name = preset_setting_name(setting)
+        stop_at = preset_setting_int(values, "stopAt")
+        random_samples = preset_setting_int(values, "randomSamples")
+        max_resolution = preset_setting_int(values, "maxResolution")
+        self.preview_preset_summary.config(
+            text=tr(self.lang, "preview_preset_summary").format(
+                name=name,
+                layers=stop_at,
+                samples=f"{random_samples:,}",
+                resolution=max_resolution,
+            )
+        )
+
+        mode = self._selected_preprocess_mode()
+        self.preview_preset_filter.config(
+            text=tr(self.lang, "preview_preset_selected_filter").format(filter=self._filter_label(mode))
+        )
+        self.preview_preset_filter.pack(fill=X, padx=10, pady=(0, 2))
+        self._bind_wraplength(self.preview_preset_filter, self.preview_preset_filter.master)
+
+        raw = self._preview_estimate_for_image(
+            getattr(self, "_preview_source_path", None),
+            mode,
+        )
+        projected = projected_layer_count(raw, stop_at)
+        if projected is not None and raw is not None:
+            self.preview_preset_projection.config(
+                text=tr(self.lang, "preview_preset_projection").format(
+                    count=projected,
+                    raw=raw,
+                    cap=stop_at,
+                )
+            )
+            fit_key = "preview_preset_cap_exceeded" if raw > stop_at else "preview_preset_cap_ok"
+            self.preview_preset_fit.config(text=tr(self.lang, fit_key).format(raw=raw, cap=stop_at))
+        elif projected is not None:
+            self.preview_preset_projection.config(
+                text=tr(self.lang, "preview_preset_projection_simple").format(count=projected)
+            )
+            self.preview_preset_fit.config(text="")
+        else:
+            self.preview_preset_projection.config(text="")
+            self.preview_preset_fit.config(text="")
+        if self.preview_preset_projection.cget("text"):
+            self.preview_preset_projection.pack(fill=X, padx=10, pady=(0, 2))
+            self._bind_wraplength(self.preview_preset_projection, self.preview_preset_projection.master)
+        else:
+            self.preview_preset_projection.pack_forget()
+        if self.preview_preset_fit.cget("text"):
+            self.preview_preset_fit.pack(fill=X, padx=10, pady=(0, 2))
+            self._bind_wraplength(self.preview_preset_fit, self.preview_preset_fit.master)
+        else:
+            self.preview_preset_fit.pack_forget()
+
+        source_path = getattr(self, "_preview_source_path", None)
+        resolution_text = ""
+        if source_path and max_resolution > 0:
+            dims = read_image_dimensions(Path(source_path))
+            if dims:
+                src_w, src_h = dims
+                eff_w, eff_h = effective_max_dimension(src_w, src_h, max_resolution)
+                if eff_w < src_w or eff_h < src_h:
+                    resolution_text = tr(self.lang, "preview_preset_resolution_downscale").format(
+                        width=eff_w,
+                        height=eff_h,
+                        source_width=src_w,
+                        source_height=src_h,
+                    )
+        if resolution_text:
+            self.preview_preset_resolution.config(text=resolution_text)
+            self.preview_preset_resolution.pack(fill=X, padx=10, pady=(0, 2))
+            self._bind_wraplength(self.preview_preset_resolution, self.preview_preset_resolution.master)
+        else:
+            self.preview_preset_resolution.pack_forget()
+
+        gpu_text = self._preview_gpu_load_text(values, setting)
+        self.preview_preset_gpu.config(text=gpu_text)
+        self.preview_preset_gpu.pack(fill=X, padx=10, pady=(0, 2))
+        self._bind_wraplength(self.preview_preset_gpu, self.preview_preset_gpu.master)
+
+    def _preview_container_bounds(
+        self,
+        container,
+        *,
+        fallback_w: int,
+        fallback_h: int,
+        min_height: int = 0,
+    ) -> tuple[int, int]:
+        """Size from a stable parent frame, quantized to avoid Configure feedback loops."""
         try:
-            width = label.winfo_width()
-            height = label.winfo_height()
+            self.root.update_idletasks()
+            width = container.winfo_width()
+            height = container.winfo_height()
         except Exception:
             width = height = 0
-        if width <= 40 or height <= 40:
-            return 360, 260
-        return max(1, width - 12), max(1, height - 12)
+        if width <= 32:
+            width = fallback_w
+        else:
+            width = max(64, width - 12)
+        if height <= 32:
+            height = max(min_height, fallback_h) if min_height > 0 else fallback_h
+        else:
+            height = max(min_height, height - 12) if min_height > 0 else max(64, height - 12)
+        width = max(64, (width // 32) * 32)
+        height = max(64, (height // 32) * 32)
+        return width, height
+
+    def _preview_card_thumb_bounds(self) -> tuple[int, int]:
+        return PREVIEW_FILTER_THUMB_W, PREVIEW_FILTER_THUMB_H
+
+    def _preview_main_bounds(self) -> tuple[int, int]:
+        container = getattr(self, "_preview_main_container", None)
+        if container is None:
+            return PREVIEW_MAX, PREVIEW_MAIN_MIN
+        return self._preview_container_bounds(
+            container,
+            fallback_w=PREVIEW_MAX,
+            fallback_h=PREVIEW_MAIN_MIN,
+            min_height=PREVIEW_MAIN_MIN,
+        )
+
+    def _clear_preview_label_cache(self, label) -> None:
+        label._fp_preview_cache_key = None  # type: ignore[attr-defined]
+        label.image = None
+
+    def _preview_label_cache_hit(self, label, path: str | Path, bounds: tuple[int, int]) -> bool:
+        key = (str(path), int(bounds[0]), int(bounds[1]))
+        return getattr(label, "_fp_preview_cache_key", None) == key and getattr(label, "image", None)
+
+    def _preview_label_cache_store(self, label, path: str | Path, bounds: tuple[int, int]) -> None:
+        label._fp_preview_cache_key = (str(path), int(bounds[0]), int(bounds[1]))  # type: ignore[attr-defined]
+
+    def _refresh_preview_main_chrome(self) -> None:
+        if not hasattr(self, "preview_main_title"):
+            return
+        spec = filter_spec(self._selected_preprocess_mode())
+        if spec is None:
+            self.preview_main_title.config(text="")
+            self.preview_main_hint.config(text="")
+            self.preview_main_estimate.config(text="")
+            return
+        self.preview_main_title.config(text=tr(self.lang, spec.label_key))
+        self.preview_main_hint.config(text=tr(self.lang, spec.hint_key))
+        self.preview_main_estimate.config(
+            text=self._preview_card_estimate_text(spec.mode_id)
+        )
+
+    def _schedule_preview_main_render(self) -> None:
+        if not hasattr(self, "preview_main_preview") or self.closed:
+            return
+        job = self._preview_main_render_job
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+        self._preview_main_render_job = self.root.after(180, self._render_preview_main)
+
+    def _render_preview_main(self) -> None:
+        self._preview_main_render_job = None
+        if self.closed or not hasattr(self, "preview_main_preview"):
+            return
+        mode_id = self._selected_preprocess_mode()
+        self._refresh_preview_main_chrome()
+        label = self.preview_main_preview
+        entry = self._preview_filter_payload.get(mode_id)
+        path = entry.get("path") if entry else None
+        if not path or not Path(path).exists():
+            self._clear_preview_label_cache(label)
+            label.config(image="", text=tr(self.lang, "luma_before_hint"))
+            return
+        bounds = self._preview_main_bounds()
+        if self._preview_label_cache_hit(label, path, bounds):
+            return
+        data = render_source_image(path, bounds)
+        if not data:
+            self._clear_preview_label_cache(label)
+            label.config(image="", text=tr(self.lang, "preview_unavailable"))
+            return
+        image = PhotoImage(data=data)
+        label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+        label.image = image
+        self._preview_label_cache_store(label, path, bounds)
 
     def _schedule_preview_filter_render(self, mode_id: str):
         job = self._preview_render_jobs.get(mode_id)
@@ -3975,23 +4928,24 @@ class App:
         label = widgets["preview"]
         estimate_label = widgets["estimate"]
         entry = self._preview_filter_payload.get(mode_id)
-        if entry and entry.get("estimate"):
-            estimate_label.config(text=tr(self.lang, "preview_estimate").format(count=int(entry["estimate"])))
-        else:
-            estimate_label.config(text=tr(self.lang, "preview_estimate_unknown"))
+        estimate_label.config(text=self._preview_card_estimate_text(mode_id))
         path = entry.get("path") if entry else None
         if not path or not Path(path).exists():
+            self._clear_preview_label_cache(label)
             label.config(image="", text=tr(self.lang, "luma_before_hint"))
-            label.image = None
             return
-        data = render_source_image(path, self._preview_card_bounds(label))
+        bounds = self._preview_card_thumb_bounds()
+        if self._preview_label_cache_hit(label, path, bounds):
+            return
+        data = render_source_image(path, bounds)
         if not data:
+            self._clear_preview_label_cache(label)
             label.config(image="", text=tr(self.lang, "preview_unavailable"))
-            label.image = None
             return
         image = PhotoImage(data=data)
         label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
         label.image = image
+        self._preview_label_cache_store(label, path, bounds)
 
     def _highlight_preview_filter_cards(self):
         if not self._preview_filter_cards:
@@ -4000,9 +4954,10 @@ class App:
         for mode_id, widgets in self._preview_filter_cards.items():
             card = widgets["card"]
             if mode_id == selected:
-                card.config(highlightbackground=COLOR_ACCENT, highlightthickness=3)
+                apply_frame_selection(card, "selected", self.themes)
             else:
-                card.config(highlightbackground=COLOR_BORDER, highlightthickness=1)
+                apply_frame_selection(card, "idle", self.themes)
+        self._refresh_preview_main_chrome()
 
     def _start_preview_filter_compute(self, source: Path):
         if not load_cv2():
@@ -4017,8 +4972,12 @@ class App:
         self.preview_status_label.config(text=tr(self.lang, "preview_processing").format(path=source.name))
         for widgets in self._preview_filter_cards.values():
             widgets["estimate"].config(text=tr(self.lang, "preview_estimate_unknown"))
+            self._clear_preview_label_cache(widgets["preview"])
             widgets["preview"].config(image="", text=tr(self.lang, "luma_before_hint"))
-            widgets["preview"].image = None
+        if hasattr(self, "preview_main_preview"):
+            self._clear_preview_label_cache(self.preview_main_preview)
+            self.preview_main_preview.config(image="", text=tr(self.lang, "luma_before_hint"))
+            self._refresh_preview_main_chrome()
         threading.Thread(target=self._preview_filter_worker, args=(source,), daemon=True).start()
 
     def _preview_filter_worker(self, source: Path):
@@ -4034,12 +4993,17 @@ class App:
             return
         self._preview_filter_payload = payload
         self.preview_status_label.config(
-            text=tr(self.lang, "preview_output_folder").format(path=PREVIEW_EXPORT_ROOT)
+            text=tr(self.lang, "preview_output_folder").format(path=self._preview_folder_for_image(Path(source_key)))
         )
         for mode_id in self._preview_filter_cards:
             self._render_preview_filter_card(mode_id)
         self._highlight_preview_filter_cards()
+        self._schedule_preview_main_render()
+        self._refresh_preview_preset_panel()
         self._refresh_generate_compare()
+        image_path = Path(source_key)
+        if image_path.is_file():
+            self._refresh_tailored_preset_for_image(image_path)
 
     def choose_preview_image(self):
         path = filedialog.askopenfilename(
@@ -4051,10 +5015,14 @@ class App:
 
     def _ensure_generate_images(self, paths: list[Path]) -> list[Path]:
         added_paths: list[Path] = []
+        fm_settings = load_file_management_settings()
         for item in paths:
             path = Path(item)
             if not path.exists() or path in self.images:
                 continue
+            path = ensure_image_workspace_source(
+                path, copy_external=fm_settings.effective_copy_external_images()
+            )
             self.images.append(path)
             added_paths.append(path)
             self._load_existing_checkpoints_for_image(path)
@@ -4069,6 +5037,7 @@ class App:
             except (ValueError, TclError):
                 pass
             self.show_source_preview(select_path)
+            self._ensure_preview_for_image(select_path)
         return added_paths
 
     def use_generate_image_for_preview(self):
@@ -4093,14 +5062,20 @@ class App:
         self._start_preview_filter_compute(image_path)
 
     def apply_preview_filter_to_generate(self):
-        try:
-            self.main_tabs.select(self.generate_tab)
-        except Exception:
-            pass
+        self._select_hub_subtab(self.create_hub, self.create_notebook, self.generate_tab)
+
+    def _preview_folder_for_image(self, image_path: Path | None = None) -> Path:
+        image_path = Path(image_path) if image_path is not None else self._selected_generate_image()
+        if image_path is not None and image_path.exists():
+            return preview_output_folder(image_path)
+        from asset_workspace import IMAGE_WORKSPACE_ROOT
+
+        return IMAGE_WORKSPACE_ROOT
 
     def open_preview_folder(self):
-        PREVIEW_EXPORT_ROOT.mkdir(parents=True, exist_ok=True)
-        os.startfile(PREVIEW_EXPORT_ROOT)
+        folder = self._preview_folder_for_image()
+        folder.mkdir(parents=True, exist_ok=True)
+        os.startfile(folder)
 
     def _copy_to_clipboard(self, text: str):
         try:
@@ -4112,24 +5087,241 @@ class App:
             self.log_line(tr(self.lang, "log_clipboard_failed").format(error=exc))
 
     def _build_tools_tab(self):
+        self.tools_tab.pack(fill=BOTH, expand=True)
         self.tools_workspace.build(self.tools_tab)
 
-    def _start_resource_monitor(self):
+    def _build_file_management_tab(self):
+        self.file_management_tab.pack(fill=BOTH, expand=True)
+        self.file_management.build(self.file_management_tab)
+
+    def _build_dev_tools_tab(self):
+        self.dev_tools_tab.pack(fill=BOTH, expand=True)
+        self.dev_tools_workspace.build(self.dev_tools_tab)
+
+    def _tutorial_text(self) -> str:
+        return tr(self.lang, "tutorial")
+
+    def _show_first_run_if_needed(self) -> None:
+        if self.closed or self._ui_prefs.get("first_run_complete"):
+            return
+        show_first_run_welcome(self.root, tr, self.lang)
+        self._ui_prefs["first_run_complete"] = True
+        save_ui_preferences(self._ui_prefs)
+
+    def _show_help_menu(self) -> None:
+        menu = Menu(self.root, tearoff=0)
+        menu.add_command(label=tr(self.lang, "help_tutorial"), command=self.show_help_tutorial)
+        menu.add_command(label=tr(self.lang, "help_acknowledgements"), command=self.show_help_acknowledgements)
+        menu.add_separator()
+        menu.add_command(label=tr(self.lang, "help_safety"), command=self.show_help_safety)
+        try:
+            widget = getattr(self, "help_menu_button", None)
+            if widget is not None:
+                x = widget.winfo_rootx()
+                y = widget.winfo_rooty() + widget.winfo_height()
+                menu.tk_popup(x, y)
+            else:
+                menu.tk_popup(self.root.winfo_pointerx(), self.root.winfo_pointery())
+        finally:
+            menu.grab_release()
+
+    def show_help_tutorial(self) -> None:
+        show_tutorial_dialog(self.root, tr, self.lang, self._tutorial_text())
+
+    def show_help_acknowledgements(self) -> None:
+        show_acknowledgements_dialog(self.root, tr, self.lang)
+
+    def show_help_safety(self) -> None:
+        show_safety_guide(self.root, tr, self.lang, ask_language=True)
+
+    def _prune_stale_translated_widgets(self) -> None:
+        alive = []
+        for widget, key, option in self.translated:
+            if self._widget_alive(widget):
+                alive.append((widget, key, option))
+        self.translated = alive
+
+    def _build_log(self):
+        row = Frame(self.log_pane)
+        row.pack(fill=X, padx=0, pady=(6, 2))
+        self._label(row, "logs", anchor="w").pack(side=LEFT)
+        self._button(row, "export_logs", self.export_detailed_log).pack(side=RIGHT)
+        self._label(row, "progress", anchor="e").pack(side=LEFT, padx=(18, 4))
+        progress_label = Label(row, textvariable=self.progress_text, anchor="w", bg=COLOR_BG, fg=COLOR_INFO)
+        progress_label._theme_role = "info"
+        progress_label.pack(side=LEFT, fill=X, expand=True)
+        resize_hint = self._label(self.log_pane, "layout_resize_hint", anchor="w", theme_role="muted")
+        resize_hint.pack(fill=X, padx=0, pady=(0, 4))
+        log_frame = Frame(self.log_pane)
+        log_frame.pack(fill=BOTH, expand=True, padx=0, pady=(0, 8))
+        log_scroll = ttk.Scrollbar(log_frame, orient="vertical")
+        log_scroll.pack(side=RIGHT, fill="y")
+        self.log = Text(log_frame, height=9, yscrollcommand=log_scroll.set)
+        self.log.pack(side=LEFT, fill=BOTH, expand=True)
+        log_scroll.config(command=self.log.yview)
+        self._bind_text_mousewheel(self.log)
+
+    def _field(self, parent, key, variable, row, values=None, readonly=False):
+        self._label(parent, key, anchor="w").grid(row=row, column=0, sticky="w", padx=(0, 8), pady=5)
+        if values:
+            widget = ttk.Combobox(parent, values=values, textvariable=variable, state="readonly" if readonly else "normal")
+        else:
+            widget = Entry(parent, textvariable=variable)
+        widget.grid(row=row, column=1, sticky="ew", pady=5)
+        parent.columnconfigure(1, weight=1)
+        return widget
+
+    def _on_language(self, _event=None):
+        self.lang = LANGUAGES.get(self.lang_combo.get(), "en")
+        save_language_code(ROOT, self.lang)
+        self._sync_theme_combo()
+        self._apply_ui_fonts()
+        self._refresh_privilege_status()
+        self._refresh_admin_action_labels()
+        for widget, key, option in self.translated:
+            try:
+                if option == "text_upper":
+                    widget.config(text=tr(self.lang, key).upper())
+                else:
+                    widget.config(**{option: tr(self.lang, key)})
+            except Exception:
+                pass
+        self.themes.apply(self.theme_id.get())
+        self._refresh_header_version_row()
+        if self._resource_monitor_snapshot is not None:
+            self._apply_resource_snapshot(self._resource_monitor_snapshot)
+        if hasattr(self, "create_notebook"):
+            for frame, key in self._create_subtab_specs():
+                self.create_notebook.tab(frame, text=tr(self.lang, key))
+        if hasattr(self, "import_notebook"):
+            for frame, key in self._import_subtab_specs():
+                self.import_notebook.tab(frame, text=tr(self.lang, key))
+        if hasattr(self, "tools_workspace"):
+            self.tools_workspace.on_language_changed()
+        if hasattr(self, "file_management"):
+            self.file_management.on_language_changed()
+        if hasattr(self, "dev_tools_workspace"):
+            self.dev_tools_workspace.on_language_changed()
+        if hasattr(self, "generate_compare_hint"):
+            self.generate_compare_hint.config(text=tr(self.lang, "generate_select_image"))
+        if hasattr(self, "preview_status_label"):
+            if self._preview_compute_running and self._preview_source_path:
+                self.preview_status_label.config(
+                    text=tr(self.lang, "preview_processing").format(path=Path(self._preview_source_path).name)
+                )
+            else:
+                self.preview_status_label.config(
+                    text=tr(self.lang, "preview_output_folder").format(
+                        path=self._preview_folder_for_image(Path(self._preview_source_path))
+                    )
+                )
+        if self._preview_filter_cards:
+            for mode_id, widgets in self._preview_filter_cards.items():
+                widgets["title"].config(text=self._filter_label(mode_id))
+            self._refresh_preprocess_mode_combo()
+            self._update_preprocess_filter_active_hint()
+            self._highlight_preview_filter_cards()
+            self._refresh_preview_main_chrome()
+            for mode_id in self._preview_filter_cards:
+                self._render_preview_filter_card(mode_id)
+            self._schedule_preview_main_render()
+        self._refresh_preview_preset_panel()
+        self.text_vinyl.on_language_changed()
+        if self.photo is None and hasattr(self, "import_preview_label"):
+            self.import_preview_label.config(text=tr(self.lang, "preview_hint"))
+        if hasattr(self, "generate_source_before_preview"):
+            self._refresh_generate_compare()
+        if hasattr(self, "advanced_button"):
+            self.advanced_button.config(text=tr(self.lang, "hide_advanced" if self.advanced_visible else "show_advanced"))
+        if hasattr(self, "setting_description"):
+            self._update_setting_description()
+        self.text_vinyl.update_theme_hints()
+        self.status.set(tr(self.lang, "ready"))
+
+    def _update_setting_description(self, _event=None):
+        if not self._widget_alive(getattr(self, "setting_description", None)):
+            return
+        item = self._selected_setting()
+        try:
+            self.setting_description.config(text=item["description"] if item else tr(self.lang, "no_settings_profiles"))
+        except TclError:
+            return
+        if item and self.use_custom_settings.get() != "1":
+            values = item.get("values", {})
+            self.custom_stop_at.set(values.get("stopAt", "3000"))
+            self.custom_max_resolution.set(values.get("maxResolution", "1200"))
+            self.custom_random_samples.set(values.get("randomSamples", "3000"))
+            self.custom_mutated_samples.set(values.get("mutatedSamples", "1000"))
+            self.custom_save_at.set(values.get("saveAt", values.get("stopAt", "3000")))
+            self.custom_preprocess_mode.set(values.get("preprocessMode", "none"))
+            self._set_preprocess_mode(
+                normalize_preprocess_mode(values.get("preprocessMode", "none")),
+                refresh_ui=True,
+            )
+        self._update_eco_preset_warning()
+        self._update_tailored_preset_warning()
+        self._refresh_preview_preset_panel()
+
+    def _update_eco_preset_warning(self):
+        label = getattr(self, "eco_preset_warning", None)
+        if label is None or not self._widget_alive(label):
+            return
+        item = self._selected_setting()
+        if item and is_eco_experimental_preset(item):
+            t = self.themes.tokens
+            label.config(text=tr(self.lang, "eco_preset_warning"), fg=t.validation_border, bg=t.panel)
+            label.pack(fill=X, padx=10, pady=(0, 4), before=self.eco_gpu_cooldown_toggle.master)
+        else:
+            label.pack_forget()
+
+    def _update_tailored_preset_warning(self):
+        label = getattr(self, "tailored_preset_warning", None)
+        if label is None or not self._widget_alive(label):
+            return
+        item = self._selected_setting()
+        if item and is_tailored_experimental_preset(item):
+            t = self.themes.tokens
+            label.config(text=tr(self.lang, "tailored_preset_warning"), fg=t.validation_border, bg=t.panel)
+            label.pack(fill=X, padx=10, pady=(0, 4), before=self.eco_gpu_cooldown_toggle.master)
+        else:
+            label.pack_forget()
+
+    def _on_eco_cooldown_toggle(self):
+        self._persist_eco_generation_settings()
+
+    def _persist_eco_generation_settings(self):
+        self._eco_generation_settings = EcoGenerationSettings(
+            cooldown_enabled=self.eco_gpu_cooldown.get() == "1",
+            eco_preset_acknowledged=self._eco_generation_settings.eco_preset_acknowledged,
+        )
+        save_eco_generation_settings(self._eco_generation_settings, ROOT)
+
+    def _eco_cooldown_enabled(self) -> bool:
+        return getattr(self, "eco_gpu_cooldown", None) is not None and self.eco_gpu_cooldown.get() == "1"
+
+    def _read_gpu_temp_c_for_cooldown(self) -> float | None:
+        snapshot = getattr(self, "_resource_monitor_snapshot", None)
+        if snapshot is not None and snapshot.gpu_temp_c is not None:
+            return snapshot.gpu_temp_c
+        return read_gpu_temp_c()
+
+    def _start_resource_monitor(self) -> None:
         if not self._resource_monitor_settings.enabled:
             return
         self._resource_monitor_backend = ResourceMonitorBackend()
         threading.Thread(target=self._resource_monitor_worker, daemon=True).start()
 
-    def _resource_monitor_worker(self):
+    def _resource_monitor_worker(self) -> None:
         settings = self._resource_monitor_settings
         backend = self._resource_monitor_backend
         if backend is None:
             return
         while not self.shutdown_event.is_set():
-            snapshot = backend.poll()
-            init_error = backend.consume_init_error_for_log()
-            if init_error:
-                self.queue.put(("log", f"Resource monitor: {init_error}"))
+            try:
+                snapshot = backend.poll()
+            except Exception as exc:
+                self.queue.put(("log", f"Resource monitor: {exc}"))
+                snapshot = unavailable_snapshot("afterburner")
             self.queue.put(("resource_monitor", snapshot))
             if self.shutdown_event.wait(settings.poll_seconds):
                 break
@@ -4168,7 +5360,7 @@ class App:
         elif heat_state == "normal" and previous in ("warning", "critical"):
             self.log_line(tr(self.lang, "resource_temp_returned_normal").format(temp=peak_text))
 
-    def _apply_resource_snapshot(self, snapshot: ResourceSnapshot):
+    def _apply_resource_snapshot(self, snapshot: ResourceSnapshot) -> None:
         self._resource_monitor_snapshot = snapshot
         panel = self._header_telemetry
         if panel is None:
@@ -4176,145 +5368,173 @@ class App:
         panel.apply_snapshot(snapshot)
         self._handle_resource_heat_state(snapshot)
 
-    def _build_tutorial_tab(self):
-        frame = Frame(self.tutorial_tab)
-        frame.pack(fill=BOTH, expand=True, padx=10, pady=10)
-        tutorial_scroll = ttk.Scrollbar(frame, orient="vertical")
-        tutorial_scroll.pack(side=RIGHT, fill="y")
-        self.tutorial_text = Text(frame, wrap="word", yscrollcommand=tutorial_scroll.set)
-        self.tutorial_text.pack(side=LEFT, fill=BOTH, expand=True)
-        tutorial_scroll.config(command=self.tutorial_text.yview)
-        self._bind_text_mousewheel(self.tutorial_text)
-        self._update_tutorial()
+    def _sleep_with_shutdown(self, seconds: float) -> bool:
+        """Sleep up to ``seconds``. Returns True if shutdown was requested."""
+        deadline = time.monotonic() + max(0.0, seconds)
+        while time.monotonic() < deadline:
+            if self.shutdown_event.is_set():
+                return True
+            remaining = min(0.25, deadline - time.monotonic())
+            if remaining <= 0:
+                break
+            time.sleep(remaining)
+        return self.shutdown_event.is_set()
 
-    def _build_acknowledgements_tab(self):
-        frame = Frame(self.acknowledgements_tab)
-        frame.pack(fill=BOTH, expand=True, padx=10, pady=10)
-        acknowledgements_scroll = ttk.Scrollbar(frame, orient="vertical")
-        acknowledgements_scroll.pack(side=RIGHT, fill="y")
-        self.acknowledgements_text = Text(frame, wrap="word", yscrollcommand=acknowledgements_scroll.set)
-        self.acknowledgements_text.pack(side=LEFT, fill=BOTH, expand=True)
-        acknowledgements_scroll.config(command=self.acknowledgements_text.yview)
-        self._bind_text_mousewheel(self.acknowledgements_text)
-        self._update_acknowledgements()
-
-    def _build_log(self):
-        row = Frame(self.log_pane)
-        row.pack(fill=X, padx=0, pady=(6, 2))
-        self._label(row, "logs", anchor="w").pack(side=LEFT)
-        self._button(row, "export_logs", self.export_detailed_log).pack(side=RIGHT)
-        self._label(row, "progress", anchor="e").pack(side=LEFT, padx=(18, 4))
-        progress_label = Label(row, textvariable=self.progress_text, anchor="w", bg=COLOR_BG, fg=COLOR_INFO)
-        progress_label._theme_role = "info"
-        progress_label.pack(side=LEFT, fill=X, expand=True)
-        resize_hint = self._label(self.log_pane, "layout_resize_hint", anchor="w", theme_role="muted")
-        resize_hint.pack(fill=X, padx=0, pady=(0, 4))
-        log_frame = Frame(self.log_pane)
-        log_frame.pack(fill=BOTH, expand=True, padx=0, pady=(0, 8))
-        log_scroll = ttk.Scrollbar(log_frame, orient="vertical")
-        log_scroll.pack(side=RIGHT, fill="y")
-        self.log = Text(log_frame, height=9, yscrollcommand=log_scroll.set)
-        self.log.pack(side=LEFT, fill=BOTH, expand=True)
-        log_scroll.config(command=self.log.yview)
-        self._bind_text_mousewheel(self.log)
-
-    def _field(self, parent, key, variable, row, values=None, readonly=False):
-        self._label(parent, key, anchor="w").grid(row=row, column=0, sticky="w", padx=(0, 8), pady=5)
-        if values:
-            widget = ttk.Combobox(parent, values=values, textvariable=variable, state="readonly" if readonly else "normal")
-        else:
-            widget = Entry(parent, textvariable=variable)
-        widget.grid(row=row, column=1, sticky="ew", pady=5)
-        parent.columnconfigure(1, weight=1)
-        return widget
-
-    def _on_language(self, _event=None):
-        self.lang = LANGUAGES.get(self.lang_combo.get(), "en")
-        save_language_code(ROOT, self.lang)
-        self._sync_theme_combo()
-        self._apply_ui_fonts()
-        for widget, key, option in self.translated:
-            try:
-                if option == "text_upper":
-                    widget.config(text=tr(self.lang, key).upper())
-                else:
-                    widget.config(**{option: tr(self.lang, key)})
-            except Exception:
-                pass
-        for tab, key in self._workspace_tab_specs():
-            self.main_tabs.tab(tab, text=tr(self.lang, key))
-        if hasattr(self, "tools_workspace"):
-            self.tools_workspace.on_language_changed()
-        if hasattr(self, "generate_compare_hint"):
-            self.generate_compare_hint.config(text=tr(self.lang, "generate_select_image"))
-        if hasattr(self, "preview_status_label"):
-            if self._preview_compute_running and self._preview_source_path:
-                self.preview_status_label.config(
-                    text=tr(self.lang, "preview_processing").format(path=Path(self._preview_source_path).name)
-                )
-            else:
-                self.preview_status_label.config(
-                    text=tr(self.lang, "preview_output_folder").format(path=PREVIEW_EXPORT_ROOT)
-                )
-        if self._preview_filter_cards:
-            for mode_id, widgets in self._preview_filter_cards.items():
-                widgets["title"].config(text=self._filter_label(mode_id))
-                spec = widgets.get("spec")
-                if spec and widgets.get("hint"):
-                    widgets["hint"].config(text=tr(self.lang, spec.hint_key))
-            self._refresh_preprocess_mode_combo()
-            self._update_preprocess_filter_active_hint()
-            self._highlight_preview_filter_cards()
-            for mode_id in self._preview_filter_cards:
-                self._render_preview_filter_card(mode_id)
-        self.text_vinyl.on_language_changed()
-        if self.photo is None and hasattr(self, "import_preview_label"):
-            self.import_preview_label.config(text=tr(self.lang, "preview_hint"))
-        if hasattr(self, "generate_source_before_preview"):
-            self._refresh_generate_compare()
-        if hasattr(self, "advanced_button"):
-            self.advanced_button.config(text=tr(self.lang, "hide_advanced" if self.advanced_visible else "show_advanced"))
-        if hasattr(self, "setting_description"):
-            self._update_setting_description()
-        self._update_tutorial()
-        self._update_acknowledgements()
-        self.text_vinyl.update_theme_hints()
-        if self._resource_monitor_snapshot is not None:
-            self._apply_resource_snapshot(self._resource_monitor_snapshot)
-        self.status.set(tr(self.lang, "ready"))
-
-    def _update_tutorial(self):
-        self.tutorial_text.config(state="normal")
-        self.tutorial_text.delete("1.0", END)
-        self.tutorial_text.insert(END, tr(self.lang, "tutorial"))
-        self.tutorial_text.config(state="disabled")
-
-    def _update_acknowledgements(self):
-        self.acknowledgements_text.config(state="normal")
-        self.acknowledgements_text.delete("1.0", END)
-        self.acknowledgements_text.insert(END, get_acknowledgements(self.lang))
-        self.acknowledgements_text.config(state="disabled")
-
-    def _update_setting_description(self, _event=None):
-        if not self._widget_alive(getattr(self, "setting_description", None)):
+    def _wait_for_gpu_cooldown_between_images(self) -> None:
+        if not self._eco_cooldown_enabled():
             return
-        item = self._selected_setting()
-        try:
-            self.setting_description.config(text=item["description"] if item else tr(self.lang, "no_settings_profiles"))
-        except TclError:
-            return
-        if item and self.use_custom_settings.get() != "1":
-            values = item.get("values", {})
-            self.custom_stop_at.set(values.get("stopAt", "3000"))
-            self.custom_max_resolution.set(values.get("maxResolution", "1200"))
-            self.custom_random_samples.set(values.get("randomSamples", "3000"))
-            self.custom_mutated_samples.set(values.get("mutatedSamples", "1000"))
-            self.custom_save_at.set(values.get("saveAt", values.get("stopAt", "3000")))
-            self.custom_preprocess_mode.set(values.get("preprocessMode", "none"))
-            self._set_preprocess_mode(
-                normalize_preprocess_mode(values.get("preprocessMode", "none")),
-                refresh_ui=True,
+        target = ECO_GPU_COOLDOWN_TARGET_C
+        temp = self._read_gpu_temp_c_for_cooldown()
+        if temp is None:
+            self.queue.put(
+                (
+                    "log",
+                    tr(self.lang, "eco_cooldown_no_sensor").format(
+                        seconds=int(ECO_GPU_FIXED_PAUSE_SECONDS)
+                    ),
+                )
             )
+            if self._sleep_with_shutdown(ECO_GPU_FIXED_PAUSE_SECONDS):
+                return
+            return
+        if temp <= target:
+            return
+        self.queue.put(
+            (
+                "log",
+                tr(self.lang, "eco_cooldown_waiting").format(
+                    temp=f"{temp:.0f}",
+                    target=f"{target:.0f}",
+                ),
+            )
+        )
+        deadline = time.monotonic() + ECO_GPU_COOLDOWN_MAX_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            if self.shutdown_event.is_set():
+                return
+            if self._sleep_with_shutdown(ECO_GPU_COOLDOWN_POLL_SECONDS):
+                return
+            temp = self._read_gpu_temp_c_for_cooldown()
+            if temp is None:
+                break
+            self.queue.put(
+                ("status", tr(self.lang, "eco_cooldown_status").format(temp=f"{temp:.0f}"))
+            )
+            if temp <= target:
+                self.queue.put(
+                    ("log", tr(self.lang, "eco_cooldown_ready").format(temp=f"{temp:.0f}"))
+                )
+                return
+        self.queue.put(("log", tr(self.lang, "eco_cooldown_timeout")))
+
+    def _confirm_eco_preset_if_needed(self, setting) -> bool:
+        if not is_eco_experimental_preset(setting):
+            return True
+        if self._eco_generation_settings.eco_preset_acknowledged:
+            return True
+        if not messagebox.askokcancel(
+            APP_DISPLAY_NAME,
+            tr(self.lang, "eco_preset_confirm"),
+            parent=self.root,
+        ):
+            return False
+        self._eco_generation_settings = EcoGenerationSettings(
+            cooldown_enabled=self._eco_cooldown_enabled(),
+            eco_preset_acknowledged=True,
+        )
+        save_eco_generation_settings(self._eco_generation_settings, ROOT)
+        return True
+
+    def _confirm_tailored_preset_if_needed(self, setting) -> bool:
+        if not is_tailored_experimental_preset(setting):
+            return True
+        if load_tailored_acknowledged(ROOT):
+            return True
+        if not messagebox.askokcancel(
+            APP_DISPLAY_NAME,
+            tr(self.lang, "tailored_preset_confirm"),
+            parent=self.root,
+        ):
+            return False
+        save_tailored_acknowledged(True, ROOT)
+        return True
+
+    def _complexity_estimate_from_payload(self, mode_id: str | None = None) -> int | None:
+        payload = getattr(self, "_preview_filter_payload", None) or {}
+        if not payload:
+            return None
+        if mode_id:
+            entry = payload.get(normalize_preprocess_mode(mode_id))
+            if entry and entry.get("estimate"):
+                try:
+                    return int(entry["estimate"])
+                except (TypeError, ValueError):
+                    pass
+        estimates: list[int] = []
+        for entry in payload.values():
+            if entry and entry.get("estimate"):
+                try:
+                    estimates.append(int(entry["estimate"]))
+                except (TypeError, ValueError):
+                    continue
+        return max(estimates) if estimates else None
+
+    def _tailored_profile_label(self) -> str | None:
+        for item in self.settings:
+            if is_tailored_experimental_preset(item):
+                return item.label
+        return None
+
+    def _refresh_tailored_preset_for_image(self, image_path: Path | None = None) -> None:
+        if image_path is None:
+            image_path = self._selected_generate_image()
+        if image_path is None:
+            return
+        estimate = self._complexity_estimate_from_payload(self._selected_preprocess_mode())
+        if not estimate:
+            return
+        dims = read_image_dimensions(Path(image_path))
+        width, height = dims if dims else (0, 0)
+        values = build_tailored_values(
+            complexity_estimate=estimate,
+            width=width,
+            height=height,
+            preprocess_mode=self._selected_preprocess_mode(),
+            base_values=normal_base_values(),
+        )
+        write_tailored_profile(
+            Path(image_path),
+            values,
+            complexity_estimate=estimate,
+            image_name=Path(image_path).name,
+        )
+        current_setting = self._selected_setting()
+        keep_path = current_setting.get("path") if current_setting else None
+        self._reload_settings(preferred_path=keep_path)
+        if current_setting and is_tailored_experimental_preset(current_setting):
+            self._update_setting_description()
+        self.log_line(
+            tr(self.lang, "tailored_preset_updated").format(
+                name=Path(image_path).name,
+                estimate=estimate,
+                cap=values.get("stopAt", "?"),
+            )
+        )
+
+    def _ensure_preview_for_image(self, image_path: Path) -> None:
+        image_path = Path(image_path)
+        try:
+            resolved = str(image_path.resolve())
+        except OSError:
+            resolved = str(image_path)
+        if (
+            str(getattr(self, "_preview_source_path", "")) == resolved
+            and self._preview_filter_payload
+        ):
+            self._refresh_tailored_preset_for_image(image_path)
+            return
+        if not self._preview_compute_running:
+            self._start_preview_filter_compute(image_path)
 
     def _sync_preprocess_from_custom(self, *_args):
         if self.use_custom_settings.get() != "1":
@@ -4323,6 +5543,7 @@ class App:
         self._refresh_preprocess_mode_combo()
         if self._preview_filter_cards:
             self._highlight_preview_filter_cards()
+        self._refresh_preview_preset_panel()
 
     def _sync_custom_state(self):
         state = "normal" if self.use_custom_settings.get() == "1" else "disabled"
@@ -4330,6 +5551,7 @@ class App:
             entry.config(state=state)
         if state == "disabled":
             self._update_setting_description()
+        self._refresh_preview_preset_panel()
 
     def _effective_setting(self):
         setting = self._selected_setting()
@@ -4407,9 +5629,8 @@ class App:
         except OSError:
             previous_resolved = None
         self.settings = load_settings()
-        values = [item["label"] for item in self.settings]
         if hasattr(self, "profile_combo"):
-            self.profile_combo["values"] = values
+            self.profile_combo.set_profiles(self.settings)
         selected = None
         if previous_resolved:
             for item in self.settings:
@@ -4419,10 +5640,11 @@ class App:
                         break
                 except OSError:
                     pass
-        if selected is None and values:
-            selected = values[min(2, len(values) - 1)]
+        if selected is None and self.settings:
+            selected = default_preset_label(self.settings)
         self.selected_profile.set(selected or "")
         self._update_setting_description()
+        self._refresh_preview_preset_panel()
 
     def _render_lists(self):
         self._render_image_list()
@@ -4644,11 +5866,17 @@ class App:
         else:
             self.queue.put(("update_current", payload))
 
-    def _set_update_indicator(self, text="", color=COLOR_WARN):
+    def _set_update_indicator(self, text="", color=None):
         indicator = getattr(self, "update_indicator", None)
         if indicator is None:
             return
-        indicator.config(text=text, fg=color)
+        t = self.themes.tokens
+        if color is None:
+            color = t.indicator_alert
+        status = "available" if color == t.indicator_attention else (
+            "failed" if color == t.indicator_alert else "default"
+        )
+        apply_update_indicator(indicator, status, self.themes, text=text)
         if text:
             if not indicator.winfo_ismapped():
                 indicator.pack(anchor="e", pady=(0, 6))
@@ -4657,7 +5885,7 @@ class App:
 
     def _handle_update_failed(self, error):
         self.update_state = {"status": "failed", "error": error}
-        self._set_update_indicator("!", COLOR_WARN)
+        self._set_update_indicator("!", self.themes.tokens.indicator_alert)
         self.log_line(tr(self.lang, "log_update_check_failed").format(error=error))
 
     def _handle_update_current(self, payload):
@@ -4667,7 +5895,7 @@ class App:
 
     def _handle_update_available(self, payload):
         self.update_state = {"status": "available", **payload}
-        self._set_update_indicator("!", COLOR_ACCENT)
+        self._set_update_indicator("!", self.themes.tokens.indicator_attention)
         self.log_line(
             tr(self.lang, "log_update_available").format(latest=payload.get("latest"), current=__version__)
         )
@@ -4693,19 +5921,20 @@ class App:
 
         latest = payload.get("latest", "")
         changelog = payload.get("changelog") or tr(self.lang, "update_no_changelog")
+        tokens = self.themes.tokens
         dialog = Toplevel(self.root)
         self.update_dialog = dialog
         dialog.title(tr(self.lang, "update_available_title"))
-        dialog.configure(bg=COLOR_BG)
+        dialog.configure(bg=tokens.dialog_bg)
         dialog.resizable(True, True)
 
-        body = Frame(dialog, bg=COLOR_BG)
+        body = Frame(dialog, bg=tokens.dialog_bg)
         body.pack(fill=BOTH, expand=True, padx=16, pady=14)
         Label(
             body,
             text=tr(self.lang, "update_available_message").format(current=__version__, latest=latest),
-            bg=COLOR_BG,
-            fg=COLOR_TEXT,
+            bg=tokens.dialog_bg,
+            fg=tokens.dialog_text,
             justify=LEFT,
             anchor="w",
             font=("Segoe UI", 11, "bold"),
@@ -4713,24 +5942,24 @@ class App:
         Label(
             body,
             text=tr(self.lang, "changelog"),
-            bg=COLOR_BG,
-            fg=COLOR_MUTED,
+            bg=tokens.dialog_bg,
+            fg=tokens.dialog_muted,
             anchor="w",
         ).pack(fill=X)
 
-        text_frame = Frame(body, bg=COLOR_BG)
+        text_frame = Frame(body, bg=tokens.dialog_bg)
         text_frame.pack(fill=BOTH, expand=True, pady=(4, 12))
         changelog_text = Text(text_frame, width=80, height=18, wrap="word")
         scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=changelog_text.yview)
         changelog_text.configure(
             yscrollcommand=scrollbar.set,
-            bg=COLOR_INPUT,
-            fg=COLOR_TEXT,
-            insertbackground=COLOR_TEXT,
-            selectbackground=COLOR_ACCENT_DARK,
-            selectforeground=COLOR_SELECT_FG,
+            bg=tokens.dialog_input,
+            fg=tokens.dialog_text,
+            insertbackground=tokens.dialog_text,
+            selectbackground=tokens.text_select_bg,
+            selectforeground=tokens.text_select_fg,
             highlightthickness=1,
-            highlightbackground=COLOR_BORDER,
+            highlightbackground=tokens.idle_border,
             relief="flat",
         )
         changelog_text.pack(side=LEFT, fill=BOTH, expand=True)
@@ -4738,7 +5967,7 @@ class App:
         changelog_text.insert(END, changelog)
         changelog_text.config(state="disabled")
 
-        actions = Frame(body, bg=COLOR_BG)
+        actions = Frame(body, bg=tokens.dialog_bg)
         actions.pack(fill=X)
 
         def close_update_dialog():
@@ -4753,10 +5982,10 @@ class App:
             actions,
             text=tr(self.lang, "update_later"),
             command=close_update_dialog,
-            bg=COLOR_BUTTON,
-            fg=COLOR_TEXT,
-            activebackground=COLOR_BUTTON_ACTIVE,
-            activeforeground=COLOR_TEXT,
+            bg=tokens.button,
+            fg=tokens.text,
+            activebackground=tokens.button_active,
+            activeforeground=tokens.button_active_fg,
             relief="flat",
             bd=0,
             padx=12,
@@ -4766,10 +5995,10 @@ class App:
             actions,
             text=tr(self.lang, "update_open_page"),
             command=open_update_page,
-            bg=COLOR_ACCENT_DARK,
-            fg=COLOR_SELECT_FG,
-            activebackground=COLOR_ACCENT,
-            activeforeground=COLOR_SELECT_FG,
+            bg=tokens.tab_selected_bg,
+            fg=tokens.tab_selected_fg,
+            activebackground=tokens.accent,
+            activeforeground=tokens.tab_selected_fg,
             relief="flat",
             bd=0,
             padx=12,
@@ -4936,9 +6165,15 @@ class App:
             filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp"), ("All files", "*.*")],
         )
         added_paths = []
+        fm_settings = load_file_management_settings()
         for item in files:
             path = Path(item)
-            if path.exists() and path not in self.images:
+            if not path.exists():
+                continue
+            path = ensure_image_workspace_source(
+                path, copy_external=fm_settings.effective_copy_external_images()
+            )
+            if path not in self.images:
                 self.images.append(path)
                 added_paths.append(path)
                 self._load_existing_checkpoints_for_image(path)
@@ -5036,7 +6271,9 @@ class App:
     def _preview_selected_image(self, _event=None):
         selection = self.image_list.curselection()
         if selection:
-            self.show_source_preview(self.images[selection[0]])
+            image_path = self.images[selection[0]]
+            self.show_source_preview(image_path)
+            self._ensure_preview_for_image(image_path)
         self._refresh_generate_compare()
 
     def _preview_selected_json(self, _event=None):
@@ -5257,6 +6494,51 @@ class App:
         self.log_line(tr(self.lang, "log_no_game_process"))
         return None
 
+    def _game_context_for_trust(self, pid: int):
+        game = self.selected_game.get() or "fh6"
+        profile = PROFILES.get(game)
+        game_label = profile.label if profile else game
+        try:
+            process_name = psutil.Process(int(pid)).name()
+        except (psutil.Error, TypeError, ValueError):
+            process_name = "unknown"
+        return game_label, process_name
+
+    def _refresh_privilege_status(self) -> None:
+        if not hasattr(self, "privilege_label"):
+            return
+        if is_windows_admin():
+            self.privilege_label.config(text=tr(self.lang, "privilege_admin"))
+        else:
+            self.privilege_label.config(text=tr(self.lang, "privilege_standard_shield"))
+        self._refresh_admin_action_labels()
+
+    def _prepare_memory_work(self, operation: str) -> bool:
+        pid = self.ensure_live_game_pid()
+        if not pid:
+            return False
+        game_label, process_name = self._game_context_for_trust(pid)
+        return prepare_memory_work(
+            self.root,
+            tr,
+            self.lang,
+            operation=operation,
+            game_label=game_label,
+            process_name=process_name,
+            pid=int(pid),
+        )
+
+    def _offer_admin_retry_if_needed(self) -> None:
+        if not getattr(self, "_saw_permission_error", False) or is_windows_admin():
+            return
+        if not messagebox.askyesno(
+            tr(self.lang, "elevate_prompt_title"),
+            tr(self.lang, "permission_denied_offer"),
+            parent=self.root,
+        ):
+            return
+        request_admin_restart()
+
     def stop_generate(self):
         with self.generation_lock:
             if not self.generation_running:
@@ -5286,10 +6568,19 @@ class App:
                 self.generation_running = False
             self.log_line(tr(self.lang, "log_no_quality_profile"))
             return
-        if not GENERATOR_EXE.exists():
+        if not generator_available():
             with self.generation_lock:
                 self.generation_running = False
             self.log_line(tr(self.lang, "log_missing_generator").format(path=GENERATOR_EXE))
+            return
+        selected = self._selected_setting()
+        if not self._confirm_eco_preset_if_needed(selected):
+            with self.generation_lock:
+                self.generation_running = False
+            return
+        if not self._confirm_tailored_preset_if_needed(selected):
+            with self.generation_lock:
+                self.generation_running = False
             return
         self.shutdown_event.clear()
         self._reset_generation_eta()
@@ -5305,11 +6596,22 @@ class App:
         try:
             self.queue.put(("log", f"Selected profile: {setting['path'].name}"))
             self._log_generation_load_warning(setting)
-            for image_path in list(self.images):
+            if is_eco_experimental_preset(setting):
+                self.queue.put(("log", tr(self.lang, "eco_preset_active")))
+            for image_index, image_path in enumerate(list(self.images)):
                 if self.shutdown_event.is_set():
                     self.queue.put(("status", tr(self.lang, "stopped")))
                     return
+                if image_index > 0:
+                    self._wait_for_gpu_cooldown_between_images()
+                    if self.shutdown_event.is_set():
+                        self.queue.put(("status", tr(self.lang, "stopped")))
+                        return
                 self._reset_generation_eta()
+                fm_settings = load_file_management_settings()
+                image_path = ensure_image_workspace_source(
+                    image_path, copy_external=fm_settings.effective_copy_external_images()
+                )
                 preprocess_mode = setting_preprocess_mode(setting)
                 input_image = preprocess_input_image(image_path, setting)
                 if preprocess_mode != PREPROCESS_NONE:
@@ -5486,7 +6788,9 @@ class App:
         os.startfile(ROOT)
 
     def run_subprocess(self, cmd, timeout=None, extra_env=None):
+        self._saw_permission_error = False
         self._record_detail(f"HELPER COMMAND: {self._format_command(cmd)}")
+        self.queue.put(("log", describe_helper_launch(cmd)))
         self.queue.put(("log", self._friendly_command_name(cmd)))
         flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         env = os.environ.copy()
@@ -5520,7 +6824,10 @@ class App:
                 line = proc.stdout.readline()
                 if line:
                     self._record_detail(f"HELPER RAW: {line.rstrip()}")
-                    friendly = self._friendly_subprocess_line(line.rstrip())
+                    stripped = line.rstrip()
+                    if is_permission_error_text(stripped):
+                        self._saw_permission_error = True
+                    friendly = self._friendly_subprocess_line(stripped)
                     if friendly:
                         self.queue.put(("log", friendly))
                 if proc.poll() is not None:
@@ -5540,6 +6847,8 @@ class App:
                 if friendly:
                     self.queue.put(("log", friendly))
             self._record_detail(f"HELPER EXIT: {proc.returncode}")
+            if proc.returncode not in (0, None) and self._saw_permission_error:
+                self.queue.put(("offer_elevation", None))
             return proc.returncode
         finally:
             self._unregister_process(proc)
@@ -5601,11 +6910,9 @@ class App:
             return raw
         if raw.startswith("Writing layer") or raw == "DONE!" or raw.startswith("The ideal background color"):
             return raw
-        if "access is denied" in lower or "winerror 5" in lower or "permissionerror" in lower:
-            return (
-                "Windows denied access to the FH6 process. "
-                "The app should already request administrator rights on startup."
-            )
+        if is_permission_error_text(raw):
+            self._saw_permission_error = True
+            return tr(self.lang, "permission_denied_hint")
         if "openprocess" in lower or "error" in lower or "failed" in lower or "traceback" in lower:
             return raw
         if raw.startswith("<class 'SystemExit'>") or raw.startswith("SystemExit: 0"):
@@ -5613,10 +6920,14 @@ class App:
         return raw
 
     def start_auto_locate(self):
-        pid = self.ensure_live_game_pid()
         layer_count = self.layer_count.get().strip()
-        if not pid or not layer_count:
+        if not layer_count:
             self.log_line(tr(self.lang, "log_pid_layer_required"))
+            return
+        if not self._prepare_memory_work("diagnostics"):
+            return
+        pid = self.ensure_live_game_pid()
+        if not pid:
             return
         self.status.set(tr(self.lang, "running"))
         threading.Thread(target=self._auto_locate_worker, args=(pid, layer_count), daemon=True).start()
@@ -5790,6 +7101,8 @@ class App:
         if not layer_count:
             self.log_line(tr(self.lang, "layer_count_required"))
             return
+        if not self._prepare_memory_work("export"):
+            return
         pid = self.ensure_live_game_pid()
         if not pid:
             return
@@ -5853,10 +7166,12 @@ class App:
         if not layer_count:
             self.log_line(tr(self.lang, "layer_count_required"))
             if hasattr(self, "layer_count_entry"):
-                self.layer_count_entry.config(highlightbackground=COLOR_WARN, highlightthickness=1)
+                apply_entry_validation(self.layer_count_entry, invalid=True, manager=self.themes)
             return
         if hasattr(self, "layer_count_entry"):
-            self.layer_count_entry.config(highlightbackground=COLOR_BORDER, highlightthickness=0)
+            apply_entry_validation(self.layer_count_entry, invalid=False, manager=self.themes)
+        if not self._prepare_memory_work("import"):
+            return
         pid = self.ensure_live_game_pid()
         if not pid:
             return
@@ -5906,6 +7221,8 @@ class App:
         self.queue.put(("status", tr(self.lang, "done")))
 
     def start_diagnose(self):
+        if not self._prepare_memory_work("diagnostics"):
+            return
         pid = self.ensure_live_game_pid()
         cmd = [*helper_command("main"), "--game", self.selected_game.get() or "fh6", "--diagnose"]
         if pid:
@@ -5914,9 +7231,14 @@ class App:
         threading.Thread(target=lambda: self._run_command_worker(cmd, 120), daemon=True).start()
 
     def start_save_snapshot(self):
-        pid = self.ensure_live_game_pid()
         count = self.snapshot_count.get().strip() or self.layer_count.get().strip()
-        if not pid or not count:
+        if not count:
+            self.log_line(tr(self.lang, "log_pid_snapshot_required"))
+            return
+        if not self._prepare_memory_work("diagnostics"):
+            return
+        pid = self.ensure_live_game_pid()
+        if not pid:
             self.log_line(tr(self.lang, "log_pid_snapshot_required"))
             return
         output_path = PROBE_DIR / f"memory-count-{count}.jsonl"
@@ -5937,11 +7259,15 @@ class App:
         threading.Thread(target=lambda: self._run_command_worker(cmd, 360), daemon=True).start()
 
     def start_compare_snapshot(self):
-        pid = self.ensure_live_game_pid()
         previous = self.snapshot_count.get().strip()
         current = self.current_count.get().strip() or self.layer_count.get().strip()
-        if not pid or not previous or not current:
+        if not previous or not current:
             self.log_line(tr(self.lang, "log_pid_snapshot_current_required"))
+            return
+        if not self._prepare_memory_work("diagnostics"):
+            return
+        pid = self.ensure_live_game_pid()
+        if not pid:
             return
         snapshot_path = PROBE_DIR / f"memory-count-{previous}.jsonl"
         candidates_path = PROBE_DIR / f"memory-count-{previous}-to-{current}-candidates.json"
@@ -5967,11 +7293,15 @@ class App:
         threading.Thread(target=lambda: self._run_command_worker(cmd, 360), daemon=True).start()
 
     def start_inspect_table(self):
-        pid = self.ensure_live_game_pid()
         table = self.inspect_table_value.get().strip()
         count = self.layer_count.get().strip()
-        if not pid or not table or not count:
+        if not table or not count:
             self.log_line(tr(self.lang, "log_pid_layer_table_required"))
+            return
+        if not self._prepare_memory_work("diagnostics"):
+            return
+        pid = self.ensure_live_game_pid()
+        if not pid:
             return
         cmd = [
             *helper_command("fh6_probe"),
@@ -5993,6 +7323,9 @@ class App:
         code = self.run_subprocess(cmd, timeout=timeout)
         self.queue.put(("status", tr(self.lang, "done") if code == 0 else tr(self.lang, "failed")))
 
+    def _handle_offer_elevation(self) -> None:
+        self._offer_admin_retry_if_needed()
+
     def _poll_queue(self):
         if self.closed:
             return
@@ -6007,6 +7340,8 @@ class App:
                 self.progress_text.set(payload)
             elif kind == "status":
                 self.status.set(payload)
+            elif kind == "offer_elevation":
+                self._handle_offer_elevation()
             elif kind == "generation_done":
                 stopped = self.shutdown_event.is_set()
                 with self.generation_lock:
@@ -6085,14 +7420,39 @@ def main():
             except Exception:
                 pass
 
+        try:
+            from defender_audit import log_startup
+
+            log_startup(sys.argv)
+        except Exception:
+            pass
         if len(sys.argv) >= 3 and sys.argv[1] == "--helper":
+            try:
+                from defender_audit import CATEGORY_HELPER, log_event
+
+                log_event(
+                    CATEGORY_HELPER,
+                    "embedded helper",
+                    name=sys.argv[2],
+                    argc=len(sys.argv),
+                )
+            except Exception:
+                pass
             run_embedded_helper(sys.argv[2], sys.argv[3:])
             return
-        ensure_elevated_or_exit()
         parser = argparse.ArgumentParser(description=f"Standalone {APP_DISPLAY_NAME} desktop app.")
         parser.add_argument("--version", action="version", version=app_version_string())
+        parser.add_argument(
+            "--matrix-smoke",
+            action="store_true",
+            help="Headless startup probe for Defender matrix (writes runtime/logs/matrix-smoke.json).",
+        )
         parser.add_argument("images", nargs="*", help="Optional image files to preload.")
         args = parser.parse_args()
+        if args.matrix_smoke:
+            from matrix_smoke import run_matrix_smoke
+
+            raise SystemExit(run_matrix_smoke())
         App(args.images).run()
     except SystemExit:
         raise

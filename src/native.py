@@ -188,7 +188,48 @@ def get_base_address(pid):
         ) from exc
 
 
-def read_process_memory(pid, address, size, *, strict=False, allow_partial=True):
+def _audit_memory_read(pid, address, size):
+    try:
+        from defender_audit import CATEGORY_MEMORY_READ, log_memory
+
+        log_memory(
+            CATEGORY_MEMORY_READ,
+            "ReadProcessMemory",
+            target_pid=pid,
+            address=address,
+            size=size,
+        )
+    except Exception:
+        pass
+
+
+def _audit_memory_write(pid, address, nbytes):
+    try:
+        from defender_audit import CATEGORY_MEMORY_WRITE, log_memory
+
+        log_memory(
+            CATEGORY_MEMORY_WRITE,
+            "WriteProcessMemory",
+            target_pid=pid,
+            address=address,
+            size=nbytes,
+        )
+    except Exception:
+        pass
+
+
+def read_process_memory(pid, address, size, *, strict=False, allow_partial=True, audit=True):
+    try:
+        from build_profile import memory_scan_disabled
+
+        if memory_scan_disabled():
+            if strict:
+                raise ProcessMemoryError("Memory read disabled for this build profile")
+            return b""
+    except ProcessMemoryError:
+        raise
+    except Exception:
+        pass
     if size <= 0:
         return b""
     if size > MAX_MEMORY_READ_BYTES:
@@ -200,6 +241,8 @@ def read_process_memory(pid, address, size, *, strict=False, allow_partial=True)
             raise ProcessMemoryError(f"Refusing to read invalid address 0x{int(address):x}")
         return b""
 
+    if audit:
+        _audit_memory_read(pid, address, size)
     handle = _open_handle(pid, write=False)
     buf = (ctypes.c_char * size)()
     nread = SIZE_T()
@@ -233,8 +276,18 @@ def read_process_memory(pid, address, size, *, strict=False, allow_partial=True)
 def write_process_memory(pid, address, buf):
     if not buf:
         return
+    try:
+        from build_profile import memory_scan_disabled
+
+        if memory_scan_disabled():
+            raise ProcessMemoryError("Memory write disabled for this build profile")
+    except ProcessMemoryError:
+        raise
+    except Exception:
+        pass
     if not is_user_address(address):
         raise ProcessMemoryError(f"Refusing to write invalid address 0x{int(address):x}")
+    _audit_memory_write(pid, address, len(buf))
     handle = _open_handle(pid, write=True)
     nwritten = SIZE_T()
     try:
@@ -256,8 +309,33 @@ def write_process_memory(pid, address, buf):
 
 
 def scan_block(pid, start_address, block_size, scan_for):
+    try:
+        from build_profile import memory_scan_disabled
+
+        if memory_scan_disabled():
+            return -1
+    except Exception:
+        pass
+    try:
+        from defender_audit import CATEGORY_MEMORY_SCAN, log_memory
+
+        log_memory(
+            CATEGORY_MEMORY_SCAN,
+            "signature scan",
+            target_pid=pid,
+            address=start_address,
+            size=block_size,
+            pattern_len=len(scan_for),
+        )
+    except Exception:
+        pass
     memory = read_process_memory(
-        pid, start_address, block_size, strict=False, allow_partial=True
+        pid,
+        start_address,
+        block_size,
+        strict=False,
+        allow_partial=True,
+        audit=False,
     )
     return memory.find(scan_for)
 

@@ -1,9 +1,8 @@
 """
 Centralized UI color themes for the desktop app.
 
-Themes are token palettes consumed via module-level COLOR_* globals on ``app``
-and ttk style configuration. Add a new ``Palette`` entry and i18n label to
-extend the set without touching individual widgets.
+Themes are token palettes consumed by :class:`ui.theme_manager.ThemeManager` and
+legacy ``COLOR_*`` module globals on ``app`` (kept in sync for migration).
 """
 
 from __future__ import annotations
@@ -15,17 +14,19 @@ from typing import Dict, Literal
 ThemeId = Literal[
     "eurocorp",
     "elite",
+    "crynet",
+    "unatco",
+    "new_eden",
     "red_phosphorous",
-    "y2k",
-    "spirit_of_horizon",
 ]
 
 THEME_IDS: tuple[str, ...] = (
     "eurocorp",
     "elite",
+    "crynet",
+    "unatco",
+    "new_eden",
     "red_phosphorous",
-    "y2k",
-    "spirit_of_horizon",
 )
 
 DEFAULT_THEME_ID: ThemeId = "eurocorp"
@@ -34,8 +35,12 @@ DEFAULT_THEME_ID: ThemeId = "eurocorp"
 _LEGACY_THEME_IDS: dict[str, str] = {
     "dark": "eurocorp",
     "system": "eurocorp",
-    "light": "y2k",
-    "sakura": "spirit_of_horizon",
+    "light": "new_eden",
+    "y2k": "new_eden",
+    "mirrors_edge": "new_eden",
+    "sakura": "crynet",
+    "spirit_of_horizon": "crynet",
+    "deus_ex": "unatco",
 }
 
 
@@ -61,6 +66,7 @@ class Palette:
     preview_fg: str
     select_fg: str = "#ffffff"
     button_active_fg: str = ""
+    button_fg: str = ""
     frame_light: str = ""
     frame_dark: str = ""
     sash: str = ""
@@ -81,31 +87,33 @@ def _with_frame_tokens(
     )
 
 
-# Current default appearance (formerly "dark").
+# Default theme — Syndicate (2012) Eurocorp: matte black, steel graphite, restrained
+# tactical orange accents (not neon cyberpunk).
 EUROCORP = _with_frame_tokens(
     Palette(
-        bg="#07070b",
-        panel="#101018",
-        panel_alt="#17171f",
-        input="#0d0f14",
-        text="#eef1f8",
-        muted="#8f96a8",
-        accent="#38b6ff",
-        accent_dark="#1e7db8",
-        warn="#ffc14d",
-        border="#2a3142",
-        button="#1e2533",
-        button_active="#283040",
-        hint="#e0b24a",
-        info="#5cc8ff",
-        success="#41ff9c",
-        error="#ff6b6b",
-        preview_bg="#141820",
-        preview_fg="#eef1f8",
+        bg="#040405",
+        panel="#0a0b0e",
+        panel_alt="#121418",
+        input="#08090c",
+        text="#e8ebf0",
+        muted="#70788a",
+        accent="#cc6a2e",
+        accent_dark="#8f4a1a",
+        warn="#a8844a",
+        border="#262a32",
+        button="#14171c",
+        button_active="#1e2229",
+        hint="#94704a",
+        info="#5c7082",
+        success="#6d848c",
+        error="#b8544c",
+        preview_bg="#0c0d10",
+        preview_fg="#e8ebf0",
+        select_fg="#e8ebf0",
     ),
-    frame_light="#3d4a5c",
-    frame_dark="#1a1f2a",
-    sash="#1f2633",
+    frame_light="#353a44",
+    frame_dark="#0c0e12",
+    sash="#181b22",
 )
 
 ELITE = Palette(
@@ -160,64 +168,103 @@ RED_PHOSPHOROUS = Palette(
     sash="#1a0000",
 )
 
-Y2K = Palette(
-    bg="#e8f4f8",
-    panel="#ffffff",
-    panel_alt="#d0eaf5",
-    input="#ffffff",
-    text="#003344",
-    muted="#336677",
-    accent="#00aaff",
-    accent_dark="#00cc66",
-    warn="#007799",
-    border="#66ccff",
-    button="#d0eaf5",
-    button_active="#b8e0f0",
-    hint="#008866",
-    info="#00aaff",
-    success="#00cc66",
-    error="#cc3366",
-    preview_bg="#c8e8f4",
-    preview_fg="#003344",
-    select_fg="#ffffff",
-    button_active_fg="#003344",
-    frame_light="#99ddff",
-    frame_dark="#b0d8ec",
-    sash="#b8e0f0",
+# New Eden-inspired light mode: white fields, cherry-red accents, high contrast.
+NEW_EDEN = _with_frame_tokens(
+    Palette(
+        bg="#ffffff",
+        panel="#ffffff",
+        panel_alt="#f4f4f4",
+        input="#ffffff",
+        text="#141414",
+        muted="#5c5c5c",
+        accent="#e4032e",
+        accent_dark="#c90025",
+        warn="#b80f22",
+        border="#e0e0e0",
+        button="#f2f2f2",
+        button_active="#fde8ec",
+        hint="#8a3040",
+        info="#1a8cff",
+        success="#1f8a4c",
+        error="#c90025",
+        preview_bg="#fafafa",
+        preview_fg="#141414",
+        select_fg="#ffffff",
+        button_active_fg="#141414",
+    ),
+    frame_light="#f0f0f0",
+    frame_dark="#e5e5e5",
+    sash="#ebebeb",
 )
 
-SPIRIT_OF_HORIZON = Palette(
-    bg="#f9f5f5",
-    panel="#ffffff",
-    panel_alt="#fff0f2",
-    input="#ffffff",
-    text="#1a1a1a",
-    muted="#5c4a4e",
-    accent="#e8002d",
-    accent_dark="#c40024",
-    warn="#b80028",
-    border="#f4a7b9",
-    button="#fff0f2",
-    button_active="#ffd6de",
-    hint="#f4a7b9",
-    info="#0099e6",
-    success="#e8002d",
-    error="#c40024",
-    preview_bg="#fff0f2",
-    preview_fg="#1a1a1a",
-    select_fg="#ffffff",
-    button_active_fg="#1a1a1a",
-    frame_light="#f4a7b9",
-    frame_dark="#ffd6de",
-    sash="#ffd6de",
+# Crysis 2 / CryNet Systems HUD — near-black field, cool readable text, restrained
+# ice-cyan holographic accents (not oversaturated neon).
+CRYNET = _with_frame_tokens(
+    Palette(
+        bg="#020304",
+        panel="#060a10",
+        panel_alt="#0a1018",
+        input="#040810",
+        text="#c8dce8",
+        muted="#5a7284",
+        accent="#7fefff",
+        accent_dark="#1a4858",
+        warn="#8ec4dc",
+        border="#1a3848",
+        button="#081018",
+        button_active="#122028",
+        hint="#6a98a8",
+        info="#7fefff",
+        success="#5a9aa8",
+        error="#d06070",
+        preview_bg="#060a10",
+        preview_fg="#c8dce8",
+        select_fg="#020304",
+        button_active_fg="#7fefff",
+    ),
+    frame_light="#3a6878",
+    frame_dark="#040810",
+    sash="#142028",
+)
+
+# UNATCO terminal — black field, navy title chrome, muted holo-green panels,
+# lime status accents and cyan instrumentation (government computer interfaces).
+UNATCO = _with_frame_tokens(
+    Palette(
+        bg="#000000",
+        panel="#252525",
+        panel_alt="#2a3830",
+        input="#0a0a0a",
+        text="#ffffff",
+        muted="#bbbbbb",
+        accent="#283868",
+        accent_dark="#101830",
+        warn="#888888",
+        border="#505050",
+        button="#888888",
+        button_active="#aaaaaa",
+        hint="#707070",
+        info="#48b0c8",
+        success="#99ff00",
+        error="#c06060",
+        preview_bg="#141414",
+        preview_fg="#ffffff",
+        select_fg="#ffffff",
+        button_active_fg="#101010",
+        button_fg="#101010",
+    ),
+    frame_light="#aaaaaa",
+    frame_dark="#1a1a1a",
+    sash="#404040",
 )
 
 _PALETTES: dict[str, Palette] = {
     "eurocorp": EUROCORP,
     "elite": ELITE,
+    "crynet": CRYNET,
+    "unatco": UNATCO,
+    "new_eden": NEW_EDEN,
     "red_phosphorous": RED_PHOSPHOROUS,
-    "y2k": Y2K,
-    "spirit_of_horizon": SPIRIT_OF_HORIZON,
 }
 
 
@@ -271,6 +318,7 @@ def palette_to_color_globals(palette: Palette) -> Dict[str, str]:
         "COLOR_BUTTON": palette.button,
         "COLOR_BUTTON_ACTIVE": palette.button_active,
         "COLOR_BUTTON_ACTIVE_FG": palette.button_active_fg or palette.text,
+        "COLOR_BUTTON_FG": palette.button_fg or palette.text,
         "COLOR_HINT": palette.hint,
         "COLOR_INFO": palette.info,
         "COLOR_SUCCESS": palette.success,

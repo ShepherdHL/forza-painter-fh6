@@ -17,6 +17,7 @@ from resource_monitor import (
     format_load,
     format_temp_c,
     temp_color_role,
+    temp_status_message_key,
 )
 from ui_chrome import DonutGauge
 
@@ -79,6 +80,7 @@ class HeaderTelemetryPanel:
             body,
             text="",
             anchor="w",
+            justify="left",
             bg=app_module.COLOR_PANEL,
             fg=app_module.COLOR_MUTED,
             font=app._ui_font(8),
@@ -94,7 +96,19 @@ class HeaderTelemetryPanel:
         )
 
         self.host.bind("<Configure>", self._on_configure, add="+")
+        self._bind_status_wraplength()
         self._apply_layout_mode("full")
+
+    def _bind_status_wraplength(self) -> None:
+        def _resize(_event=None) -> None:
+            try:
+                width = max(160, self.host.winfo_width() - 24)
+                self._status.config(wraplength=width)
+            except Exception:
+                pass
+
+        self.host.bind("<Configure>", _resize, add="+")
+        _resize()
 
     def _tr(self, key: str) -> str:
         from app import tr
@@ -229,12 +243,31 @@ class HeaderTelemetryPanel:
             self.apply_snapshot(self._snapshot)
         self._render_heat_chrome()
 
+    def _apply_temp_label(self, label: Label, temp: float | None) -> None:
+        role = temp_color_role(temp)
+        label.config(text=format_temp_c(temp))
+        label._theme_role = role  # type: ignore[attr-defined]
+        label.config(fg=self._theme_fg(role))
+
+    def _apply_temp_status(self, label: Label, temp: float | None) -> None:
+        key = temp_status_message_key(temp)
+        if key is None:
+            label.config(text="", fg=self._theme_fg("muted"))
+            label._theme_role = "muted"  # type: ignore[attr-defined]
+            return
+        role = temp_color_role(temp)
+        label.config(text=self._tr(key), fg=self._theme_fg(role))
+        label._theme_role = role  # type: ignore[attr-defined]
+
     def apply_snapshot(self, snapshot: ResourceSnapshot) -> None:
         self._snapshot = snapshot
         if snapshot.backend == "unavailable":
-            message = self._tr("resource_unavailable")
-            if snapshot.message:
-                message = f"{message}: {snapshot.message}"
+            if snapshot.message == "afterburner":
+                message = self._tr("resource_afterburner_recommend")
+            else:
+                message = self._tr("resource_unavailable")
+                if snapshot.message:
+                    message = f"{message}: {snapshot.message}"
             self._set_unavailable(message)
             return
 
@@ -255,19 +288,16 @@ class HeaderTelemetryPanel:
                 if "clock" in parts:
                     parts["clock"].config(text=format_clock_mhz(clock), fg=self._theme_fg("muted"))
                 if "temp" in parts:
-                    parts["temp"].config(text=format_temp_c(temp), fg=self._theme_fg(temp_color_role(temp)))
-            nominal = temp is not None and temp_color_role(temp) == "success"
+                    self._apply_temp_label(parts["temp"], temp)
             for status in self._metric_status.get(key, []):
-                if nominal:
-                    status.config(text=self._tr("resource_temp_nominal"), fg=self._colors.COLOR_SUCCESS)
-                else:
-                    status.config(text="")
+                self._apply_temp_status(status, temp)
             minimal = self._minimal_labels.get(key)
             if minimal is not None:
                 minimal.config(
                     text=self._minimal_line(key, load, clock, temp),
                     fg=self._theme_fg(temp_color_role(temp) if temp is not None else "text"),
                 )
+                minimal._theme_role = temp_color_role(temp) if temp is not None else "text"  # type: ignore[attr-defined]
 
     def _minimal_line(self, key: str, load, clock, temp) -> str:
         prefix = self._tr(key).upper()

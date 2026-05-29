@@ -8,18 +8,25 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from tkinter import BOTH, END, HORIZONTAL, LEFT, RIGHT, Frame, Label, Listbox, PhotoImage, StringVar, filedialog, ttk
+from tkinter import BOTH, END, HORIZONTAL, LEFT, RIGHT, X, Frame, Label, Listbox, PhotoImage, StringVar, filedialog, ttk
 from tkinter import Checkbutton, Entry
 
 from app_paths import ROOT
-from mandarin_chars import (
-    filter_mandarin_library,
-    gb2312_hanzi_chars,
-    mandarin_character_library,
-    text_contains_hangul,
+from asset_workspace import TEXT_VINYL_WORKSPACE_ROOT, text_vinyl_workspace, write_manifest, workspace_source_file
+from mandarin_chars import text_contains_hangul
+from text_char_libraries import (
+    LIBRARY_HANGUL,
+    LIBRARY_HANZI,
+    LIBRARY_HIRAGANA,
+    LIBRARY_KANJI,
+    LIBRARY_KATAKANA,
+    LIBRARY_LATIN,
 )
 from text_fonts import (
     SCRIPT_CHINESE,
+    SCRIPT_JAPANESE,
+    SCRIPT_KOREAN,
+    SCRIPT_UNIVERSAL,
     TEXT_SCRIPT_IDS,
     coverage_message_key,
     discover_fonts_for_script,
@@ -36,7 +43,14 @@ from text_geometry import (
     TEXT_SHAPE_MODES,
     write_geometry_json,
 )
-from i18n import ui_font_name
+from ui.char_grid_picker import CharGridPicker
+from ui.color_values_editor import ColorValuesEditor
+
+_JAPANESE_CHAR_LIBRARIES = (
+    (LIBRARY_HIRAGANA, "text_char_library_hiragana"),
+    (LIBRARY_KATAKANA, "text_char_library_katakana"),
+    (LIBRARY_KANJI, "text_char_library_kanji"),
+)
 
 
 class TextVinylWorkspace:
@@ -50,7 +64,6 @@ class TextVinylWorkspace:
         self._reference_preview_job = None
         self._json_preview_job = None
         self._coverage_job = None
-        self.text_char_search = StringVar()
         self.text_panels = {
             script: {
                 "input": StringVar(),
@@ -66,8 +79,8 @@ class TextVinylWorkspace:
         self.text_font_size = StringVar(value="120")
         self.text_cell_size = StringVar(value="4")
         self.text_shape_mode = StringVar(value="rectangles")
-        self.text_color = StringVar(value="255,255,255,255")
         self.text_image_path = StringVar()
+        self._color_editor: ColorValuesEditor | None = None
         self.text_invert = StringVar(value="0")
         self.text_script_notebook: ttk.Notebook | None = None
         self.text_json_list: Listbox | None = None
@@ -76,8 +89,6 @@ class TextVinylWorkspace:
         self.text_shape_combo: ttk.Combobox | None = None
         self.text_template_hint_label: Label | None = None
         self.text_coverage_label: Label | None = None
-        self.text_char_list: Listbox | None = None
-        self.text_char_count_label: Label | None = None
 
     @property
     def lang(self) -> str:
@@ -120,11 +131,14 @@ class TextVinylWorkspace:
 
         scroll_area, body = app._make_vertical_scroll(left_outer)
         scroll_area.pack(fill=BOTH, expand=True, padx=0, pady=10)
+        scroll_options_hint = app._label(
+            body, "text_scroll_options_hint", anchor="w", justify="left", theme_role="hint"
+        )
+        scroll_options_hint.pack(fill="x", pady=(0, 8))
+        app._bind_wraplength(scroll_options_hint, body)
         tab_hint = app._label(body, "text_tab_hint", anchor="w", justify="left", theme_role="hint")
         tab_hint.pack(fill="x", pady=(0, 8))
         app._bind_wraplength(tab_hint, body)
-
-        self._build_options_panel(body)
 
         self.text_script_notebook = ttk.Notebook(body, style="Script.TNotebook")
         self.text_script_notebook.pack(fill=BOTH, expand=True, pady=(0, 8))
@@ -134,6 +148,8 @@ class TextVinylWorkspace:
             panel_frame = Frame(self.text_script_notebook)
             self.text_script_notebook.add(panel_frame, text=self._tr(self._script_tab_key(script)))
             self._build_script_panel(panel_frame, script)
+
+        self._build_options_panel(body)
 
         outputs_box = ttk.LabelFrame(body, text=self._tr("text_outputs"))
         app.translated.append((outputs_box, "text_outputs", "text"))
@@ -173,11 +189,12 @@ class TextVinylWorkspace:
         app.translated.append((invert_toggle, "text_invert", "text"))
         app._button(ref_actions, "text_trace_image", self.start_trace).pack(side=LEFT)
         app._label(ref_box, "text_reference_preview", anchor="w", font=("Segoe UI", 10, "bold")).pack(fill="x", padx=10)
+        preview_t = app.themes.tokens
         self.text_reference_preview_label = Label(
             ref_box,
             text=self._tr("preview_hint"),
-            bg=self._color("COLOR_PREVIEW_BG"),
-            fg=self._color("COLOR_PREVIEW_FG"),
+            bg=preview_t.preview_bg,
+            fg=preview_t.preview_fg,
         )
         self.text_reference_preview_label.pack(fill=BOTH, expand=True, padx=10, pady=(4, 10))
         self.text_reference_preview_label.bind("<Configure>", lambda _e: self._schedule_reference_preview_refresh())
@@ -188,8 +205,8 @@ class TextVinylWorkspace:
         self.text_json_preview_label = Label(
             json_box,
             text=self._tr("preview_hint"),
-            bg=self._color("COLOR_PREVIEW_BG"),
-            fg=self._color("COLOR_PREVIEW_FG"),
+            bg=preview_t.preview_bg,
+            fg=preview_t.preview_fg,
         )
         self.text_json_preview_label.pack(fill=BOTH, expand=True, padx=10, pady=10)
         self.text_json_preview_label.bind("<Configure>", lambda _e: self._schedule_json_preview_refresh())
@@ -226,8 +243,14 @@ class TextVinylWorkspace:
         text_shape_hint = app._label(opts, "text_shape_mode_hint", anchor="w", theme_role="muted")
         text_shape_hint.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(4, 0))
         app._bind_wraplength(text_shape_hint, opts, padding=8)
-        app._label(opts, "text_color").grid(row=4, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
-        Entry(opts, textvariable=self.text_color, width=24).grid(row=4, column=1, columnspan=3, sticky="w", pady=(6, 0))
+        color_section = Frame(opts)
+        color_section.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        app._label(color_section, "text_color", anchor="w").pack(anchor="w")
+        self._color_editor = ColorValuesEditor(color_section, app, include_alpha=True, editable=True)
+        self._color_editor.frame.pack(fill=X, pady=(4, 0))
+        text_color_hint = app._label(color_section, "text_color_hint", anchor="w", theme_role="muted")
+        text_color_hint.pack(fill=X, pady=(4, 0))
+        app._bind_wraplength(text_color_hint, color_section, padding=8)
         app._label(opts, "text_cell_hint", anchor="w", theme_role="muted").grid(
             row=5, column=0, columnspan=4, sticky="w", pady=(6, 0)
         )
@@ -275,40 +298,63 @@ class TextVinylWorkspace:
         font_actions.pack(fill="x", padx=10, pady=(0, 10))
         app._button(font_actions, "text_font_browse", lambda s=script: self.browse_font(s)).pack(side=LEFT)
 
-        if script == SCRIPT_CHINESE:
-            library = ttk.LabelFrame(parent, text=self._tr("text_char_library"))
-            library.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
-            app.translated.append((library, "text_char_library", "text"))
-            lib_top = Frame(library)
-            lib_top.pack(fill="x", padx=10, pady=8)
-            app._label(lib_top, "text_char_search").pack(side=LEFT)
-            char_search = Entry(lib_top, textvariable=self.text_char_search, width=16)
-            char_search.pack(side=LEFT, padx=8)
-            char_search.bind("<KeyRelease>", lambda _event: self.refresh_mandarin_char_list())
-            self.text_char_count_label = app._label(lib_top, "text_char_count", theme_role="muted")
-            self.text_char_count_label.pack(side=LEFT, padx=8)
-            self.text_char_count_label.config(
-                text=self._tr("text_char_count").format(count=len(mandarin_character_library()))
-            )
-            lib_body = Frame(library)
-            lib_body.pack(fill=BOTH, expand=True, padx=10, pady=(0, 8))
-            char_scrollbar = ttk.Scrollbar(lib_body, orient="vertical")
-            char_scrollbar.pack(side=RIGHT, fill="y")
-            self.text_char_list = Listbox(
-                lib_body,
-                height=8,
-                selectmode="browse",
-                exportselection=False,
-                yscrollcommand=char_scrollbar.set,
-                font=(ui_font_name(self.app.lang), 11),
-            )
-            self.text_char_list.pack(side=LEFT, fill=BOTH, expand=True)
-            char_scrollbar.config(command=self.text_char_list.yview)
-            self.text_char_list.bind("<Double-Button-1>", lambda _event: self.insert_selected_mandarin_char())
-            lib_actions = Frame(library)
-            lib_actions.pack(fill="x", padx=10, pady=(0, 10))
-            app._button(lib_actions, "text_char_insert", self.insert_selected_mandarin_char).pack(side=LEFT)
-            widgets["library"] = library
+        widgets["char_pickers"] = []
+        if script == SCRIPT_UNIVERSAL:
+            self._build_char_library(parent, script, LIBRARY_LATIN, "text_char_library_latin")
+        elif script == SCRIPT_JAPANESE:
+            kana_notebook = ttk.Notebook(parent, style="Script.TNotebook")
+            kana_notebook.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+            widgets["kana_notebook"] = kana_notebook
+            for library_id, label_key in _JAPANESE_CHAR_LIBRARIES:
+                tab_frame = Frame(kana_notebook)
+                kana_notebook.add(tab_frame, text=self._tr(label_key))
+                self._build_char_library(
+                    tab_frame,
+                    script,
+                    library_id,
+                    label_key,
+                    framed=False,
+                )
+        elif script == SCRIPT_KOREAN:
+            self._build_char_library(parent, script, LIBRARY_HANGUL, "text_char_library_hangul")
+        elif script == SCRIPT_CHINESE:
+            self._build_char_library(parent, script, LIBRARY_HANZI, "text_char_library_hanzi")
+
+    def _build_char_library(
+        self,
+        parent: Frame,
+        script: str,
+        library_id: str,
+        label_key: str,
+        *,
+        framed: bool = True,
+    ) -> CharGridPicker:
+        picker = CharGridPicker(
+            parent,
+            self.app,
+            library_id,
+            label_key=label_key,
+            on_insert=lambda char, s=script: self._insert_char(s, char),
+            framed=framed,
+        )
+        picker.frame.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+        self._panel(script)["widgets"]["char_pickers"].append(picker)
+        return picker
+
+    def _insert_char(self, script: str, char: str) -> None:
+        panel = self._panel(script)
+        panel["input"].set(panel["input"].get() + char)
+        if self.text_script_notebook is not None:
+            try:
+                self.text_script_notebook.select(TEXT_SCRIPT_IDS.index(script))
+            except ValueError:
+                pass
+        self._schedule_coverage_check()
+
+    def refresh_char_pickers(self) -> None:
+        for script in TEXT_SCRIPT_IDS:
+            for picker in self._panel(script)["widgets"].get("char_pickers", []):
+                picker.refresh()
 
     def on_tab_activated(self) -> None:
         self._schedule_reference_preview_refresh()
@@ -325,15 +371,33 @@ class TextVinylWorkspace:
         self.update_shape_hint()
         self.update_coverage_status()
         self._refresh_shape_mode_combo()
-        if self.text_char_list is not None:
-            try:
-                self.text_char_list.config(font=(ui_font_name(self.app.lang), 11))
-            except Exception:
-                pass
+        for script in TEXT_SCRIPT_IDS:
+            widgets = self._panel(script)["widgets"]
+            kana_notebook = widgets.get("kana_notebook")
+            if kana_notebook is not None:
+                for index, (_library_id, label_key) in enumerate(_JAPANESE_CHAR_LIBRARIES):
+                    try:
+                        kana_notebook.tab(index, text=self._tr(label_key))
+                    except Exception:
+                        pass
+            for picker in widgets.get("char_pickers", []):
+                picker.on_language_changed()
 
     def update_theme_hints(self) -> None:
         self.update_shape_hint()
         self.update_coverage_status()
+
+    def _preview_colors(self) -> tuple[str, str]:
+        t = self.app.themes.tokens
+        return t.preview_bg, t.preview_fg
+
+    def on_theme_changed(self) -> None:
+        self.update_theme_hints()
+        self.refresh_char_pickers()
+        if self._reference_preview_path is not None:
+            self.set_reference_preview(self._reference_preview_path)
+        if getattr(self, "_json_preview_path", None) is not None:
+            self.set_json_preview(self._json_preview_path)
 
     @staticmethod
     def _script_tab_key(script: str) -> str:
@@ -523,12 +587,12 @@ class TextVinylWorkspace:
         panel = self._panel(script)
         text = panel["input"].get().strip()
         if not text:
-            self.text_coverage_label.config(text="", fg=self._color("COLOR_MUTED"))
+            self.text_coverage_label.config(text="", fg=self.app.themes.fg("muted"))
             return
         try:
             font_path = self._resolve_font_path(script)
         except Exception as exc:
-            self.text_coverage_label.config(text=str(exc), fg=self._color("COLOR_ERROR"))
+            self.text_coverage_label.config(text=str(exc), fg=self.app.themes.fg("error"))
             return
         ok, missing = validate_text_coverage(text, font_path)
         if ok:
@@ -537,9 +601,9 @@ class TextVinylWorkspace:
             selected = panel["font_choice"].get().strip()
             if suggest and text_contains_hangul(text) and "[KR]" not in selected.upper():
                 message = self._tr("text_coverage_suggest_kr").format(font=suggest)
-                fg = self._color("COLOR_HINT")
+                fg = self.app.themes.fg("hint")
             else:
-                fg = self._color("COLOR_SUCCESS")
+                fg = self.app.themes.fg("success")
             self.text_coverage_label.config(text=message, fg=fg)
         else:
             key = coverage_message_key(text, False, missing)
@@ -548,44 +612,16 @@ class TextVinylWorkspace:
                     count=len(missing),
                     chars=format_missing_chars(missing),
                 ),
-                fg=self._color("COLOR_ERROR"),
+                fg=self.app.themes.fg("error"),
             )
 
-    def refresh_mandarin_char_list(self) -> None:
-        if self.text_char_list is None:
-            return
-        query = self.text_char_search.get().strip()
-        matches = filter_mandarin_library(query)
-        self.text_char_list.delete(0, END)
-        for char in matches:
-            self.text_char_list.insert(END, char)
-        if self.text_char_count_label is not None:
-            total = len(gb2312_hanzi_chars())
-            shown = len(matches)
-            suffix = f" ({shown} shown)" if query else ""
-            self.text_char_count_label.config(text=f"{total} GB2312 hanzi{suffix}")
-
-    def insert_selected_mandarin_char(self) -> None:
-        if self.text_char_list is None:
-            return
-        selection = self.text_char_list.curselection()
-        if not selection:
-            return
-        char = self.text_char_list.get(selection[0])
-        panel = self._panel(SCRIPT_CHINESE)
-        current = panel["input"].get()
-        panel["input"].set(current + char)
-        if self.text_script_notebook is not None:
-            self.text_script_notebook.select(TEXT_SCRIPT_IDS.index(SCRIPT_CHINESE))
-        self._schedule_coverage_check()
-
     def _parse_color(self) -> tuple[int, int, int, int]:
-        parts = [int(part.strip()) for part in self.text_color.get().split(",")]
-        if len(parts) == 3:
-            parts.append(255)
-        if len(parts) != 4:
-            raise ValueError("Color must be R,G,B or R,G,B,A")
-        return tuple(parts[:4])
+        if self._color_editor is None:
+            return 255, 255, 255, 255
+        try:
+            return self._color_editor.get_rgba()
+        except ValueError as exc:
+            raise ValueError(self._tr("text_color_invalid")) from exc
 
     def browse_reference_image(self) -> None:
         path = filedialog.askopenfilename(
@@ -620,17 +656,41 @@ class TextVinylWorkspace:
         threading.Thread(target=self._trace_worker, args=(path,), daemon=True).start()
 
     @staticmethod
-    def output_path(stem: str) -> Path:
+    def output_path(stem: str, *, mode: str = "typed", identity: str | None = None) -> Path:
         safe = re.sub(r"[^\w\u3040-\u30ff\u3400-\u9fff-]+", "_", stem, flags=re.UNICODE).strip("_")
         if not safe:
             safe = "text_vinyl"
-        folder = ROOT / "runtime" / "text-vinyl"
-        folder.mkdir(parents=True, exist_ok=True)
-        return folder / f"{safe[:48]}.json"
+        identity = identity or stem or safe
+        paths = text_vinyl_workspace(mode, identity).ensure()
+        return paths.json_finals / f"{safe[:48]}.json"
 
     def finish_json(self, payload, output: Path, shape_mode: str | None = None) -> None:
         write_geometry_json(output, payload)
         layers = estimate_layer_count(payload)
+        try:
+            import json
+            from datetime import datetime, timezone
+
+            root = output.parent.parent
+            if root.parent == TEXT_VINYL_WORKSPACE_ROOT:
+                manifest_path = root / "manifest.json"
+                body: dict = {}
+                if manifest_path.is_file():
+                    body = json.loads(manifest_path.read_text(encoding="utf-8"))
+                body.setdefault("workspace_id", root.name)
+                body.setdefault("kind", "text_vinyl")
+                body.update(
+                    {
+                        "label": output.name,
+                        "layers": layers,
+                        "shape_mode": shape_mode or "",
+                        "output": str(output),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                manifest_path.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
+        except Exception:
+            pass
         if output not in self.json_files:
             self.json_files.append(output)
         self.render_json_list()
@@ -710,9 +770,10 @@ class TextVinylWorkspace:
             self.app.log_line(self._tr("text_log_json_already_import"))
 
     def open_output_folder(self) -> None:
-        folder = ROOT / "runtime" / "text-vinyl"
-        folder.mkdir(parents=True, exist_ok=True)
-        os.startfile(folder)  # type: ignore[attr-defined]
+        from asset_workspace import TEXT_VINYL_WORKSPACE_ROOT
+
+        TEXT_VINYL_WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
+        os.startfile(TEXT_VINYL_WORKSPACE_ROOT)  # type: ignore[attr-defined]
 
     def _preview_selected_json(self, _event=None) -> None:
         if self.text_json_list is None:
@@ -743,8 +804,7 @@ class TextVinylWorkspace:
             return
         self._reference_preview_path = Path(path) if path else None
         label = self.text_reference_preview_label
-        preview_bg = self._color("COLOR_PREVIEW_BG")
-        preview_fg = self._color("COLOR_PREVIEW_FG")
+        preview_bg, preview_fg = self._preview_colors()
         if path is None or not path.exists():
             label.config(image="", text=self._tr("preview_hint"), bg=preview_bg, fg=preview_fg)
             label.image = None
@@ -779,8 +839,7 @@ class TextVinylWorkspace:
         if self.text_json_preview_label is None:
             return
         label = self.text_json_preview_label
-        preview_bg = self._color("COLOR_PREVIEW_BG")
-        preview_fg = self._color("COLOR_PREVIEW_FG")
+        preview_bg, preview_fg = self._preview_colors()
         if path is None:
             self._json_preview_path = None
             label.config(image="", text=self._tr("preview_hint"), bg=preview_bg, fg=preview_fg)
@@ -817,7 +876,16 @@ class TextVinylWorkspace:
                 cell_size=cell_size,
                 shape_mode=shape_mode,
             )
-            output = self.output_path(text[:12])
+            paths = text_vinyl_workspace("typed", text).ensure()
+            write_manifest(
+                paths,
+                {
+                    "label": text[:48],
+                    "mode": "typed",
+                    "source_original": text[:120],
+                },
+            )
+            output = self.output_path(text[:12], mode="typed", identity=text)
             self.queue.put(("text_json_done", (payload, output, shape_mode)))
         except Exception as exc:
             self.queue.put(("log", f"{self._tr('text_failed')}: {exc}"))
@@ -829,14 +897,39 @@ class TextVinylWorkspace:
             color = self._parse_color()
             cell_size = int(self.text_cell_size.get().strip() or "4")
             shape_mode = self._resolve_shape_mode()
+            source = Path(path)
+            identity = str(source.resolve()) if source.exists() else path
+            paths = text_vinyl_workspace("trace", identity).ensure()
+            from file_management_settings import load_file_management_settings
+
+            trace_input = source
+            if source.exists() and load_file_management_settings().effective_copy_trace_references():
+                import shutil
+
+                destination = workspace_source_file(paths, source.suffix or ".png")
+                try:
+                    if not destination.exists() or source.stat().st_mtime > destination.stat().st_mtime:
+                        shutil.copy2(source, destination)
+                    trace_input = destination
+                except OSError:
+                    trace_input = source
             payload = build_geometry_from_text_image(
-                Path(path),
+                trace_input,
                 color=color,
                 cell_size=cell_size,
                 invert=self.text_invert.get() == "1",
                 shape_mode=shape_mode,
             )
-            output = self.output_path(Path(path).stem)
+            output = self.output_path(source.stem, mode="trace", identity=identity)
+            write_manifest(
+                paths,
+                {
+                    "label": source.name,
+                    "mode": "trace",
+                    "source_original": identity,
+                    "shape_mode": shape_mode,
+                },
+            )
             self.queue.put(("text_json_done", (payload, output, shape_mode)))
         except Exception as exc:
             self.queue.put(("log", f"{self._tr('text_failed')}: {exc}"))

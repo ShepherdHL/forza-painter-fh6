@@ -1,4 +1,5 @@
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *$py.class
 
@@ -14,6 +15,7 @@ webui-data/
 runtime/
 dist/
 build/
+src/_build_profile.json
 
 # Local runtime artifacts (do not commit)
 forza-painter-*-log-*.txt

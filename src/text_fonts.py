@@ -235,6 +235,15 @@ def _registry_font_entries() -> Dict[str, Path]:
 
     fonts_dir = _fonts_directory()
     try:
+        try:
+            from defender_audit import log_registry_read
+
+            log_registry_read(
+                r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts",
+                purpose="font enumeration",
+            )
+        except Exception:
+            pass
         with winreg.OpenKey(
             winreg.HKEY_LOCAL_MACHINE,
             r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts",

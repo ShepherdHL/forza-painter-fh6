@@ -307,6 +307,15 @@ class ColorPickerToolPanel(ToolPanel):
         self._render_history()
         self.app.log_line(self._tr("colors_saved", hex=hex_value))
 
+    def on_theme_changed(self) -> None:
+        if self._canvas is not None:
+            self._canvas.configure(
+                bg=self._color("COLOR_PANEL"),
+                highlightbackground=self._color("COLOR_BORDER"),
+            )
+        self._redraw()
+        self._render_history()
+
     def _render_history(self) -> None:
         if self._history_frame is None:
             return
