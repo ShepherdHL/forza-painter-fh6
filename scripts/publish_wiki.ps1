@@ -4,6 +4,23 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = Split-Path -Parent $ScriptDir
 
+function Invoke-Git {
+    param([string[]]$GitCommand)
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $output = & git @GitCommand 2>&1
+        $code = $LASTEXITCODE
+        if ($output) {
+            $output | ForEach-Object { Write-Host $_ }
+        }
+        return $code
+    }
+    finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 function Get-RemoteWikiUrl {
     $remote = (git -C $Root remote get-url origin 2>$null)
     if (-not $remote) {
@@ -16,6 +33,14 @@ function Get-RemoteWikiUrl {
         return "https://github.com/$($Matches[1]).wiki.git"
     }
     throw "Unsupported origin remote: $remote"
+}
+
+function Get-WikiWebUrl {
+    param([string]$WikiGitUrl)
+    if ($WikiGitUrl -match "github\.com[:/](.+?)\.wiki\.git") {
+        return "https://github.com/$($Matches[1])/wiki"
+    }
+    return $WikiGitUrl
 }
 
 function Convert-ToWikiLinks {
@@ -46,18 +71,32 @@ function Read-RootDoc {
 }
 
 $WikiUrl = Get-RemoteWikiUrl
+$WikiWebUrl = Get-WikiWebUrl $WikiUrl
 $WorkDir = Join-Path $env:TEMP "forza-painter-fh6-wiki-publish"
 if (Test-Path $WorkDir) {
     Remove-Item -LiteralPath $WorkDir -Recurse -Force
 }
 
+Write-Host "Checking wiki remote: $WikiUrl"
+$probeCode = Invoke-Git -GitCommand @("ls-remote", $WikiUrl)
+if ($probeCode -ne 0) {
+    Write-Host ""
+    Write-Host "Wiki git repo is not available yet." -ForegroundColor Yellow
+    Write-Host "Enabling Wikis is not enough - GitHub creates the wiki repo after the first page exists."
+    Write-Host ""
+    Write-Host "One-time setup (about 30 seconds):"
+    Write-Host "  1. Open $WikiWebUrl"
+    Write-Host "  2. Click Create the first page"
+    Write-Host "  3. Title: Home   Body: placeholder   Save Page"
+    Write-Host "  4. Run this script again from the repo root:"
+    Write-Host ('     powershell -ExecutionPolicy Bypass -File "' + $PSCommandPath + '"')
+    exit 1
+}
+
 Write-Host "Cloning wiki from $WikiUrl ..."
-git clone $WikiUrl $WorkDir 2>&1 | Out-Host
-if ($LASTEXITCODE -ne 0) {
-    throw @"
-Wiki clone failed. Enable Wikis on the repository (Settings -> Features -> Wikis),
-then run this script again. First-time setup may require creating one page on github.com manually.
-"@
+$cloneCode = Invoke-Git -GitCommand @("clone", $WikiUrl, $WorkDir)
+if ($cloneCode -ne 0) {
+    throw "Wiki clone failed even though the remote exists. Check git credentials and try again."
 }
 
 $pages = @{
@@ -75,15 +114,22 @@ foreach ($entry in $pages.GetEnumerator()) {
 
 Push-Location $WorkDir
 try {
-    git add -A
+    Invoke-Git -GitCommand @("add", "-A") | Out-Null
     $status = git status --porcelain
     if (-not $status) {
         Write-Host "Wiki already up to date."
         exit 0
     }
-    git commit -m "Sync docs from main ($(Get-Date -Format 'yyyy-MM-dd'))"
-    git push origin HEAD
-    Write-Host "Wiki published. Open: https://github.com/ShepherdHL/forza-painter-fh6/wiki"
+    Invoke-Git -GitCommand @("commit", "-m", "Sync docs from main ($(Get-Date -Format 'yyyy-MM-dd'))") | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Wiki commit failed."
+    }
+    $pushCode = Invoke-Git -GitCommand @("push", "origin", "HEAD")
+    if ($pushCode -ne 0) {
+        throw "Wiki push failed."
+    }
+    Write-Host ""
+    Write-Host "Wiki published. Open: $WikiWebUrl" -ForegroundColor Green
 }
 finally {
     Pop-Location
