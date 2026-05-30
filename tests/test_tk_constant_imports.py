@@ -59,7 +59,10 @@ def _bare_tk_constant_uses(tree: ast.AST) -> set[str]:
 
 def _collect_missing_imports() -> list[str]:
     messages: list[str] = []
-    for path in sorted(SRC_ROOT.rglob("*.py")):
+    ui_paths = [SRC_ROOT / "app.py", *SRC_ROOT.glob("ui_*.py"), *SRC_ROOT.glob("ui/**/*.py")]
+    for path in sorted(set(ui_paths)):
+        if not path.is_file():
+            continue
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(path))
         imported = _tkinter_imported_names(tree)

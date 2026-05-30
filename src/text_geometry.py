@@ -364,7 +364,7 @@ def build_geometry_from_text(
             hint = (
                 " For Korean, choose a [KR] font such as Malgun Gothic."
                 if any(is_hangul_char(char) for char in text)
-                else ""
+                else " Choose a text font that supports every character in your input."
             )
             raise ValueError(
                 f"Font {resolved_font.name} is missing {len(missing)} character(s): "

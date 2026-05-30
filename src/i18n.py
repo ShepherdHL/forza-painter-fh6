@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 LANGUAGES = {
     "English": "en",
     "中文": "zh",
@@ -18,6 +20,29 @@ def ui_font_name(lang: str) -> str:
     if lang == "ko":
         return "Malgun Gothic"
     return "Segoe UI"
+
+
+_EXPERIMENTAL_TM_MARKERS = (
+    "Experimental",
+    "experimental",
+    "实验性",
+    "實驗性",
+    "実験的",
+    "실험적",
+)
+
+
+def mark_experimental_trademark(text: str) -> str:
+    if not text or not isinstance(text, str):
+        return text
+    result = text
+    for marker in _EXPERIMENTAL_TM_MARKERS:
+        result = re.sub(
+            rf"{re.escape(marker)}(?!\s*\(TM\)|™)",
+            f"{marker}™",
+            result,
+        )
+    return result
 
 
 def tr(text_map: dict, lang: str, key: str) -> str:

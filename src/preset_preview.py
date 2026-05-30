@@ -27,7 +27,7 @@ def preset_label_color(preset_index: int | None) -> str | None:
 
 
 _BUNDLED_BADGE_BY_INDEX: dict[int, str] = {
-    0: "❄▁▂",
+    0: "🍃▁▂",
     1: "⚡▁▁",
     2: "⏩▂▂",
     3: "★▄▄▃",
@@ -101,7 +101,7 @@ def preset_badge_prefix(
     speed = _bar_for_speed(stop_at)
     detail = _bar_for_detail(random_samples)
     if path is not None and is_eco_experimental_preset({"path": path}):
-        gpu = "❄"
+        gpu = "🍃"
     else:
         gpu = _bar_for_gpu_tier(gpu_load_tier(random_samples, max_resolution))
     return _format_badge(speed, detail, gpu)

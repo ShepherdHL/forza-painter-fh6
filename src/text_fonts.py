@@ -11,7 +11,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from mandarin_chars import is_cjk_char, is_hangul_char, text_contains_hangul, text_scripts, unique_chars
+from mandarin_chars import is_hangul_char, text_contains_hangul, text_scripts, unique_chars
 
 _FONT_EXTS = {".ttf", ".ttc", ".otf", ".fon"}
 _PROBE_SIZE = 48
@@ -78,7 +78,30 @@ _LATIN_HINTS = (
     "impact",
     "gabriola",
 )
-_LATIN_PROBE = "ABCabc123"
+_LATIN_PROBE = "ABCabcPhoenix0123456789"
+_SYMBOL_FONT_HINTS = (
+    "icons",
+    "icon ",
+    " icon",
+    "mdl2",
+    "webdings",
+    "wingdings",
+    "wingding",
+    "marlett",
+    "symbol",
+    "seguiemj",
+    "emoji",
+    "holomdl2",
+    "monotype sorts",
+    "extra symbols",
+    "math",
+    "arrow",
+    "gadugi",
+    "ebrima",
+    "sylfaen",
+    "ms outlook",
+    "mt extra",
+)
 _LATIN_FALLBACKS = [
     Path(r"C:\Windows\Fonts\segoeui.ttf"),
     Path(r"C:\Windows\Fonts\arial.ttf"),
@@ -146,9 +169,20 @@ def _name_looks_cjk(name: str) -> bool:
     return bool(_CJK_NAME_RE.search(name))
 
 
+def _name_is_symbol_font(name: str) -> bool:
+    lowered = name.lower()
+    return any(hint in lowered for hint in _SYMBOL_FONT_HINTS)
+
+
 def _name_looks_latin(name: str) -> bool:
     lowered = name.lower()
-    return any(hint in lowered for hint in _LATIN_HINTS)
+    if _name_is_symbol_font(lowered):
+        return False
+    if any(hint in lowered for hint in _LATIN_HINTS):
+        if "segoe" in lowered and "segoe ui" not in lowered:
+            return False
+        return True
+    return False
 
 
 def _name_latin_tags(name: str) -> Tuple[str, ...]:
@@ -157,8 +191,10 @@ def _name_latin_tags(name: str) -> Tuple[str, ...]:
 
 def _score_latin_font(name: str) -> int:
     lowered = name.lower()
+    if _name_is_symbol_font(lowered):
+        return -1000
     score = 0
-    if "segoe ui" in lowered or lowered.startswith("segoe"):
+    if "segoe ui" in lowered:
         score += 120
     if "arial" in lowered:
         score += 110
@@ -177,11 +213,23 @@ def _score_latin_font(name: str) -> int:
     return score
 
 
+@lru_cache(maxsize=512)
+def _latin_probe_cached(path_str: str, mtime_ns: int) -> bool:
+    path = Path(path_str)
+    if not path.exists():
+        return False
+    return all(font_has_glyph(path, char) for char in _LATIN_PROBE)
+
+
 def font_supports_latin(font_path: Path) -> bool:
     path = Path(font_path)
     if not path.exists():
         return False
-    return all(font_has_glyph(path, char) for char in _LATIN_PROBE)
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        return _latin_probe_cached(str(path.resolve()), 0)
+    return _latin_probe_cached(str(path.resolve()), mtime_ns)
 
 
 def _name_tags(name: str) -> Tuple[str, ...]:
@@ -350,6 +398,8 @@ def discover_latin_fonts(deep_scan: bool = False) -> Tuple[DiscoveredFont, ...]:
             continue
         if _name_looks_cjk(display_name) and not _name_looks_latin(display_name):
             continue
+        if not font_supports_latin(path):
+            continue
         score = _score_latin_font(display_name)
         existing = by_path.get(path)
         if existing is None or score > existing.score:
@@ -365,6 +415,8 @@ def discover_latin_fonts(deep_scan: bool = False) -> Tuple[DiscoveredFont, ...]:
             continue
         path = fallback.resolve()
         if path in by_path:
+            continue
+        if not font_supports_latin(path):
             continue
         name = path.stem
         by_path[path] = DiscoveredFont(
@@ -569,7 +621,7 @@ def font_supports_sample(font_path: Path, require_hangul: bool = False) -> bool:
 def missing_glyphs(text: str, font_path: Path) -> List[str]:
     missing: List[str] = []
     for char in unique_chars(text):
-        if not is_cjk_char(char):
+        if char.isspace():
             continue
         if not font_has_glyph(font_path, char):
             missing.append(char)
@@ -592,15 +644,19 @@ def coverage_message_key(text: str, ok: bool, missing: Sequence[str]) -> str:
 
 
 def recommend_font_label_for_text(text: str, script: str | None = None) -> str | None:
-    if not text_contains_hangul(text):
+    if not text.strip():
         return None
-    fonts = discover_fonts_for_script(script or SCRIPT_KOREAN) if script else discover_cjk_fonts()
+    target_script = script or SCRIPT_UNIVERSAL
+    fonts = discover_fonts_for_script(target_script)
     for font in fonts:
-        if "kr" in font.script_tags and _font_covers_text(font, text):
+        if _font_covers_text(font, text):
             return font.label
-    for font in fonts:
-        if "kr" in font.script_tags:
-            return font.label
+    if text_contains_hangul(text):
+        for font in fonts:
+            if "kr" in font.script_tags:
+                return font.label
+    if fonts:
+        return fonts[0].label
     return None
 
 

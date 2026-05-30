@@ -11,8 +11,8 @@ hiragana, **Korean (Hangul)**, and other CJK scripts can be imported.
 ## In the app
 
 Open the **Text vinyl** tab (a dedicated workspace: settings and script tabs on the left,
-reference image + JSON previews on the right). Generated JSON stays on this tab until you
-click **Add to Import Final**, then continue in the **Import Final JSON** tab as usual.
+reference image + JSON previews on the right). Generated designs stay on this tab until you
+click **Continue to Import → Text**, which opens **Import → Import text** with your design selected.
 
 Use the script sub-tabs:
 
@@ -34,8 +34,8 @@ Each tab keeps its own text, font choice, and **Search fonts** filter. Below the
 5. Set **Trace shape mode** (see table below) and match your FH6 template before import.
 6. Adjust **font size** and **trace cell size** (larger cell → fewer layers, less detail).
 7. Click **Generate from text**.
-8. Preview the JSON on the right, then click **Add to Import Final** when ready.
-9. Open **Import Final JSON** and import as usual.
+8. Preview the design on the right, then click **Continue to Import → Text** when ready.
+9. On **Import → Import text**, confirm your design and import as usual.
 
 Default font priority favors Simplified Chinese faces (Microsoft YaHei, SimHei, Noto Sans SC), then Traditional Chinese, Japanese, and Korean fonts.
 

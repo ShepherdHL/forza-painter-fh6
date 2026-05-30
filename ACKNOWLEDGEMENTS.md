@@ -40,6 +40,13 @@ This project is a derivative of the Forza Painter workflow and retains upstream 
 | DxBang | [Bang's Forza Color Converter](https://bang.systems/forza-colors/) | Forza H/S/B color conversion used in **Tools → Color Picker**. |
 | zjl88858 | [forza-painter-geometrize-gpu](https://github.com/zjl88858/forza-painter-geometrize-gpu) | GPU/OpenCL geometrize generator lineage used by the bundled generator workflow. |
 
+## Pixel art
+
+| Person / project | Link | Contribution |
+| --- | --- | --- |
+| endarz | [SVGtoforza-painterJSON](https://github.com/endarz/SVGtoforza-painterJSON) | Original Aseprite SVG → handmade JSON workflow; the in-app Pixel art converter is heavily modified from this project. |
+| Igara Studio S.A. | [Aseprite](https://www.aseprite.org/) | They made Aseprite. It's just a really great tool. If you would like to use this Forza Painter to make pixel art — don't. Use Aseprite instead. I'm serious. It's better. |
+
 ## Contributors to this repository
 
 | Person | Link |

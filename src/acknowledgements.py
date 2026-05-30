@@ -24,6 +24,13 @@ Tools and libraries
   Bang's Forza Color Converter; Forza H/S/B color conversion used in Tools → Color Picker.
 • zjl88858 — https://github.com/zjl88858/forza-painter-geometrize-gpu
   GPU/OpenCL geometrize generator lineage used by the bundled generator workflow.
+
+Pixel art
+• endarz — https://github.com/endarz/SVGtoforza-painterJSON
+  Original Aseprite SVG → handmade JSON workflow; the in-app Pixel art converter is heavily modified from this project.
+• Igara Studio S.A. — https://www.aseprite.org/
+  They made Aseprite. It's just a really great tool. If you would like to use this Forza Painter to make pixel art — don't. Use Aseprite instead. I'm serious. It's better.
+
 Contributors to this repository
 • H3XDaemon — https://github.com/H3XDaemon
 • MaccLochlainn — https://github.com/MaccLochlainn
@@ -54,6 +61,12 @@ FH6 分支与延续
   Bang's Forza Color Converter；「工具 → 取色器」使用的 Forza H/S/B 颜色转换。
 • zjl88858 — https://github.com/zjl88858/forza-painter-geometrize-gpu
   内置 GPU 生成器所采用的 GPU/OpenCL geometrize 生成器谱系。
+
+像素艺术
+• endarz — https://github.com/endarz/SVGtoforza-painterJSON
+  原版 Aseprite SVG → 手工 JSON 工作流；应用内像素艺术转换器在其基础上大幅修改。
+• Igara Studio S.A. — https://www.aseprite.org/
+  Aseprite 的开发者。它是非常出色的工具。若你想做像素艺术，请用 Aseprite，不要用本应用的编辑器。我是认真的，Aseprite 更好。
 
 本仓库贡献者
 • H3XDaemon — https://github.com/H3XDaemon
@@ -86,6 +99,12 @@ FH6 계보
 • zjl88858 — https://github.com/zjl88858/forza-painter-geometrize-gpu
   번들 생성기가 사용하는 GPU/OpenCL geometrize 생성기 계보.
 
+픽셀 아트
+• endarz — https://github.com/endarz/SVGtoforza-painterJSON
+  원조 Aseprite SVG → handmade JSON 워크플로; 앱 내 픽셀 아트 변환기는 이를 크게 수정한 것입니다.
+• Igara Studio S.A. — https://www.aseprite.org/
+  Aseprite를 만든 팀입니다. 정말 훌륭한 도구입니다. 픽셀 아트를 만들려면 이 Forza Painter를 쓰지 마세요. Aseprite를 쓰세요. 진심입니다. 더 낫습니다.
+
 이 저장소 기여자
 • H3XDaemon — https://github.com/H3XDaemon
 • MaccLochlainn — https://github.com/MaccLochlainn
@@ -116,6 +135,12 @@ FH6 系譜
   Bang's Forza Color Converter；「色」タブで使用する Forza H/S/B 色変換。
 • zjl88858 — https://github.com/zjl88858/forza-painter-geometrize-gpu
   同梱 GPU 生成器が使用する GPU/OpenCL geometrize 生成器系譜。
+
+ピクセルアート
+• endarz — https://github.com/endarz/SVGtoforza-painterJSON
+  オリジナルの Aseprite SVG → handmade JSON ワークフロー。アプリ内ピクセルアート変換はこれを大幅に改変したものです。
+• Igara Studio S.A. — https://www.aseprite.org/
+  Aseprite の開発元。非常に優れたツールです。本気でピクセルアートを作るなら Forza Painter ではなく Aseprite を使ってください。マジで。Aseprite の方が上です。
 
 このリポジトリの貢献者
 • H3XDaemon — https://github.com/H3XDaemon

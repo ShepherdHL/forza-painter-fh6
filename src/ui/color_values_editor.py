@@ -7,6 +7,7 @@ from typing import Any, Callable
 from tkinter import LEFT, X, Button, Entry, Frame, Label, StringVar, ttk
 
 from forza_colors import describe_color, hex_to_rgb
+from ui.saved_color_swatches import apply_themed_palette_surface, render_saved_color_swatches
 
 
 class ColorValuesEditor:
@@ -20,12 +21,16 @@ class ColorValuesEditor:
         include_alpha: bool = True,
         editable: bool = True,
         show_actions: bool = True,
+        show_saved_palette: bool = True,
     ) -> None:
         self.app = app
         self.include_alpha = bool(include_alpha)
         self.editable = bool(editable)
         self.show_actions = bool(show_actions)
+        self.show_saved_palette = bool(show_saved_palette)
         self._syncing = False
+        self._palette_row: Frame | None = None
+        self._palette_listener = self._on_shared_palette_changed
 
         self.hex_var = StringVar(value="#ffffff")
         self.rgb_r_var = StringVar(value="255")
@@ -115,7 +120,72 @@ class ColorValuesEditor:
             readonly=True,
         )
 
-        self.set_rgba(255, 255, 255, 255)
+        if self.show_saved_palette:
+            palette_box = Frame(self.frame)
+            palette_box.pack(fill=X, pady=(8, 0))
+            apply_themed_palette_surface(palette_box, app)
+            self.app._label(palette_box, "colors_saved_history", anchor="w", theme_role="muted").pack(fill=X)
+            self._palette_row = Frame(palette_box)
+            self._palette_row.pack(fill=X, pady=(4, 0))
+            apply_themed_palette_surface(self._palette_row, app)
+
+        last = self._initial_rgba()
+        self.set_rgba(*last, record=False)
+        self._bind_shared_palette()
+
+    def _initial_rgba(self) -> tuple[int, int, int, int]:
+        palette = getattr(self.app, "shared_colors", None)
+        if palette is not None:
+            colors = palette.saved_colors()
+            if colors:
+                return colors[0]
+        from shared_color_palette import get_last_color
+
+        last = get_last_color()
+        if last is not None:
+            return last
+        return 255, 255, 255, 255
+
+    def _bind_shared_palette(self) -> None:
+        palette = getattr(self.app, "shared_colors", None)
+        if palette is None:
+            return
+        palette.subscribe(self._palette_listener)
+        self._render_saved_palette()
+
+    def _on_shared_palette_changed(self, rgba: tuple[int, int, int, int], source: str) -> None:
+        self._render_saved_palette()
+        self.set_rgba(*rgba, record=False)
+
+    def _render_saved_palette(self) -> None:
+        if self._palette_row is None:
+            return
+        apply_themed_palette_surface(self._palette_row, self.app)
+        for child in self._palette_row.winfo_children():
+            child.destroy()
+        palette = getattr(self.app, "shared_colors", None)
+        if palette is None:
+            return
+        render_saved_color_swatches(
+            self._palette_row,
+            self.app,
+            palette.saved_colors(),
+            on_select=self._recall_saved_color,
+        )
+
+    def _recall_saved_color(self, rgba: tuple[int, int, int, int]) -> None:
+        palette = getattr(self.app, "shared_colors", None)
+        if palette is not None:
+            palette.recall(rgba)
+        else:
+            self.set_rgba(*rgba, record=False)
+
+    def _record_color(self) -> None:
+        palette = getattr(self.app, "shared_colors", None)
+        if palette is None:
+            return
+        r, g, b, a = self.get_rgba()
+        palette.push(r, g, b, a, source="push")
 
     def _value_row(
         self,
@@ -162,6 +232,7 @@ class ColorValuesEditor:
             return
         alpha = self._read_alpha(default=255)
         self._apply_rgb(rgb.r, rgb.g, rgb.b, alpha, update_hex=False)
+        self._record_color()
 
     def _commit_rgb(self) -> None:
         if self._syncing:
@@ -174,6 +245,7 @@ class ColorValuesEditor:
             return
         alpha = self._read_alpha(default=255)
         self._apply_rgb(r, g, b, alpha, update_hex=True)
+        self._record_color()
 
     def _commit_alpha(self) -> None:
         if self._syncing:
@@ -228,7 +300,7 @@ class ColorValuesEditor:
         finally:
             self._syncing = False
 
-    def set_rgba(self, r: int, g: int, b: int, a: int = 255) -> None:
+    def set_rgba(self, r: int, g: int, b: int, a: int = 255, *, record: bool = True) -> None:
         self._apply_rgb(
             self._clamp_channel(str(r)),
             self._clamp_channel(str(g)),
@@ -236,6 +308,8 @@ class ColorValuesEditor:
             self._clamp_channel(str(a)),
             update_hex=True,
         )
+        if record:
+            self._record_color()
 
     def get_rgba(self) -> tuple[int, int, int, int]:
         r = self._clamp_channel(self.rgb_r_var.get())

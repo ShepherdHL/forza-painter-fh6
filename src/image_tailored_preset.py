@@ -41,7 +41,7 @@ IMAGE_PROFILES_DIR = ROOT / "runtime" / "image-profiles"
 ACTIVE_PROFILE_PATH = IMAGE_PROFILES_DIR / "tailored-active.ini"
 TAILORED_SETTINGS_PATH = ROOT / "runtime" / "settings" / "tailored_preset.json"
 TAILORED_BADGE = "🧪▃▃"
-TAILORED_DISPLAY_NAME = "Tailored (experimental)"
+TAILORED_DISPLAY_NAME = "Tailored"
 NORMAL_PRESET_FRAGMENT = "normal.ini"
 
 MIN_STOP_AT = 100
@@ -186,7 +186,7 @@ def write_tailored_profile(
     IMAGE_PROFILES_DIR.mkdir(parents=True, exist_ok=True)
     key = image_profile_key(image_path)
     description = (
-        f"Experimental per-image preset for {image_name} "
+        f"Tailored preset for {image_name} "
         f"(complexity est. ~{complexity_estimate}, cap {values.get('stopAt', '?')} layers). "
         "Approximate — results may vary."
     )
@@ -247,7 +247,7 @@ def tailored_placeholder_profile():
     values = normal_base_values()
     values["displayName"] = TAILORED_DISPLAY_NAME
     description = (
-        "Experimental per-image preset (opt-in, not the default). "
+        "Per-image preset (opt-in, not the default). "
         "Add an image on Generate or Image Preview to build slot 0; keep Normal for routine runs."
     )
     label = preset_label_with_badge(f"0. {TAILORED_DISPLAY_NAME}", TAILORED_BADGE)

@@ -122,6 +122,8 @@ def refresh_app_interactive_ui(app: Any, manager: ThemeManager) -> None:
         app._paint_tab_strip()
     if hasattr(app, "text_vinyl"):
         app.text_vinyl.on_theme_changed()
+    if hasattr(app, "pixel_art"):
+        app.pixel_art.on_theme_changed()
     if hasattr(app, "tools_workspace"):
         app.tools_workspace.on_theme_changed()
     if hasattr(app, "hub_bar"):

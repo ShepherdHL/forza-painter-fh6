@@ -23,9 +23,10 @@ def _focus_within_widget(widget: tk.Misc, focused: tk.Misc | None) -> bool:
 
 
 def _scroll_units(event: tk.Event) -> int:
-    if event.num == 4:
+    num = getattr(event, "num", None)
+    if num == 4:
         return -1
-    if event.num == 5:
+    if num == 5:
         return 1
     try:
         return int(-1 * (event.delta / 120))

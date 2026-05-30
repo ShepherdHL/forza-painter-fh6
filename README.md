@@ -40,9 +40,10 @@ Convert PNG/JPG/BMP images into Forza Horizon 6 Vinyl Group layers. The app hand
 | Generate JSON | Convert images into geometry JSON with the bundled GPU/OpenCL generator. |
 | Image Preview | Compare preprocess filters (luma, bilateral, posterize, cel shading, etc.) before generating. |
 | Text vinyl | Type Mandarin/CJK with GB2312 picker and system fonts, or trace a reference image. |
-| Import Final JSON | Import generated geometry JSON into FH6. |
-| Import Handmade JSON | Import FH6 type-code / handmade JSON (squares, circles, triangles, etc.). |
-| Export Game JSON | Export the open FH6 vinyl group to handmade JSON for editing or sharing. |
+| Import photo | Import designs generated from photos into FH6. |
+| Import text | Import text vinyl designs into FH6. |
+| Import pixel art | Import pixel art with FH6 shape layers into FH6. |
+| Save from game | Save the open FH6 vinyl group as a design file. |
 | Safe FH6 workflow | Auto-locate and verify the editable layer table before writing. |
 | Update check | Check for new versions on startup and show changelog notes when available. |
 
@@ -52,7 +53,7 @@ Convert PNG/JPG/BMP images into Forza Horizon 6 Vinyl Group layers. The app hand
 2. Put the EXE in a normal writable folder, for example `Desktop\forza-painter-fh6`.
 3. Double-click the EXE. The app starts as a standard user; when you **import or export** into FH6 it will ask for consent and, if needed, one **Administrator** prompt (UAC).
 4. In FH6, open `Create Vinyl Group` / `Vinyl Group Editor`, load a sphere template, then `Ungroup` it.
-5. In the app, use **Create** to generate JSON, then **Import → Import Final JSON**, **enter the exact template layer count**, then import. Use **Help** in the header for the tutorial and safety guide.
+5. In the app, use **Create** to generate a design, then **Import → Import photo**, **Import text**, or **Import pixel art** (matching what you made). **Enter the exact template layer count**, then import. Use **Help** in the header for the tutorial and safety guide.
 
 Do not download GitHub's automatic `Source code` ZIP unless you are developing the project. Normal users only need the `.exe`.
 

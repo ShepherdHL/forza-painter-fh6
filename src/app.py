@@ -155,6 +155,7 @@ from ui_layout import (
 )
 from ui.preset_combobox import PresetCombobox
 from ui.text_vinyl_workspace import TextVinylWorkspace
+from ui.pixel_art_workspace import PixelArtWorkspace
 from ui.dev_tools import DevToolsWorkspace
 from ui.hub_navigation import HubBar
 from ui.theme_manager import ThemeManager
@@ -190,7 +191,7 @@ from ui_themes import (
     resolve_palette,
     save_theme_id,
 )
-from i18n import LANGUAGES, eta_suffix, tr as tr_text, ui_font_name
+from i18n import LANGUAGES, eta_suffix, mark_experimental_trademark, tr as tr_text, ui_font_name
 from i18n_ja import merge_japanese_text
 from i18n_ko_patch import merge_korean_patch
 from i18n_text import apply_text_patches
@@ -272,9 +273,8 @@ TEXT = {
         "title": APP_SHORT_NAME,
         "subtitle": "Translate images into .JSON files, and import them into the Forza Horizon Vinyl Editor.",
         "header_kicker": "Forza Painter - Vinyl Import/ Export Suite",
-        "header_build_prefix": "Build Version - {version} (",
-        "header_build_experimental": "Experimental",
-        "header_build_suffix": "); {date}",
+        "header_build_prefix": "Build Version - {version}; ",
+        "header_build_suffix": "{date}",
         "language": "Language",
         "appearance": "Appearance",
         "layout_resize_hint": "Drag dividers to resize panels. Sizes are remembered.",
@@ -306,8 +306,9 @@ TEXT = {
         "first_run_title": "Welcome to Forza Painter FH6",
         "first_run_body": (
             "Quick orientation:\n\n"
-            "• Create — generate JSON from images (no administrator rights).\n"
-            "• Import — write vinyls into FH6 (consent + Administrator when prompted).\n"
+            "• Create — Photo, Text, or Pixel art tabs build your design (no administrator rights).\n"
+            "• Import — matching Photo, Text, and Pixel art tabs write designs into FH6 "
+            "(consent + Administrator when prompted).\n"
             "• Tools — color picker and background removal.\n"
             "• Dev Tools — FH6 memory diagnostics (not required for normal import).\n\n"
             "Buttons marked with a shield need elevation for memory access.\n"
@@ -322,13 +323,13 @@ TEXT = {
             "This tool can use any font from your machine. If the font is not found automatically, "
             "try uploading it on this tab."
         ),
-        "text_outputs": "Text vinyl JSON",
-        "text_outputs_hint": "JSON created on this tab. Add files manually or send a selection to Import Final when ready.",
+        "text_outputs": "Text designs",
+        "text_outputs_hint": "Designs from this tab. Add files manually or continue to Import when ready.",
         "text_reference_preview": "Reference image preview",
         "text_json_preview": "Generated JSON preview",
         "text_add_json": "Add JSON",
         "text_remove_json": "Remove selected",
-        "text_send_to_import": "Add to Import Final",
+        "text_send_to_import": "Continue to Import → Text",
         "text_open_vinyl_folder": "Open text-vinyl folder",
         "text_script_universal": "Universal (Latin)",
         "text_script_japanese": "Japanese",
@@ -353,11 +354,12 @@ TEXT = {
         "text_color": "Color",
         "text_color_hint": "Edit hex or RGB; alpha 0–255 (255 = opaque). Forza H/S/B matches Bang's converter.",
         "text_color_invalid": "Color values must be valid hex or 0–255 channels.",
-        "text_coverage_ok": "All CJK characters are supported by the selected font.",
-        "text_coverage_ok_korean": "Korean and other CJK characters are supported by the selected font.",
+        "text_coverage_ok": "All characters in your text are supported by the selected font.",
+        "text_coverage_ok_korean": "Korean and other characters in your text are supported by the selected font.",
         "text_coverage_missing": "Missing {count} glyph(s) in selected font: {chars}",
         "text_coverage_missing_korean": "Korean needs a [KR] font (e.g. Malgun Gothic). Missing {count} glyph(s): {chars}",
         "text_coverage_suggest_kr": "Korean detected — select a [KR] font such as {font}.",
+        "text_coverage_suggest_font": "Try {font}.",
         "text_char_library": "Mandarin character library (GB2312 hanzi)",
         "text_char_library_latin": "Latin extended & symbols",
         "text_char_library_hiragana": "Hiragana",
@@ -385,31 +387,109 @@ TEXT = {
         "text_log_no_fonts": "No fonts found. Use Browse on each tab to pick a .ttf/.ttc/.otf file.",
         "text_log_enter_text": "Enter text to generate.",
         "text_log_choose_trace_image": "Choose a reference image to trace.",
-        "text_log_no_json_to_send": "No text vinyl JSON to send to Import Final.",
-        "text_log_json_already_import": "Selected JSON file(s) are already on the Import Final list.",
-        "text_log_added_json_import": "Added {count} JSON file(s) to Import Final.",
+        "text_log_no_json_to_send": "No text designs to send to Import.",
+        "text_log_json_already_import": "Selected design file(s) are already on Import → Text.",
+        "text_log_added_json_import": "Added {count} design(s) to Import → Text.",
+        "pixel_tab": "Pixel art",
+        "pixel_tab_hint": "Convert PNG, JPEG, or rect-based SVG into pixel art designs, or draw sprites in the built-in editor. Continue to Import when ready.",
+        "pixel_credit_endarz": "Heavily modified from endarz's SVGtoforza-painterJSON (github.com/endarz/SVGtoforza-painterJSON).",
+        "pixel_png_size_hint": "For PNG/WebP imports, 512×512 (or smaller) is recommended. The importer accepts up to 512px per side.",
+        "pixel_subtab_file": "From file",
+        "pixel_subtab_editor": "Editor",
+        "pixel_subtab_preview": "Preview",
+        "pixel_preview_hint": "Select a JSON from the Pixel art JSON list below to inspect the art and layer statistics.",
+        "pixel_stats_title": "Art information",
+        "pixel_stats_none": "Select a generated JSON to view statistics.",
+        "pixel_stats_filled": "Filled pixels: {count}",
+        "pixel_stats_layers": "Merged vinyl layers: {count} ({budget})",
+        "pixel_stats_canvas": "Canvas size: {width} × {height}",
+        "pixel_stats_colors": "Colors used: {count}",
+        "pixel_stats_color_entry": "#{hex} — {count} px",
+        "pixel_stats_preview_note": "Note: JSON previews can look dotted or sparse when drawn from merged vinyl shapes instead of the original pixel grid (common with imported JSON). Converting in this tab shows the most accurate preview.",
+        "pixel_file_source": "Source image or SVG",
+        "pixel_browse_file": "Browse",
+        "pixel_convert_options": "Conversion options",
+        "pixel_merge_mode": "Rectangle merge",
+        "pixel_max_colors": "Max colors (0 = keep all)",
+        "pixel_alpha_threshold": "Alpha threshold",
+        "pixel_target_width": "Target width (optional)",
+        "pixel_target_height": "Target height (optional)",
+        "pixel_color_tolerance": "Background match tolerance",
+        "pixel_use_jpeg_background": "Treat color as transparent (JPEG)",
+        "pixel_file_hint": "PNG/WebP with transparency works best at 512×512 or smaller. SVG must use filled <rect> elements (Aseprite-style or GLORP Lego). Use target size to downscale large art.",
+        "pixel_convert_file": "Convert to handmade JSON",
+        "pixel_layer_estimate": "Layer estimate",
+        "pixel_layer_estimate_value": "{message}",
+        "pixel_layer_estimate_unknown": "Layer estimate unavailable",
+        "pixel_editor_tools": "Editor tools",
+        "pixel_canvas_width": "Width",
+        "pixel_canvas_height": "Height",
+        "pixel_resize_canvas": "Resize canvas",
+        "pixel_tool_pencil": "Pencil",
+        "pixel_tool_eraser": "Eraser",
+        "pixel_tool_fill": "Fill",
+        "pixel_import_png_editor": "Import image",
+        "pixel_clear_canvas": "Clear canvas",
+        "pixel_cell_zoom": "Cell zoom",
+        "pixel_apply_zoom": "Apply zoom",
+        "pixel_editor_canvas": "Canvas",
+        "pixel_generate_editor": "Generate handmade JSON",
+        "pixel_outputs": "Pixel art designs",
+        "pixel_outputs_hint": "Designs from this tab. Add files manually or continue to Import when ready.",
+        "pixel_source_preview": "Source preview",
+        "pixel_json_preview": "JSON preview",
+        "pixel_add_json": "Add JSON",
+        "pixel_remove_json": "Remove selected",
+        "pixel_send_to_import": "Continue to Import → Pixel art",
+        "pixel_open_folder": "Open pixel-art folder",
+        "pixel_generating": "Building pixel art JSON...",
+        "pixel_done": "Pixel art JSON ready ({layers} layers): {path}",
+        "pixel_failed": "Pixel art conversion failed",
+        "pixel_failed_detail": "Pixel art conversion failed: {error}",
+        "pixel_dialog_open_file": "Open pixel art source",
+        "pixel_dialog_add_json": "Add handmade JSON",
+        "pixel_file_filter": "Images and SVG",
+        "pixel_log_choose_file": "Choose a PNG, JPEG, or SVG file to convert.",
+        "pixel_log_missing_file": "The selected source file does not exist.",
+        "pixel_log_oversized_source": "Source is larger than 512px on one side — use target width/height to downscale for best results.",
+        "pixel_log_empty_canvas": "Draw at least one pixel before generating JSON.",
+        "pixel_log_no_json_to_send": "No pixel art JSON is available to send.",
+        "pixel_log_added_handmade": "Added {count} design(s) to Import → Pixel art.",
+        "pixel_log_json_already_handmade": "Selected design file(s) are already on Import → Pixel art.",
+        "pixel_invalid_canvas_size": "Canvas width and height must be positive integers.",
+        "pixel_editor_size_limit": "Editor canvas cannot exceed {limit}×{limit} pixels.",
+        "pixel_resize_confirm": "Resize will clear the current canvas. Continue?",
+        "pixel_clear_confirm": "Clear all pixels from the canvas?",
         "text_dialog_select_font": "Select font file",
         "text_dialog_select_reference_image": "Select text reference image",
         "text_dialog_add_json": "Add text vinyl JSON",
         "text_template_hint_sphere": "Use an ungrouped sphere template in FH6 (ellipse / sphere layers).",
         "text_template_hint_rectangle": "Use an ungrouped rectangle template in FH6 when possible (fewer layers).",
-        "import_final_tab": "Import Final JSON",
-        "import_final_tab_hint": "Import finalized geometry JSON from this app (rectangles and rotated ellipses). Pick a generated run folder or add JSON files directly, then import into your ungrouped FH6 template.",
-        "import_final_runs": "Generated runs",
-        "import_final_refresh_runs": "Refresh runs",
-        "import_final_run_files": "JSON in selected run",
-        "import_final_use_best": "Use best safe final (highest layer count in run)",
-        "import_final_pick_best": "Select best final",
-        "import_final_import": "Import final JSON into FH6",
-        "import_handmade_tab": "Import Handmade JSON",
-        "handmade_tab": "Handmade JSON",
-        "handmade_tab_hint": "Import user-made FH6 JSON that contains real FH6 shape type codes (not generated rectangles/ellipses). After import, save and reload the vinyl group in FH6 to refresh display.",
-        "export_game_tab": "Export Game JSON",
-        "export_game_tab_hint": "Export the open vinyl group from FH6 to a handmade/type-code JSON file. Use the same game connection and template layer count as import.",
-        "export_game_json": "Export open FH6 group to JSON",
+        "import_photo_tab": "Import photo",
+        "import_photo_tab_hint": "Import designs generated from photos. Pick a past generation or add a design file, then import into your ungrouped FH6 template.",
+        "import_photo_runs": "Past generations",
+        "import_photo_refresh_runs": "Refresh list",
+        "import_photo_run_files": "Designs in selected generation",
+        "import_photo_use_best": "Auto-select best version (most layers)",
+        "import_photo_pick_best": "Select best version",
+        "import_photo_import": "Import into FH6",
+        "import_text_tab": "Import text",
+        "import_text_tab_hint": "Import text vinyl designs from Create → Text. Add files or continue from the Text tab, then import into your ungrouped FH6 template.",
+        "import_text_designs": "Text designs",
+        "import_text_import": "Import into FH6",
+        "import_text_open_folder": "Open text folder",
+        "import_pixel_tab": "Import pixel art",
+        "import_pixel_tab_hint": "Import pixel art with FH6 shape layers (squares, circles, etc.). After import, save and reload the vinyl group in FH6.",
+        "import_pixel_choose_json": "Add design file",
+        "import_pixel_import": "Import into FH6",
+        "import_pixel_status_none": "Select a pixel art design to inspect supported shapes.",
+        "import_pixel_status_counts": "Shapes: total {total} · supported {supported} · unsupported {unsupported}",
+        "export_game_tab": "Save from game",
+        "export_game_tab_hint": "Save the open vinyl group from FH6 as a design file. Use the same game connection and template layer count as import.",
+        "export_game_json": "Save open FH6 group",
         "export_open_folder": "Open export folder",
-        "handmade_choose_json": "Choose handmade JSON",
-        "handmade_import": "Import handmade JSON into FH6",
+        "handmade_choose_json": "Add design file",
+        "handmade_import": "Import into FH6",
         "handmade_export": "Export open FH6 group to JSON",
         "handmade_status_none": "Select a handmade JSON to inspect supported shapes.",
         "handmade_status_counts": "Shapes: total {total} · supported {supported} · unsupported {unsupported}",
@@ -581,16 +661,16 @@ TEXT = {
         "preview_image_already_on_generate": "Already on Generate image list: {name}",
         "generate_step_quality": "Step 2 - Choose Quality",
         "generate_step_quality_hint": "Fast profiles are quicker. Slow profiles use more GPU time and usually look cleaner.",
-        "preset_badge_legend": "▁▇ speed · ▁▇ detail · ▁▇ GPU · ❄ cool · ⚡ fastest · ⏩ fast · ★ default · ⚠ extreme",
+        "preset_badge_legend": "▁▇ speed · ▁▇ detail · ▁▇ GPU · 🍃 cool · ⚡ fastest · ⏩ fast · ★ default · ⚠ extreme",
         "eco_preset_warning": "Experimental eco preset: lower GPU load and temperature, not the same quality as Slow or Maximum Quality. Optional cooldown below helps between queued images.",
         "eco_gpu_cooldown": "Experimental GPU cooldown between images",
         "eco_gpu_cooldown_hint": "After each image in a batch, waits until GPU is at or below 75°C when MSI Afterburner is running; otherwise pauses 30s. Install and keep MSI Afterburner open for temperature-aware cooldown.",
         "resource_afterburner_recommend": "Install and run MSI Afterburner for CPU/GPU temperature readouts (msi.com/Landing/afterburner). Eco GPU cooldown also uses it when enabled.",
         "eco_preset_confirm": "You selected the experimental eco / cool GPU preset.\n\nIt uses fewer random samples and a lower resolution than slow presets, so results may look softer. It does not guarantee a maximum GPU temperature.\n\nContinue with this preset?",
         "eco_preset_active": "Experimental eco preset active: lower GPU settings than slow profiles.",
-        "tailored_preset_warning": "Experimental tailored preset (opt-in): built from Image Preview complexity. Normal is still the recommended default for most runs — use tailored when you want a per-image cap after preview.",
-        "tailored_preset_confirm": "You selected the experimental tailored preset.\n\nIt is generated from a quick image analysis and may not match final JSON layer counts. Results vary with filter choice and image content.\n\nContinue with this preset?",
-        "tailored_preset_active": "Experimental tailored preset active for the current analyzed image.",
+        "tailored_preset_warning": "Tailored preset (opt-in): built from Image Preview complexity. Normal is still the recommended default for most runs — use tailored when you want a per-image cap after preview.",
+        "tailored_preset_confirm": "You selected the tailored preset.\n\nIt is generated from a quick image analysis and may not match final JSON layer counts. Results vary with filter choice and image content.\n\nContinue with this preset?",
+        "tailored_preset_active": "Tailored preset active for the current analyzed image.",
         "tailored_preset_updated": "Tailored preset ready for {name} (est. ~{estimate}, cap {cap} layers) — select slot 0 when you want it; Normal stays the default.",
         "preview_estimate_uncapped": "~{raw} complexity est. (preset allows up to {cap})",
         "eco_cooldown_waiting": "Experimental GPU cooldown: GPU {temp}°C — waiting until ≤ {target}°C before the next image…",
@@ -610,7 +690,7 @@ TEXT = {
         "logs": "Logs",
         "export_logs": "Export detailed log",
         "progress": "Progress",
-        "json_files": "Geometry JSON files",
+        "json_files": "Design files",
         "add_json": "Add JSON",
         "remove_json": "Remove selected JSON",
         "use_outputs": "Use generated JSON",
@@ -618,14 +698,14 @@ TEXT = {
         "step_game_hint": "Start FH6, open Vinyl Group Editor, load an ungrouped sphere template, then refresh the process list.",
         "step_template": "Step 2 - Template",
         "step_template_hint": "Enter the exact layer count shown by your current in-game template.",
-        "step_json": "Step 3 - JSON",
-        "step_json_hint": "Use the JSON generated by this app, or add a geometry JSON manually.",
+        "step_json": "Step 3 - Your design",
+        "step_json_hint": "Add a design from Create, or choose one from the list below.",
         "step_import": "Step 4 - Import",
         "step_import_hint": "Click import once. The app will find the FH6 layer table safely, then write the design.",
         "advanced_options": "Advanced options",
         "show_advanced": "Show advanced",
         "hide_advanced": "Hide advanced",
-        "import_preview": "Selected JSON preview",
+        "import_preview": "Design preview",
         "game_profile": "Game profile",
         "pid": "PID",
         "layer_count": "Template layer count",
@@ -641,11 +721,12 @@ TEXT = {
         "handmade_section_hint": "For JSON with real FH6 shape type codes (not only generated rectangles/ellipses). Export reads the open vinyl group; import writes save-safe layer fields. Save and reload the vinyl group in FH6 after import.",
         "export_typecode_json": "Export open group to JSON",
         "typecode_trim_after_import": "Trim vinyl group to imported layer count after import",
-        "typecode_allow_unknown": "Allow experimental shape codes (advanced)",
+        "typecode_allow_unknown": "Allow Experimental Shape Codes",
+        "typecode_allow_unknown_hint": "Pixel art from this app is squares only — leave this off for that. This tab uses the FH6 type-code importer (including exported or external handmade JSON), not the geometry importer on Import Photo or Import Text. Enable only when your file contains experimental or unsupported shape codes.",
         "typecode_export_done": "Exported {count} layer(s) to {path}",
         "typecode_export_failed": "Export failed: {error}",
         "typecode_import_mode": "Using handmade/universal importer for {name}",
-        "typecode_import_done": "Handmade import finished: {name}",
+        "typecode_import_done": "Pixel art import finished: {name}",
         "typecode_trim_done": "Trimmed vinyl group count to {count}",
         "typecode_trim_failed": "Trim failed: {error}",
         "typecode_missing_group": "Could not resolve FH6 group address for trim/export. Re-run auto-locate.",
@@ -700,7 +781,7 @@ TEXT = {
         "stopping_generation": "Stopping current generation...",
         "generation_stopped": "Generation stopped.",
         "generator_recycled_layers": "Generator recycled fully covered layers after {max_layer}/{total}; continuing. This is normal and is not a full restart.",
-        "existing_checkpoints_found": "Found existing checkpoint JSON for {image}: {count} file(s). Added the best one to Import.",
+        "existing_checkpoints_found": "Found saved progress for {image}: {count} file(s). Added the best one to Import → Photo.",
         "checkpoint_available_after_failure": "Saved checkpoint is available despite the failed/stopped run: {path}",
         "imported_presets": "Imported {count} preset file(s).",
         "saved_preset": "Saved preset: {path}",
@@ -790,7 +871,7 @@ TEXT = {
         "resource_temp_returned_normal": "Resource monitor: temperatures returned to normal (peak {temp}°C).",
         "log_no_run_folder_selected": "No generated run folder selected.",
         "log_no_json_in_run": "No JSON found in {path}",
-        "log_selected_best_final": "Selected best final: {name}",
+        "log_selected_best_final": "Selected best version: {name}",
         "log_no_quality_profile": "No quality profile selected.",
         "log_save_preset_failed": "Failed to save preset: {error}",
         "log_clipboard_failed": "Clipboard copy failed: {error}",
@@ -815,8 +896,8 @@ TEXT = {
         "log_pid_layer_table_required": "PID, layer count, and table address are required.",
         "update_no_changelog": "No changelog section was available.",
         "startup_failed": "The app failed to start.{details}\n\n{name}: {error}",
-        "log_skipped_handmade_on_final": "Skipped handmade/type-code JSON on Final import tab: {name}",
-        "log_skipped_non_handmade": "Skipped non-handmade JSON: {name}",
+        "log_skipped_handmade_on_final": "Skipped pixel art design on photo/text import: {name}",
+        "log_skipped_non_handmade": "Skipped design that is not pixel art: {name}",
         "no_settings_profiles": "No settings profiles found.",
         "text_shape_rectangles": "Rectangles",
         "text_shape_squares": "Squares",
@@ -851,9 +932,8 @@ Notes
         "title": APP_SHORT_NAME,
         "subtitle": "将图像转换为 .JSON 文件，并导入 Forza Horizon 贴膜编辑器。",
         "header_kicker": "Forza Painter - 贴膜导入/导出套件",
-        "header_build_prefix": "构建版本 - {version} (",
-        "header_build_experimental": "实验版",
-        "header_build_suffix": "); {date}",
+        "header_build_prefix": "构建版本 - {version}；",
+        "header_build_suffix": "{date}",
         "language": "语言",
         "appearance": "外观",
         "layout_resize_hint": "拖动分隔条可调整面板大小，设置会自动保存。",
@@ -873,13 +953,13 @@ Notes
             "向下滚动查看「生成选项」。\n"
             "本工具可使用本机任意字体；若未自动找到字体，请在本标签页上传字体文件。"
         ),
-        "text_outputs": "文字贴膜 JSON",
-        "text_outputs_hint": "本标签页生成的 JSON。可手动添加文件，或选中后发送到「导入 Final JSON」。",
+        "text_outputs": "文字设计",
+        "text_outputs_hint": "本标签页生成的设计文件。可手动添加，或就绪后继续到「导入」。",
         "text_reference_preview": "参考图预览",
         "text_json_preview": "生成的 JSON 预览",
         "text_add_json": "添加 JSON",
         "text_remove_json": "移除选中",
-        "text_send_to_import": "添加到 Import Final",
+        "text_send_to_import": "继续到导入 → 文字",
         "text_open_vinyl_folder": "打开 text-vinyl 文件夹",
         "text_script_universal": "通用（拉丁）",
         "text_script_japanese": "日文",
@@ -904,11 +984,12 @@ Notes
         "text_color": "颜色",
         "text_color_hint": "可编辑 Hex 或 RGB；透明度 0–255（255 = 不透明）。Forza H/S/B 与 Bang 转换器一致。",
         "text_color_invalid": "颜色须为有效 Hex 或 0–255 数值。",
-        "text_coverage_ok": "当前字体支持输入中的所有 CJK 字符。",
-        "text_coverage_ok_korean": "当前字体支持输入中的韩文及其他 CJK 字符。",
+        "text_coverage_ok": "当前字体支持输入中的所有字符。",
+        "text_coverage_ok_korean": "当前字体支持输入中的韩文及其他字符。",
         "text_coverage_missing": "当前字体缺少 {count} 个字形：{chars}",
         "text_coverage_missing_korean": "韩文请选用 [KR] 字体（如 Malgun Gothic）。缺少 {count} 个字形：{chars}",
         "text_coverage_suggest_kr": "检测到韩文 — 请选择 [KR] 字体，例如 {font}。",
+        "text_coverage_suggest_font": "可尝试 {font}。",
         "text_char_library": "简体字库（GB2312）",
         "text_char_library_latin": "拉丁扩展与符号",
         "text_char_library_hiragana": "平假名",
@@ -936,9 +1017,79 @@ Notes
         "text_log_no_fonts": "未找到字体。请在各标签页使用「浏览」选择 .ttf/.ttc/.otf 文件。",
         "text_log_enter_text": "请输入要生成的文字。",
         "text_log_choose_trace_image": "请选择要描摹的参考图片。",
-        "text_log_no_json_to_send": "没有可发送到 Import Final 的文字贴膜 JSON。",
-        "text_log_json_already_import": "所选 JSON 文件已在 Import Final 列表中。",
-        "text_log_added_json_import": "已将 {count} 个 JSON 文件添加到 Import Final。",
+        "text_log_no_json_to_send": "没有可发送到导入的文字设计。",
+        "text_log_json_already_import": "所选设计文件已在「导入 → 文字」列表中。",
+        "text_log_added_json_import": "已将 {count} 个设计文件添加到「导入 → 文字」。",
+        "pixel_tab": "像素艺术",
+        "pixel_tab_hint": "将 PNG、JPEG 或 rect 型 SVG 转为像素艺术设计，或使用内置编辑器绘制。就绪后继续到「导入」。",
+        "pixel_credit_endarz": "在 endarz 的 SVGtoforza-painterJSON 基础上大幅修改（github.com/endarz/SVGtoforza-painterJSON）。",
+        "pixel_png_size_hint": "PNG/WebP 导入建议 512×512 或更小。每边最大 512 像素。",
+        "pixel_subtab_file": "从文件",
+        "pixel_subtab_editor": "编辑器",
+        "pixel_subtab_preview": "预览",
+        "pixel_preview_hint": "从下方像素艺术 JSON 列表中选择文件以查看图像与图层统计。",
+        "pixel_stats_title": "图像信息",
+        "pixel_stats_none": "请选择已生成的 JSON 以查看统计。",
+        "pixel_stats_filled": "填充像素：{count}",
+        "pixel_stats_layers": "合并贴膜层：{count}（{budget}）",
+        "pixel_stats_canvas": "画布尺寸：{width} × {height}",
+        "pixel_stats_colors": "使用颜色数：{count}",
+        "pixel_stats_color_entry": "#{hex} — {count} px",
+        "pixel_stats_preview_note": "说明：若 JSON 预览由合并贴膜层绘制而非原始像素网格，可能看起来稀疏或呈点状（常见于导入的 JSON）。在本标签页转换可获得最准确的预览。",
+        "pixel_file_source": "源图像或 SVG",
+        "pixel_browse_file": "浏览",
+        "pixel_convert_options": "转换选项",
+        "pixel_merge_mode": "矩形合并",
+        "pixel_max_colors": "最大颜色数（0 = 不限制）",
+        "pixel_alpha_threshold": "透明度阈值",
+        "pixel_target_width": "目标宽度（可选）",
+        "pixel_target_height": "目标高度（可选）",
+        "pixel_color_tolerance": "背景色容差",
+        "pixel_use_jpeg_background": "将颜色视为透明（JPEG）",
+        "pixel_file_hint": "带透明通道的 PNG/WebP 建议 512×512 或更小。SVG 须为填充的 <rect>（Aseprite 或 GLORP Lego 导出）。可用目标尺寸缩小大图。",
+        "pixel_convert_file": "转换为手工 JSON",
+        "pixel_layer_estimate": "图层预估",
+        "pixel_layer_estimate_value": "{message}",
+        "pixel_layer_estimate_unknown": "无法预估图层数",
+        "pixel_editor_tools": "编辑工具",
+        "pixel_canvas_width": "宽度",
+        "pixel_canvas_height": "高度",
+        "pixel_resize_canvas": "调整画布",
+        "pixel_tool_pencil": "铅笔",
+        "pixel_tool_eraser": "橡皮",
+        "pixel_tool_fill": "填充",
+        "pixel_import_png_editor": "导入图片",
+        "pixel_clear_canvas": "清空画布",
+        "pixel_cell_zoom": "单元格缩放",
+        "pixel_apply_zoom": "应用缩放",
+        "pixel_editor_canvas": "画布",
+        "pixel_generate_editor": "生成手工 JSON",
+        "pixel_outputs": "像素艺术设计",
+        "pixel_outputs_hint": "本标签页生成的设计文件。可手动添加，或就绪后继续到「导入」。",
+        "pixel_source_preview": "源预览",
+        "pixel_json_preview": "JSON 预览",
+        "pixel_add_json": "添加 JSON",
+        "pixel_remove_json": "移除选中",
+        "pixel_send_to_import": "继续到导入 → 像素艺术",
+        "pixel_open_folder": "打开 pixel-art 文件夹",
+        "pixel_generating": "正在生成像素艺术 JSON...",
+        "pixel_done": "像素艺术 JSON 已就绪（{layers} 层）：{path}",
+        "pixel_failed": "像素艺术转换失败",
+        "pixel_failed_detail": "像素艺术转换失败：{error}",
+        "pixel_dialog_open_file": "打开像素艺术源文件",
+        "pixel_dialog_add_json": "添加手工 JSON",
+        "pixel_file_filter": "图像与 SVG",
+        "pixel_log_choose_file": "请选择要转换的 PNG、JPEG 或 SVG 文件。",
+        "pixel_log_missing_file": "所选源文件不存在。",
+        "pixel_log_oversized_source": "源图有一边超过 512 像素 — 请使用目标宽度/高度缩小以获得最佳效果。",
+        "pixel_log_empty_canvas": "请至少绘制一个像素后再生成 JSON。",
+        "pixel_log_no_json_to_send": "没有可发送的像素艺术 JSON。",
+        "pixel_log_added_handmade": "已将 {count} 个设计文件添加到「导入 → 像素艺术」。",
+        "pixel_log_json_already_handmade": "所选设计文件已在「导入 → 像素艺术」列表中。",
+        "pixel_invalid_canvas_size": "画布宽高须为正整数。",
+        "pixel_editor_size_limit": "编辑器画布不能超过 {limit}×{limit} 像素。",
+        "pixel_resize_confirm": "调整大小将清空当前画布。是否继续？",
+        "pixel_clear_confirm": "清空画布上的所有像素？",
         "text_dialog_select_font": "选择字体文件",
         "text_dialog_select_reference_image": "选择文字参考图片",
         "text_dialog_add_json": "添加文字贴膜 JSON",
@@ -962,20 +1113,28 @@ Notes
         "safety_pick_other_language": "其他语言…",
         "first_run_title": "欢迎使用 Forza Painter FH6",
         "first_run_continue": "知道了",
-        "import_final_tab": "导入 Final JSON",
-        "import_final_tab_hint": "导入本应用生成的最终几何 JSON（矩形与旋转椭圆）。选择生成运行文件夹或直接添加 JSON，然后导入到未分组的 FH6 模板。",
-        "import_final_runs": "生成运行",
-        "import_final_refresh_runs": "刷新运行列表",
-        "import_final_run_files": "所选运行中的 JSON",
-        "import_final_use_best": "使用最佳安全 final（运行内最高图层数）",
-        "import_final_pick_best": "选择最佳 final",
-        "import_final_import": "将 Final JSON 导入 FH6",
-        "import_handmade_tab": "导入手工 JSON",
-        "handmade_tab": "手工 JSON",
-        "handmade_tab_hint": "导入包含真实 FH6 形状类型码的用户 JSON（非生成的矩形/椭圆）。导入后请在 FH6 中保存并重新加载贴膜组。",
-        "export_game_tab": "导出游戏 JSON",
-        "export_game_tab_hint": "将 FH6 中当前打开的贴膜组导出为手工/类型码 JSON。使用与导入相同的游戏连接和模板图层数。",
-        "export_game_json": "将打开的 FH6 组导出为 JSON",
+        "import_photo_tab": "导入照片",
+        "import_photo_tab_hint": "导入由照片生成的设计。选择历史生成记录或添加设计文件，然后导入到未分组的 FH6 模板。",
+        "import_photo_runs": "历史生成",
+        "import_photo_refresh_runs": "刷新列表",
+        "import_photo_run_files": "所选生成中的设计",
+        "import_photo_use_best": "自动选择最佳版本（图层最多）",
+        "import_photo_pick_best": "选择最佳版本",
+        "import_photo_import": "导入到 FH6",
+        "import_text_tab": "导入文字",
+        "import_text_tab_hint": "导入「创建 → 文字」标签页生成的文字贴膜设计。添加文件或从文字标签页继续，然后导入到未分组的 FH6 模板。",
+        "import_text_designs": "文字设计",
+        "import_text_import": "导入到 FH6",
+        "import_text_open_folder": "打开文字文件夹",
+        "import_pixel_tab": "导入像素艺术",
+        "import_pixel_tab_hint": "导入带 FH6 形状图层的像素艺术（方块、圆形等）。导入后请在 FH6 中保存并重新加载贴膜组。",
+        "import_pixel_choose_json": "添加设计文件",
+        "import_pixel_import": "导入到 FH6",
+        "import_pixel_status_none": "选择像素艺术设计以查看支持的形状。",
+        "import_pixel_status_counts": "形状：共 {total} · 支持 {supported} · 不支持 {unsupported}",
+        "export_game_tab": "从游戏保存",
+        "export_game_tab_hint": "将 FH6 中当前打开的贴膜组保存为设计文件。使用与导入相同的游戏连接和模板图层数。",
+        "export_game_json": "保存当前 FH6 组",
         "export_open_folder": "打开导出文件夹",
         "handmade_choose_json": "选择手工 JSON",
         "handmade_import": "将手工 JSON 导入 FH6",
@@ -1149,16 +1308,16 @@ Notes
         "preview_image_already_on_generate": "已在生成图片列表中：{name}",
         "generate_step_quality": "第 2 步 - 选择品质",
         "generate_step_quality_hint": "快速配置耗时短；慢速配置会占用更多 GPU 时间，通常画面更干净。",
-        "preset_badge_legend": "▁▇ 速度 · ▁▇ 细节 · ▁▇ GPU · ❄ 低负载 · ⚡ 最快 · ⏩ 快速 · ★ 默认 · ⚠ 极限",
+        "preset_badge_legend": "▁▇ 速度 · ▁▇ 细节 · ▁▇ GPU · 🍃 低负载 · ⚡ 最快 · ⏩ 快速 · ★ 默认 · ⚠ 极限",
         "eco_preset_warning": "实验性 eco 预设：GPU 负载和温度更低，画质不如 Slow 或 Maximum Quality。可在下方启用可选冷却（多图队列时生效）。",
         "eco_gpu_cooldown": "实验性：多图之间 GPU 冷却",
         "eco_gpu_cooldown_hint": "每张图完成后等待 GPU ≤75°C（MSI Afterburner 运行时）；否则固定暂停 30 秒。请安装并保持 MSI Afterburner 运行以启用温度冷却。",
         "resource_afterburner_recommend": "请安装并运行 MSI Afterburner 以显示 CPU/GPU 温度（msi.com/Landing/afterburner）。启用 Eco GPU 冷却时也会使用它。",
         "eco_preset_confirm": "您选择了实验性 eco / 低 GPU 负载预设。\n\n该预设的随机样本和分辨率低于 slow，效果可能更软，且不保证 GPU 最高温度。\n\n是否继续？",
         "eco_preset_active": "实验性 eco 预设已启用：GPU 参数低于 slow 配置。",
-        "tailored_preset_warning": "实验性量身定制预设（可选）：由图像预览复杂度生成。大多数情况仍推荐 Normal 作为默认；需要按图上限时再选 slot 0。",
-        "tailored_preset_confirm": "您选择了实验性量身定制预设。\n\n该预设由快速图像分析生成，可能与最终 JSON 层数不一致。结果会随滤镜与图像内容变化。\n\n是否继续？",
-        "tailored_preset_active": "当前分析图像已启用实验性量身定制预设。",
+        "tailored_preset_warning": "量身定制预设（可选）：由图像预览复杂度生成。大多数情况仍推荐 Normal 作为默认；需要按图上限时再选 slot 0。",
+        "tailored_preset_confirm": "您选择了量身定制预设。\n\n该预设由快速图像分析生成，可能与最终 JSON 层数不一致。结果会随滤镜与图像内容变化。\n\n是否继续？",
+        "tailored_preset_active": "当前分析图像已启用量身定制预设。",
         "tailored_preset_updated": "已为 {name} 准备好量身定制预设（预估 ~{estimate}，上限 {cap} 层）— 需要时选 slot 0；默认仍为 Normal。",
         "preview_estimate_uncapped": "复杂度预估 ~{raw}（预设上限 {cap}）",
         "eco_cooldown_waiting": "实验性 GPU 冷却：当前 {temp}°C，等待降至 ≤ {target}°C 后再处理下一张…",
@@ -1210,6 +1369,7 @@ Notes
         "export_typecode_json": "导出当前组为 JSON",
         "typecode_trim_after_import": "导入后将贴膜组层数裁剪为实际导入层数",
         "typecode_allow_unknown": "允许实验性形状码（高级）",
+        "typecode_allow_unknown_hint": "本应用生成的像素艺术仅为方块，通常请保持关闭。此标签页使用 FH6 类型码导入器（含导出或外部手工 JSON），与「导入照片/导入文字」的几何导入器不同。仅当文件含实验性或不受支持的形状码时再启用。",
         "typecode_export_done": "已导出 {count} 层到 {path}",
         "typecode_export_failed": "导出失败：{error}",
         "typecode_import_mode": "对手工/通用 JSON 使用导入器：{name}",
@@ -1405,9 +1565,8 @@ Notes
         "title": APP_SHORT_NAME,
         "subtitle": "이미지를 .JSON 파일로 변환하여 Forza Horizon 비닐 편집기로 가져옵니다.",
         "header_kicker": "Forza Painter - 비닐 가져오기/보내기 도구",
-        "header_build_prefix": "빌드 버전 - {version} (",
-        "header_build_experimental": "실험판",
-        "header_build_suffix": "); {date}",
+        "header_build_prefix": "빌드 버전 - {version}; ",
+        "header_build_suffix": "{date}",
         "language": "언어",
         "process": "게임 프로세스",
         "refresh": "새로고침",
@@ -1430,20 +1589,28 @@ Notes
         "first_run_title": "Forza Painter FH6에 오신 것을 환영합니다",
         "first_run_continue": "확인",
         "generate_tab": "JSON 생성",
-        "import_final_tab": "Final JSON 가져오기",
-        "import_final_tab_hint": "이 앱에서 생성한 최종 geometry JSON(사각형·회전 타원)을 가져옵니다. 생성 실행 폴더를 고르거나 JSON을 직접 추가한 뒤 그룹 해제된 FH6 템플릿에 가져옵니다.",
-        "import_final_runs": "생성 실행",
-        "import_final_refresh_runs": "실행 목록 새로고침",
-        "import_final_run_files": "선택한 실행의 JSON",
-        "import_final_use_best": "최적 safe final 사용(실행 내 최대 레이어)",
-        "import_final_pick_best": "최적 final 선택",
-        "import_final_import": "Final JSON을 FH6에 가져오기",
-        "import_handmade_tab": "수작업 JSON 가져오기",
-        "handmade_tab": "수작업 JSON",
-        "handmade_tab_hint": "실제 FH6 도형 타입 코드가 있는 사용자 JSON을 가져옵니다(생성 사각형/타원 아님). 가져온 뒤 FH6에서 비닐 그룹을 저장하고 다시 불러오세요.",
-        "export_game_tab": "게임 JSON보내기",
-        "export_game_tab_hint": "FH6에서 열린 비닐 그룹을 수작업/타입코드 JSON으로보냅니다. 가져오기와 동일한 게임 연결 및 템플릿 레이어 수를 사용하세요.",
-        "export_game_json": "열린 FH6 그룹을 JSON으로보내기",
+        "import_photo_tab": "사진 가져오기",
+        "import_photo_tab_hint": "사진에서 만든 디자인을 가져옵니다. 이전 생성 기록을 고르거나 디자인 파일을 추가한 뒤, 그룹 해제된 FH6 템플릿에 가져옵니다.",
+        "import_photo_runs": "이전 생성",
+        "import_photo_refresh_runs": "목록 새로고침",
+        "import_photo_run_files": "선택한 생성의 디자인",
+        "import_photo_use_best": "최적 버전 자동 선택(레이어 최대)",
+        "import_photo_pick_best": "최적 버전 선택",
+        "import_photo_import": "FH6에 가져오기",
+        "import_text_tab": "텍스트 가져오기",
+        "import_text_tab_hint": "만들기 → 텍스트 탭에서 만든 텍스트 비닐 디자인을 가져옵니다. 파일을 추가하거나 텍스트 탭에서 계속한 뒤 FH6에 가져옵니다.",
+        "import_text_designs": "텍스트 디자인",
+        "import_text_import": "FH6에 가져오기",
+        "import_text_open_folder": "텍스트 폴더 열기",
+        "import_pixel_tab": "픽셀 아트 가져오기",
+        "import_pixel_tab_hint": "FH6 도형 레이어(사각형, 원 등)가 있는 픽셀 아트를 가져옵니다. 가져온 뒤 FH6에서 비닐 그룹을 저장하고 다시 불러오세요.",
+        "import_pixel_choose_json": "디자인 파일 추가",
+        "import_pixel_import": "FH6에 가져오기",
+        "import_pixel_status_none": "픽셀 아트 디자인을 선택하면 지원되는 도형을 확인할 수 있습니다.",
+        "import_pixel_status_counts": "도형: 전체 {total} · 지원 {supported} · 미지원 {unsupported}",
+        "export_game_tab": "게임에서 저장",
+        "export_game_tab_hint": "FH6에서 열린 비닐 그룹을 디자인 파일로 저장합니다. 가져오기와 동일한 게임 연결 및 템플릿 레이어 수를 사용하세요.",
+        "export_game_json": "열린 FH6 그룹 저장",
         "export_open_folder": "보내기 폴더 열기",
         "handmade_choose_json": "수작업 JSON 선택",
         "handmade_import": "수작업 JSON을 FH6로 가져오기",
@@ -1617,16 +1784,16 @@ Notes
         "preview_image_already_on_generate": "이미 생성 이미지 목록에 있음: {name}",
         "generate_step_quality": "2단계 - 품질 선택",
         "generate_step_quality_hint": "빠른 프로필은 시간이 적게 걸립니다. 느린 프로필은 GPU 시간을 더 쓰지만 보통 더 깔끔합니다.",
-        "preset_badge_legend": "▁▇ 속도 · ▁▇ 디테일 · ▁▇ GPU · ❄ 저부하 · ⚡ 최고속 · ⏩ 빠름 · ★ 기본 · ⚠ 극한",
+        "preset_badge_legend": "▁▇ 속도 · ▁▇ 디테일 · ▁▇ GPU · 🍃 저부하 · ⚡ 최고속 · ⏩ 빠름 · ★ 기본 · ⚠ 극한",
         "eco_preset_warning": "실험적 eco 프리셋: GPU 부하·온도는 낮지만 Slow 또는 Maximum Quality와 동일한 품질이 아닙니다. 아래 실험적 냉각 옵션이 대기열 이미지 사이에 도움이 됩니다.",
         "eco_gpu_cooldown": "실험적: 이미지 사이 GPU 냉각",
         "eco_gpu_cooldown_hint": "각 이미지 후 GPU가 75°C 이하일 때까지 대기(MSI Afterburner 실행 시); 그렇지 않으면 30초 고정. 온도 기반 냉각을 위해 MSI Afterburner를 설치하고 실행하세요.",
         "resource_afterburner_recommend": "CPU/GPU 온도 표시를 위해 MSI Afterburner를 설치하고 실행하세요(msi.com/Landing/afterburner). Eco GPU 냉각도 사용합니다.",
         "eco_preset_confirm": "실험적 eco / 저 GPU 부하 프리셋을 선택했습니다.\n\nslow보다 샘플·해상도가 낮아 결과가 더 부드러울 수 있으며 최대 GPU 온도를 보장하지 않습니다.\n\n계속할까요?",
         "eco_preset_active": "실험적 eco 프리셋 활성: slow보다 낮은 GPU 설정.",
-        "tailored_preset_warning": "실험적 맞춤 프리셋(선택): 미리보기 복잡도 기반. 대부분 Normal 권장 — 이미지별 상한이 필요할 때 slot 0.",
-        "tailored_preset_confirm": "실험적 맞춤 프리셋을 선택했습니다.\n\n빠른 이미지 분석으로 생성되며 최종 JSON 레이어 수와 일치하지 않을 수 있습니다.\n\n계속할까요?",
-        "tailored_preset_active": "분석된 이미지에 실험적 맞춤 프리셋이 활성화되었습니다.",
+        "tailored_preset_warning": "맞춤 프리셋(선택): 미리보기 복잡도 기반. 대부분 Normal 권장 — 이미지별 상한이 필요할 때 slot 0.",
+        "tailored_preset_confirm": "맞춤 프리셋을 선택했습니다.\n\n빠른 이미지 분석으로 생성되며 최종 JSON 레이어 수와 일치하지 않을 수 있습니다.\n\n계속할까요?",
+        "tailored_preset_active": "분석된 이미지에 맞춤 프리셋이 활성화되었습니다.",
         "tailored_preset_updated": "{name} 맞춤 프리셋 준비됨(추정 ~{estimate}, 상한 {cap}) — 필요 시 slot 0, 기본은 Normal.",
         "preview_estimate_uncapped": "복잡도 추정 ~{raw}(프리셋 상한 {cap})",
         "eco_cooldown_waiting": "실험적 GPU 냉각: GPU {temp}°C — 다음 이미지 전 {target}°C 이하까지 대기…",
@@ -1677,6 +1844,7 @@ Notes
         "export_typecode_json": "열린 그룹을 JSON으로 보내기",
         "typecode_trim_after_import": "가져온 뒤 비닐 그룹 레이어 수를 실제 가져온 수로 자르기",
         "typecode_allow_unknown": "실험적 도형 코드 허용(고급)",
+        "typecode_allow_unknown_hint": "앱에서 만든 픽셀 아트는 사각형만 사용하므로 보통 끄두면 됩니다. 이 탭은 FH6 타입 코드 가져오기(내보낸/외부 수작업 JSON 포함)를 사용하며, 사진/텍스트 가져오기의 기하 가져오기와 다릅니다. 실험적이거나 지원되지 않는 도형 코드가 있는 JSON일 때만 켜세요.",
         "typecode_export_done": "{count}개 레이어를 {path}에보냈습니다",
         "typecode_export_failed": "보내기 실패: {error}",
         "typecode_import_mode": "수작업/범용 가져오기 사용: {name}",
@@ -1860,7 +2028,7 @@ def ensure_dirs():
 
 
 def tr(lang, key):
-    return tr_text(TEXT, lang, key)
+    return mark_experimental_trademark(tr_text(TEXT, lang, key))
 
 
 def version_key(value):
@@ -2301,6 +2469,19 @@ def _rotated_rect_points(x, y, w, h, rot_deg, scale):
     return points
 
 
+def _pixel_art_typecode_json(path) -> bool:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    fmt = str(payload.get("format", "")).lower()
+    if "pixel_art" in fmt and "typecode" in fmt:
+        return True
+    return str(payload.get("coordinate_model", "")).lower() == "endarz_pixel_grid_v1"
+
+
 def _render_typecode_geometry_json_pillow(path, max_size=None):
     loaded = load_pillow()
     if not loaded:
@@ -2310,10 +2491,15 @@ def _render_typecode_geometry_json_pillow(path, max_size=None):
         shapes, skipped = load_typecode_shapes(path, allow_unknown_low_byte=True)
         if not shapes:
             return None
+        pixel_grid = _pixel_art_typecode_json(path)
         xs = [float(item["x"]) for item in shapes]
         ys = [float(item["y"]) for item in shapes]
-        sxs = [max(1.0, float(item["sx"])) for item in shapes]
-        sys_ = [max(1.0, float(item["sy"])) for item in shapes]
+        if pixel_grid:
+            sxs = [float(item["sx"]) for item in shapes]
+            sys_ = [float(item["sy"]) for item in shapes]
+        else:
+            sxs = [max(1.0, float(item["sx"])) for item in shapes]
+            sys_ = [max(1.0, float(item["sy"])) for item in shapes]
         min_x = min(x - sx / 2.0 for x, sx in zip(xs, sxs))
         max_x = max(x + sx / 2.0 for x, sx in zip(xs, sxs))
         min_y = min(y - sy / 2.0 for y, sy in zip(ys, sys_))
@@ -2337,16 +2523,44 @@ def _render_typecode_geometry_json_pillow(path, max_size=None):
             code = int(item.get("type_code", 0))
             x = (float(item["x"]) - min_x + pad) * scale
             y = (float(item["y"]) - min_y + pad) * scale
-            sx = max(1.0, float(item["sx"])) * scale
-            sy = max(1.0, float(item["sy"])) * scale
+            raw_sx = float(item["sx"])
+            raw_sy = float(item["sy"])
+            if pixel_grid:
+                sx = raw_sx * scale
+                sy = raw_sy * scale
+            else:
+                sx = max(1.0, raw_sx) * scale
+                sy = max(1.0, raw_sy) * scale
             rot = float(item.get("rotation", 0.0))
             color = tuple(int(v) for v in item.get("color", (255, 255, 255, 255))[:3])
             if code in (1048678, 1048712):
-                draw_preview_ellipse_pillow(preview, x, y, sx / max(scale, 1e-6), sy / max(scale, 1e-6), rot, color, scale)
+                draw_preview_ellipse_pillow(
+                    preview,
+                    x / max(scale, 1e-6),
+                    y / max(scale, 1e-6),
+                    raw_sx if pixel_grid else sx / max(scale, 1e-6),
+                    raw_sy if pixel_grid else sy / max(scale, 1e-6),
+                    rot,
+                    color,
+                    scale,
+                )
             elif code == 1048677:
-                side = min(sx, sy)
-                points = _rotated_rect_points(x / max(scale, 1e-6), y / max(scale, 1e-6), side / max(scale, 1e-6), side / max(scale, 1e-6), rot, scale)
-                draw.polygon(points, fill=color)
+                if pixel_grid and abs(rot) < 1e-6:
+                    draw.rectangle(
+                        (int(round(x - sx / 2.0)), int(round(y - sy / 2.0)), int(round(x + sx / 2.0)), int(round(y + sy / 2.0))),
+                        fill=color,
+                    )
+                else:
+                    side = min(sx, sy)
+                    points = _rotated_rect_points(
+                        x / max(scale, 1e-6),
+                        y / max(scale, 1e-6),
+                        side / max(scale, 1e-6),
+                        side / max(scale, 1e-6),
+                        rot,
+                        scale,
+                    )
+                    draw.polygon(points, fill=color)
             elif code == 1048679:
                 pts = [(0.0, -sy / 2.0), (sx / 2.0, sy / 2.0), (-sx / 2.0, sy / 2.0)]
                 theta = rot * (math.pi / 180.0)
@@ -2411,6 +2625,9 @@ class App:
         self._saw_permission_error = False
         self._admin_action_widgets: list[tuple] = []
         self.settings = load_settings()
+        from shared_color_palette import SharedColorPalette
+
+        self.shared_colors = SharedColorPalette()
         self.images = [Path(path) for path in initial_images if Path(path).exists()]
         self._last_generation_preprocess: dict[str, str] = {}
         self._preview_filter_cards: dict[str, dict] = {}
@@ -2420,7 +2637,9 @@ class App:
         self._preview_main_render_job: str | None = None
         self._preview_compute_running = False
         self._preprocess_mode_labels: dict[str, str] = {}
-        self.json_files = []
+        self.photo_json_files = []
+        self.text_import_json_files = []
+        self.pixel_json_files = []
         self.outputs = []
         self.processes = []
         self.photo = None
@@ -2458,6 +2677,7 @@ class App:
         self.use_best_safe_final = StringVar(value="1")
         self.inspect_table_value = StringVar()
         self.text_vinyl = TextVinylWorkspace(self)
+        self.pixel_art = PixelArtWorkspace(self)
         self._ui_prefs = load_ui_preferences()
         self.tools_workspace = ToolsWorkspace(self)
         self.file_management = FileManagementWorkspace(self)
@@ -2860,18 +3080,13 @@ class App:
         row = Frame(parent, bg=COLOR_BG)
         row._chrome_bg_locked = True
         base_font = ("Segoe UI", 9)
-        italic_font = ("Segoe UI", 9, "italic")
         prefix = Label(row, anchor="w", fg=COLOR_MUTED, bg=COLOR_BG, font=base_font)
         prefix._theme_role = "muted"
         prefix.pack(side=LEFT)
-        experimental = Label(row, anchor="w", fg=COLOR_MUTED, bg=COLOR_BG, font=italic_font)
-        experimental._theme_role = "muted"
-        experimental.pack(side=LEFT)
         suffix = Label(row, anchor="w", fg=COLOR_MUTED, bg=COLOR_BG, font=base_font)
         suffix._theme_role = "muted"
         suffix.pack(side=LEFT)
         self._header_version_prefix = prefix
-        self._header_version_experimental = experimental
         self._header_version_suffix = suffix
         self._refresh_header_version_row()
         return row
@@ -2884,7 +3099,6 @@ class App:
             self._header_version_prefix.config(
                 text=tr(lang, "header_build_prefix").format(version=APP_LINE_VERSION)
             )
-            self._header_version_experimental.config(text=tr(lang, "header_build_experimental"))
             self._header_version_suffix.config(
                 text=tr(lang, "header_build_suffix").format(date=BUILD_RELEASE_DATE)
             )
@@ -3011,11 +3225,13 @@ class App:
         self.preview_tab_frame = Frame(self.create_notebook)
         self.generate_tab = Frame(self.create_notebook)
         self.text_tab = Frame(self.create_notebook)
+        self.pixel_tab = Frame(self.create_notebook)
 
         self.import_notebook = ttk.Notebook(self.import_hub, style="Script.TNotebook")
         self.import_notebook.pack(fill=BOTH, expand=True, padx=8, pady=8)
-        self.import_final_tab = Frame(self.import_notebook)
-        self.handmade_tab = Frame(self.import_notebook)
+        self.import_photo_tab = Frame(self.import_notebook)
+        self.import_text_tab = Frame(self.import_notebook)
+        self.import_pixel_tab = Frame(self.import_notebook)
         self.export_game_tab = Frame(self.import_notebook)
 
         self.tools_tab = Frame(self.tools_hub)
@@ -3025,8 +3241,10 @@ class App:
         self._build_image_preview_tab()
         self._build_generate_tab()
         self._build_text_tab()
-        self._build_import_final_tab()
-        self._build_handmade_tab()
+        self._build_pixel_tab()
+        self._build_import_photo_tab()
+        self._build_import_text_tab()
+        self._build_import_pixel_tab()
         self._build_export_game_tab()
         self._build_tools_tab()
         self._build_file_management_tab()
@@ -3062,12 +3280,14 @@ class App:
             (self.preview_tab_frame, "preview_tab"),
             (self.generate_tab, "generate_tab"),
             (self.text_tab, "text_tab"),
+            (self.pixel_tab, "pixel_tab"),
         )
 
     def _import_subtab_specs(self):
         return (
-            (self.import_final_tab, "import_final_tab"),
-            (self.handmade_tab, "import_handmade_tab"),
+            (self.import_photo_tab, "import_photo_tab"),
+            (self.import_text_tab, "import_text_tab"),
+            (self.import_pixel_tab, "import_pixel_tab"),
             (self.export_game_tab, "export_game_tab"),
         )
 
@@ -3152,6 +3372,15 @@ class App:
         except Exception:
             return False
 
+    def _is_pixel_tab_active(self) -> bool:
+        try:
+            return (
+                self.hub_bar.is_active(self.create_hub)
+                and self.create_notebook.select() == str(self.pixel_tab)
+            )
+        except Exception:
+            return False
+
     def _is_tools_tab_active(self) -> bool:
         try:
             return self.hub_bar.is_active(self.tools_hub)
@@ -3173,10 +3402,12 @@ class App:
     def _on_main_tab_changed(self, _event=None):
         self._paint_tab_strip()
         self._schedule_preview_refresh()
-        if self._is_import_final_tab_active():
+        if self._is_import_photo_tab_active():
             self.refresh_generated_runs()
         if self._is_text_tab_active():
             self.text_vinyl.on_tab_activated()
+        if self._is_pixel_tab_active():
+            self.pixel_art.on_tab_activated()
         if self._is_tools_tab_active():
             self.tools_workspace.on_tab_activated()
         if self._is_file_management_tab_active():
@@ -3189,10 +3420,82 @@ class App:
         self._schedule_preview_refresh()
         if self._is_text_tab_active():
             self.text_vinyl.on_tab_activated()
+        if self._is_pixel_tab_active():
+            self.pixel_art.on_tab_activated()
 
     def _on_import_subtab_changed(self, _event=None) -> None:
-        if self._is_import_final_tab_active():
+        if self._is_import_photo_tab_active():
             self.refresh_generated_runs()
+
+    def _import_lane_frame(self, lane: str):
+        return {
+            "photo": self.import_photo_tab,
+            "text": self.import_text_tab,
+            "pixel": self.import_pixel_tab,
+        }.get(lane)
+
+    def navigate_to_import_lane(self, lane: str) -> None:
+        frame = self._import_lane_frame(lane)
+        if frame is not None:
+            self._select_hub_subtab(self.import_hub, self.import_notebook, frame)
+
+    def add_photo_import_paths(self, paths, *, navigate: bool = False) -> int:
+        added = 0
+        for raw in paths:
+            path = Path(raw)
+            if not path.exists() or path in self.photo_json_files:
+                continue
+            self.photo_json_files.append(path)
+            added += 1
+        if added:
+            self._render_photo_json_list()
+            if hasattr(self, "photo_json_list"):
+                self.photo_json_list.selection_clear(0, END)
+                self.photo_json_list.selection_set(len(self.photo_json_files) - 1)
+            self.show_geometry_import_preview(self.photo_json_files[-1], self.photo_import_preview_label)
+            self._update_import_layer_info(self.photo_json_files[-1])
+        if navigate and added:
+            self.navigate_to_import_lane("photo")
+        return added
+
+    def add_text_import_paths(self, paths, *, navigate: bool = False) -> int:
+        added = 0
+        for raw in paths:
+            path = Path(raw)
+            if not path.exists() or path in self.text_import_json_files:
+                continue
+            self.text_import_json_files.append(path)
+            added += 1
+        if added:
+            self._render_text_import_json_list()
+            if hasattr(self, "text_import_json_list"):
+                self.text_import_json_list.selection_clear(0, END)
+                self.text_import_json_list.selection_set(len(self.text_import_json_files) - 1)
+            self.show_geometry_import_preview(
+                self.text_import_json_files[-1], self.text_import_preview_label
+            )
+            self._update_text_import_layer_info(self.text_import_json_files[-1])
+        if navigate and added:
+            self.navigate_to_import_lane("text")
+        return added
+
+    def add_pixel_import_paths(self, paths, *, navigate: bool = False) -> int:
+        added = 0
+        for raw in paths:
+            path = Path(raw)
+            if not path.exists() or path in self.pixel_json_files:
+                continue
+            self.pixel_json_files.append(path)
+            added += 1
+        if added:
+            self._render_pixel_json_list()
+            if hasattr(self, "pixel_json_list"):
+                self.pixel_json_list.selection_clear(0, END)
+                self.pixel_json_list.selection_set(len(self.pixel_json_files) - 1)
+            self._set_pixel_import_preview(self.pixel_json_files[-1])
+        if navigate and added:
+            self.navigate_to_import_lane("pixel")
+        return added
 
     def _theme_label_key(self, theme_id: str) -> str:
         return f"theme_{normalize_theme_id(theme_id)}"
@@ -3526,14 +3829,35 @@ class App:
         self._generate_compare_image = None
         self._generate_compare_jobs = {}
 
-    def _is_import_final_tab_active(self) -> bool:
+    def _is_import_photo_tab_active(self) -> bool:
         try:
             return (
                 self.hub_bar.is_active(self.import_hub)
-                and self.import_notebook.select() == str(self.import_final_tab)
+                and self.import_notebook.select() == str(self.import_photo_tab)
             )
         except Exception:
             return False
+
+    def _is_import_text_tab_active(self) -> bool:
+        try:
+            return (
+                self.hub_bar.is_active(self.import_hub)
+                and self.import_notebook.select() == str(self.import_text_tab)
+            )
+        except Exception:
+            return False
+
+    def _is_import_pixel_tab_active(self) -> bool:
+        try:
+            return (
+                self.hub_bar.is_active(self.import_hub)
+                and self.import_notebook.select() == str(self.import_pixel_tab)
+            )
+        except Exception:
+            return False
+
+    def _is_geometry_import_tab_active(self) -> bool:
+        return self._is_import_photo_tab_active() or self._is_import_text_tab_active()
 
     def _active_generation_result_label(self):
         if not hasattr(self, "generate_result_without_preview"):
@@ -3887,6 +4211,9 @@ class App:
     def _build_text_tab(self):
         self.text_vinyl.build(self.text_tab)
 
+    def _build_pixel_tab(self):
+        self.pixel_art.build(self.pixel_tab)
+
     def _build_fh6_import_connection(self, parent) -> Frame:
         container = Frame(parent)
 
@@ -3940,67 +4267,10 @@ class App:
         self._bind_wraplength(layer_info, step2)
         return container
 
-    def _build_import_final_tab(self):
-        paned = self._create_paned(
-            self.import_final_tab, orient=HORIZONTAL, layout_key="import_horizontal", padx=10, pady=10
-        )
-        left_outer = Frame(paned)
-        right = Frame(paned)
-        paned.add(left_outer, weight=3)
-        paned.add(right, weight=2)
-
-        scroll_area, left = self._make_vertical_scroll(left_outer)
-        scroll_area.pack(fill=BOTH, expand=True, padx=0, pady=10)
-
-        tab_hint = self._label(left, "import_final_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
-        tab_hint.pack(fill=X, pady=(0, 10))
-        self._bind_wraplength(tab_hint, left)
-
-        self._build_fh6_import_connection(left).pack(fill=X)
-
-        runs_box = ttk.LabelFrame(left, text=tr(self.lang, "import_final_runs"))
-        self.translated.append((runs_box, "import_final_runs", "text"))
-        runs_box.pack(fill=X, pady=(0, 10))
-        runs_row = Frame(runs_box)
-        runs_row.pack(fill=X, padx=10, pady=(8, 4))
-        self._button(runs_row, "import_final_refresh_runs", self.refresh_generated_runs).pack(side=LEFT)
-        self._button(runs_row, "import_final_pick_best", self.pick_best_safe_final_json).pack(side=RIGHT)
-        runs_body = Frame(runs_box)
-        runs_body.pack(fill=X, padx=10, pady=(0, 6))
-        self.generated_runs_list = Listbox(runs_body, height=5)
-        self.generated_runs_list.pack(fill=X, expand=True)
-        self.generated_runs_list.bind("<<ListboxSelect>>", self._on_generated_run_select)
-        self._generated_run_paths: list[Path] = []
-
-        files_box = ttk.LabelFrame(left, text=tr(self.lang, "import_final_run_files"))
-        self.translated.append((files_box, "import_final_run_files", "text"))
-        files_box.pack(fill=X, pady=(0, 10))
-        files_row = Frame(files_box)
-        files_row.pack(fill=X, padx=10, pady=(8, 4))
-        self._label(files_row, "json_files").pack(side=LEFT)
-        self._button(files_row, "add_json", self.add_json).pack(side=RIGHT)
-        self._button(files_row, "remove_json", self.remove_selected_json).pack(side=RIGHT, padx=(8, 0))
-        self._button(files_row, "use_outputs", self.use_generated_outputs).pack(side=RIGHT, padx=8)
-        json_body = Frame(files_box)
-        json_body.pack(fill=X, padx=10, pady=(0, 6))
-        json_scrollbar = ttk.Scrollbar(json_body, orient="vertical")
-        json_scrollbar.pack(side=RIGHT, fill="y")
-        self.json_list = Listbox(json_body, height=7, yscrollcommand=json_scrollbar.set)
-        self.json_list.pack(side=LEFT, fill=X, expand=True)
-        json_scrollbar.config(command=self.json_list.yview)
-        self.json_list.bind("<<ListboxSelect>>", self._preview_selected_json)
-        best_toggle = Checkbutton(
-            files_box,
-            text=tr(self.lang, "import_final_use_best"),
-            variable=self.use_best_safe_final,
-            onvalue="1",
-            offvalue="0",
-        )
-        best_toggle.pack(anchor="w", padx=10, pady=(0, 10))
-        self.translated.append((best_toggle, "import_final_use_best", "text"))
-        self._final_run_json_paths: list[Path] = []
-
-        step4 = ttk.LabelFrame(right, text=tr(self.lang, "step_import"))
+    def _build_geometry_import_actions(
+        self, parent, *, import_key: str, import_command, show_advanced: bool = False
+    ) -> None:
+        step4 = ttk.LabelFrame(parent, text=tr(self.lang, "step_import"))
         self.translated.append((step4, "step_import", "text"))
         step4.pack(fill=X, pady=(0, 10))
         import_hint = self._label(step4, "step_import_hint", anchor="w", justify=LEFT)
@@ -4016,13 +4286,78 @@ class App:
         actions.pack(fill=X, padx=10, pady=12)
         self._button(
             actions,
-            "import_final_import",
-            self.start_import_final,
+            import_key,
+            import_command,
             font=("Segoe UI", 13, "bold"),
             height=2,
         ).pack(side=LEFT, fill=X, expand=True)
-        self.advanced_button = self._button(actions, "show_advanced", self.toggle_advanced)
-        self.advanced_button.pack(side=LEFT, padx=(8, 0))
+        if show_advanced:
+            self.advanced_button = self._button(actions, "show_advanced", self.toggle_advanced)
+            self.advanced_button.pack(side=LEFT, padx=(8, 0))
+
+    def _build_import_photo_tab(self):
+        paned = self._create_paned(
+            self.import_photo_tab, orient=HORIZONTAL, layout_key="import_horizontal", padx=10, pady=10
+        )
+        left_outer = Frame(paned)
+        right = Frame(paned)
+        paned.add(left_outer, weight=3)
+        paned.add(right, weight=2)
+
+        scroll_area, left = self._make_vertical_scroll(left_outer)
+        scroll_area.pack(fill=BOTH, expand=True, padx=0, pady=10)
+
+        tab_hint = self._label(left, "import_photo_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
+        tab_hint.pack(fill=X, pady=(0, 10))
+        self._bind_wraplength(tab_hint, left)
+
+        self._build_fh6_import_connection(left).pack(fill=X)
+
+        runs_box = ttk.LabelFrame(left, text=tr(self.lang, "import_photo_runs"))
+        self.translated.append((runs_box, "import_photo_runs", "text"))
+        runs_box.pack(fill=X, pady=(0, 10))
+        runs_row = Frame(runs_box)
+        runs_row.pack(fill=X, padx=10, pady=(8, 4))
+        self._button(runs_row, "import_photo_refresh_runs", self.refresh_generated_runs).pack(side=LEFT)
+        self._button(runs_row, "import_photo_pick_best", self.pick_best_safe_final_json).pack(side=RIGHT)
+        runs_body = Frame(runs_box)
+        runs_body.pack(fill=X, padx=10, pady=(0, 6))
+        self.generated_runs_list = Listbox(runs_body, height=5)
+        self.generated_runs_list.pack(fill=X, expand=True)
+        self.generated_runs_list.bind("<<ListboxSelect>>", self._on_generated_run_select)
+        self._generated_run_paths: list[Path] = []
+
+        files_box = ttk.LabelFrame(left, text=tr(self.lang, "import_photo_run_files"))
+        self.translated.append((files_box, "import_photo_run_files", "text"))
+        files_box.pack(fill=X, pady=(0, 10))
+        files_row = Frame(files_box)
+        files_row.pack(fill=X, padx=10, pady=(8, 4))
+        self._label(files_row, "json_files").pack(side=LEFT)
+        self._button(files_row, "add_json", self.add_photo_json).pack(side=RIGHT)
+        self._button(files_row, "remove_json", self.remove_selected_photo_json).pack(side=RIGHT, padx=(8, 0))
+        self._button(files_row, "use_outputs", self.use_generated_outputs).pack(side=RIGHT, padx=8)
+        json_body = Frame(files_box)
+        json_body.pack(fill=X, padx=10, pady=(0, 6))
+        json_scrollbar = ttk.Scrollbar(json_body, orient="vertical")
+        json_scrollbar.pack(side=RIGHT, fill="y")
+        self.photo_json_list = Listbox(json_body, height=7, yscrollcommand=json_scrollbar.set)
+        self.photo_json_list.pack(side=LEFT, fill=X, expand=True)
+        json_scrollbar.config(command=self.photo_json_list.yview)
+        self.photo_json_list.bind("<<ListboxSelect>>", self._preview_selected_photo_json)
+        best_toggle = Checkbutton(
+            files_box,
+            text=tr(self.lang, "import_photo_use_best"),
+            variable=self.use_best_safe_final,
+            onvalue="1",
+            offvalue="0",
+        )
+        best_toggle.pack(anchor="w", padx=10, pady=(0, 10))
+        self.translated.append((best_toggle, "import_photo_use_best", "text"))
+        self._final_run_json_paths: list[Path] = []
+
+        self._build_geometry_import_actions(
+            right, import_key="import_photo_import", import_command=self.start_import_photo, show_advanced=True
+        )
 
         self.advanced_frame = ttk.LabelFrame(right, text=tr(self.lang, "advanced_options"))
         self.translated.append((self.advanced_frame, "advanced_options", "text"))
@@ -4033,7 +4368,7 @@ class App:
         )
 
         self._label(right, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X, pady=(8, 0))
-        self.import_preview_label = Label(
+        self.photo_import_preview_label = Label(
             right,
             text=tr(self.lang, "preview_hint"),
             bg=COLOR_PREVIEW_BG,
@@ -4041,9 +4376,156 @@ class App:
             width=56,
             height=20,
         )
-        self.import_preview_label.pack(fill=BOTH, expand=True, pady=6)
-        self.import_preview_label.bind("<Configure>", self._schedule_preview_refresh)
+        self.photo_import_preview_label.pack(fill=BOTH, expand=True, pady=6)
+        self.photo_import_preview_label.bind("<Configure>", self._schedule_preview_refresh)
         self.refresh_generated_runs()
+
+    def _build_import_text_tab(self):
+        paned = self._create_paned(
+            self.import_text_tab, orient=HORIZONTAL, layout_key="import_horizontal", padx=10, pady=10
+        )
+        left_outer = Frame(paned)
+        right = Frame(paned)
+        paned.add(left_outer, weight=3)
+        paned.add(right, weight=2)
+
+        scroll_area, left = self._make_vertical_scroll(left_outer)
+        scroll_area.pack(fill=BOTH, expand=True, padx=0, pady=10)
+
+        tab_hint = self._label(left, "import_text_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
+        tab_hint.pack(fill=X, pady=(0, 10))
+        self._bind_wraplength(tab_hint, left)
+
+        self._build_fh6_import_connection(left).pack(fill=X)
+
+        files_box = ttk.LabelFrame(left, text=tr(self.lang, "import_text_designs"))
+        self.translated.append((files_box, "import_text_designs", "text"))
+        files_box.pack(fill=X, pady=(0, 10))
+        files_row = Frame(files_box)
+        files_row.pack(fill=X, padx=10, pady=(8, 4))
+        self._label(files_row, "json_files").pack(side=LEFT)
+        self._button(files_row, "add_json", self.add_text_import_json).pack(side=RIGHT)
+        self._button(files_row, "remove_json", self.remove_selected_text_import_json).pack(side=RIGHT, padx=(8, 0))
+        self._button(files_row, "import_text_open_folder", self.open_text_import_folder).pack(side=RIGHT, padx=8)
+        json_body = Frame(files_box)
+        json_body.pack(fill=X, padx=10, pady=(0, 6))
+        json_scrollbar = ttk.Scrollbar(json_body, orient="vertical")
+        json_scrollbar.pack(side=RIGHT, fill="y")
+        self.text_import_json_list = Listbox(json_body, height=9, yscrollcommand=json_scrollbar.set)
+        self.text_import_json_list.pack(side=LEFT, fill=X, expand=True)
+        json_scrollbar.config(command=self.text_import_json_list.yview)
+        self.text_import_json_list.bind("<<ListboxSelect>>", self._preview_selected_text_import_json)
+        files_hint = self._label(files_box, "step_json_hint", anchor="w", justify=LEFT, theme_role="hint")
+        files_hint.pack(fill=X, padx=10, pady=(0, 10))
+        self._bind_wraplength(files_hint, files_box)
+
+        self._build_geometry_import_actions(right, import_key="import_text_import", import_command=self.start_import_text)
+
+        self._label(right, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X, pady=(8, 0))
+        self.text_import_preview_label = Label(
+            right,
+            text=tr(self.lang, "preview_hint"),
+            bg=COLOR_PREVIEW_BG,
+            fg=COLOR_PREVIEW_FG,
+            width=56,
+            height=20,
+        )
+        self.text_import_preview_label.pack(fill=BOTH, expand=True, pady=6)
+        self.text_import_preview_label.bind(
+            "<Configure>", lambda _e: self._schedule_text_import_preview_refresh()
+        )
+        self._text_import_preview_job = None
+
+    def _build_import_pixel_tab(self):
+        paned = self._create_paned(
+            self.import_pixel_tab, orient=HORIZONTAL, layout_key="import_horizontal", padx=10, pady=10
+        )
+        left = Frame(paned)
+        right = Frame(paned)
+        paned.add(left, weight=3)
+        paned.add(right, weight=2)
+
+        scroll_area, body = self._make_vertical_scroll(left)
+        scroll_area.pack(fill=BOTH, expand=True, padx=0, pady=10)
+
+        hint = self._label(body, "import_pixel_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
+        hint.pack(fill=X, pady=(0, 10))
+        self._bind_wraplength(hint, body)
+
+        self._build_fh6_import_connection(body).pack(fill=X)
+
+        actions = ttk.LabelFrame(body, text=tr(self.lang, "import_pixel_tab"))
+        self.translated.append((actions, "import_pixel_tab", "text"))
+        actions.pack(fill=X, pady=(0, 10))
+        row = Frame(actions)
+        row.pack(fill=X, padx=10, pady=(10, 8))
+        self._button(row, "import_pixel_choose_json", self.add_pixel_import_json).pack(side=LEFT)
+        self._button(row, "import_pixel_import", self.start_import_pixel).pack(side=RIGHT)
+
+        trim_toggle = Checkbutton(
+            actions,
+            text=tr(self.lang, "typecode_trim_after_import"),
+            variable=self.typecode_trim_after_import,
+            onvalue="1",
+            offvalue="0",
+        )
+        trim_toggle.pack(anchor="w", padx=10, pady=(0, 2))
+        self.translated.append((trim_toggle, "typecode_trim_after_import", "text"))
+        unknown_row = Frame(actions)
+        unknown_row.pack(anchor="w", padx=10, pady=(0, 10))
+        unknown_toggle = Checkbutton(
+            unknown_row,
+            text=tr(self.lang, "typecode_allow_unknown"),
+            variable=self.typecode_allow_unknown,
+            onvalue="1",
+            offvalue="0",
+        )
+        unknown_toggle.pack(anchor="w")
+        self.translated.append((unknown_toggle, "typecode_allow_unknown", "text"))
+        unknown_explain = self._label(
+            unknown_row,
+            "typecode_allow_unknown_hint",
+            anchor="w",
+            justify=LEFT,
+            theme_role="hint",
+        )
+        unknown_explain.pack(anchor="w", padx=(22, 0), pady=(2, 0))
+        self._bind_wraplength(unknown_explain, actions, padding=40)
+
+        files_box = ttk.LabelFrame(body, text=tr(self.lang, "step_json"))
+        self.translated.append((files_box, "step_json", "text"))
+        files_box.pack(fill=X, pady=(0, 10))
+        files_hint = self._label(files_box, "step_json_hint", anchor="w", justify=LEFT, theme_role="hint")
+        files_hint.pack(fill=X, padx=10, pady=(8, 4))
+        self._bind_wraplength(files_hint, files_box)
+
+        list_row = Frame(files_box)
+        list_row.pack(fill=X, padx=10, pady=(0, 8))
+        self.pixel_json_list = Listbox(list_row, height=7)
+        self.pixel_json_list.pack(side=LEFT, fill=X, expand=True)
+        self.pixel_json_list.bind("<<ListboxSelect>>", self._preview_selected_pixel_json)
+        self._button(list_row, "remove_json", self.remove_selected_pixel_json).pack(side=RIGHT, padx=(8, 0))
+        self.pixel_status_label = self._label(
+            files_box, "import_pixel_status_none", anchor="w", justify=LEFT, theme_role="muted"
+        )
+        self.pixel_status_label.pack(fill=X, padx=10, pady=(0, 10))
+        self._bind_wraplength(self.pixel_status_label, files_box)
+
+        self._label(right, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X, pady=(0, 8))
+        self.pixel_import_preview_label = Label(
+            right,
+            text=tr(self.lang, "preview_hint"),
+            bg=COLOR_PREVIEW_BG,
+            fg=COLOR_PREVIEW_FG,
+            width=56,
+            height=20,
+        )
+        self.pixel_import_preview_label.pack(fill=BOTH, expand=True)
+        self.pixel_import_preview_label.bind(
+            "<Configure>", lambda _e: self._schedule_pixel_import_preview_refresh()
+        )
+        self._pixel_import_preview_job = None
+        self._update_pixel_import_status()
 
     def _build_export_game_tab(self):
         paned = self._create_paned(
@@ -4084,82 +4566,6 @@ class App:
         typecode_hint.pack(fill=X, padx=10, pady=4)
         self._bind_wraplength(typecode_hint, right)
 
-    def _build_handmade_tab(self):
-        paned = self._create_paned(self.handmade_tab, orient=HORIZONTAL, layout_key="import_horizontal", padx=10, pady=10)
-        left = Frame(paned)
-        right = Frame(paned)
-        paned.add(left, weight=3)
-        paned.add(right, weight=2)
-
-        scroll_area, body = self._make_vertical_scroll(left)
-        scroll_area.pack(fill=BOTH, expand=True, padx=0, pady=10)
-
-        hint = self._label(body, "handmade_tab_hint", anchor="w", justify=LEFT, theme_role="hint")
-        hint.pack(fill=X, pady=(0, 10))
-        self._bind_wraplength(hint, body)
-
-        self._build_fh6_import_connection(body).pack(fill=X)
-
-        actions = ttk.LabelFrame(body, text=tr(self.lang, "import_handmade_tab"))
-        self.translated.append((actions, "import_handmade_tab", "text"))
-        actions.pack(fill=X, pady=(0, 10))
-        row = Frame(actions)
-        row.pack(fill=X, padx=10, pady=(10, 8))
-        self._button(row, "handmade_choose_json", self.add_handmade_json).pack(side=LEFT)
-        self._button(row, "handmade_import", self.start_import_handmade).pack(side=RIGHT)
-
-        trim_toggle = Checkbutton(
-            actions,
-            text=tr(self.lang, "typecode_trim_after_import"),
-            variable=self.typecode_trim_after_import,
-            onvalue="1",
-            offvalue="0",
-        )
-        trim_toggle.pack(anchor="w", padx=10, pady=(0, 2))
-        self.translated.append((trim_toggle, "typecode_trim_after_import", "text"))
-        unknown_toggle = Checkbutton(
-            actions,
-            text=tr(self.lang, "typecode_allow_unknown"),
-            variable=self.typecode_allow_unknown,
-            onvalue="1",
-            offvalue="0",
-        )
-        unknown_toggle.pack(anchor="w", padx=10, pady=(0, 10))
-        self.translated.append((unknown_toggle, "typecode_allow_unknown", "text"))
-
-        files_box = ttk.LabelFrame(body, text=tr(self.lang, "step_json"))
-        self.translated.append((files_box, "step_json", "text"))
-        files_box.pack(fill=X, pady=(0, 10))
-        files_hint = self._label(files_box, "step_json_hint", anchor="w", justify=LEFT, theme_role="hint")
-        files_hint.pack(fill=X, padx=10, pady=(8, 4))
-        self._bind_wraplength(files_hint, files_box)
-
-        list_row = Frame(files_box)
-        list_row.pack(fill=X, padx=10, pady=(0, 8))
-        self.handmade_json_list = Listbox(list_row, height=7)
-        self.handmade_json_list.pack(side=LEFT, fill=X, expand=True)
-        self.handmade_json_list.bind("<<ListboxSelect>>", self._preview_selected_handmade_json)
-        self._button(list_row, "remove_json", self.remove_selected_handmade_json).pack(side=RIGHT, padx=(8, 0))
-        self.handmade_status_label = self._label(files_box, "handmade_status_none", anchor="w", justify=LEFT, theme_role="muted")
-        self.handmade_status_label.pack(fill=X, padx=10, pady=(0, 10))
-        self._bind_wraplength(self.handmade_status_label, files_box)
-
-        self._label(right, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X, pady=(0, 8))
-        self.handmade_preview_label = Label(
-            right,
-            text=tr(self.lang, "preview_hint"),
-            bg=COLOR_PREVIEW_BG,
-            fg=COLOR_PREVIEW_FG,
-            width=56,
-            height=20,
-        )
-        self.handmade_preview_label.pack(fill=BOTH, expand=True)
-        self.handmade_preview_label.bind("<Configure>", lambda _e: self._schedule_handmade_preview_refresh())
-        self._handmade_preview_job = None
-
-        self.handmade_json_files: list[Path] = []
-        self._update_handmade_status()
-
     def refresh_generated_runs(self):
         if not hasattr(self, "generated_runs_list"):
             return
@@ -4186,24 +4592,24 @@ class App:
         except IndexError:
             return
         self._final_run_json_paths = json_candidates_for_run_folder(run_folder)
-        if not hasattr(self, "json_list"):
+        if not hasattr(self, "photo_json_list"):
             return
-        self.json_list.delete(0, END)
-        self.json_files.clear()
+        self.photo_json_list.delete(0, END)
+        self.photo_json_files.clear()
         for path in self._final_run_json_paths:
             try:
                 layers = geometry_shape_count(path)
             except OSError:
                 layers = "?"
             label = f"{path.name}  ({layers} layers)"
-            self.json_list.insert(END, label)
-            self.json_files.append(path)
+            self.photo_json_list.insert(END, label)
+            self.photo_json_files.append(path)
         if self.use_best_safe_final.get() == "1":
             self.pick_best_safe_final_json(select_only=True)
-        elif self.json_files:
-            self.json_list.selection_set(len(self.json_files) - 1)
-            self.show_json_preview(self.json_files[-1])
-            self._update_import_layer_info(self.json_files[-1])
+        elif self.photo_json_files:
+            self.photo_json_list.selection_set(len(self.photo_json_files) - 1)
+            self.show_geometry_import_preview(self.photo_json_files[-1], self.photo_import_preview_label)
+            self._update_import_layer_info(self.photo_json_files[-1])
 
     def pick_best_safe_final_json(self, select_only: bool = False):
         selection = list(self.generated_runs_list.curselection()) if hasattr(self, "generated_runs_list") else []
@@ -4222,18 +4628,18 @@ class App:
         if best is None:
             self.log_line(tr(self.lang, "log_no_json_in_run").format(path=run_folder))
             return
-        if best not in self.json_files:
-            self.json_files.append(best)
+        if best not in self.photo_json_files:
+            self.photo_json_files.append(best)
             self._render_lists()
         try:
-            index = self.json_files.index(best)
+            index = self.photo_json_files.index(best)
         except ValueError:
             return
-        if hasattr(self, "json_list"):
-            self.json_list.selection_clear(0, END)
-            self.json_list.selection_set(index)
-            self.json_list.see(index)
-        self.show_json_preview(best)
+        if hasattr(self, "photo_json_list"):
+            self.photo_json_list.selection_clear(0, END)
+            self.photo_json_list.selection_set(index)
+            self.photo_json_list.see(index)
+        self.show_geometry_import_preview(best, self.photo_import_preview_label)
         self._update_import_layer_info(best)
         if not select_only:
             self.log_line(tr(self.lang, "log_selected_best_final").format(name=best.name))
@@ -4242,27 +4648,52 @@ class App:
         TYPECODE_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
         os.startfile(TYPECODE_EXPORT_DIR)
 
-    def start_import_final(self):
-        if not self.json_files:
+    def open_text_import_folder(self):
+        from asset_workspace import TEXT_VINYL_WORKSPACE_ROOT
+
+        TEXT_VINYL_WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
+        os.startfile(TEXT_VINYL_WORKSPACE_ROOT)  # type: ignore[attr-defined]
+
+    def _begin_geometry_import(self, files: list[Path]) -> bool:
+        if not files:
             self.log_line(tr(self.lang, "no_json_selected"))
-            return
+            return False
         layer_count = self.layer_count.get().strip()
         if not layer_count:
             self.log_line(tr(self.lang, "layer_count_required"))
             if hasattr(self, "layer_count_entry"):
                 apply_entry_validation(self.layer_count_entry, invalid=True, manager=self.themes)
-            return
+            return False
         if hasattr(self, "layer_count_entry"):
             apply_entry_validation(self.layer_count_entry, invalid=False, manager=self.themes)
         if not self._prepare_memory_work("import"):
+            return False
+        if not self.ensure_live_game_pid():
+            return False
+        self.status.set(tr(self.lang, "running"))
+        return True
+
+    def start_import_photo(self):
+        if not self._begin_geometry_import(self.photo_json_files):
             return
         pid = self.ensure_live_game_pid()
-        if not pid:
-            return
-        self.status.set(tr(self.lang, "running"))
-        threading.Thread(target=self._import_final_worker, args=(pid,), daemon=True).start()
+        threading.Thread(
+            target=self._import_geometry_worker,
+            args=(pid, list(self.photo_json_files)),
+            daemon=True,
+        ).start()
 
-    def _import_final_worker(self, pid):
+    def start_import_text(self):
+        if not self._begin_geometry_import(self.text_import_json_files):
+            return
+        pid = self.ensure_live_game_pid()
+        threading.Thread(
+            target=self._import_geometry_worker,
+            args=(pid, list(self.text_import_json_files)),
+            daemon=True,
+        ).start()
+
+    def _import_geometry_worker(self, pid, paths: list[Path]):
         game = self.selected_game.get() or "fh6"
         layer_count = self.layer_count.get().strip()
         try:
@@ -4278,7 +4709,7 @@ class App:
         count_address = locations.get("count_address")
         table_address = locations.get("table_address")
         import_env = locations.get("import_env", {})
-        for path in list(self.json_files):
+        for path in paths:
             path = Path(path)
             if is_typecode_geometry_json(path):
                 self.queue.put(
@@ -4301,107 +4732,198 @@ class App:
                 return
         self.queue.put(("status", tr(self.lang, "done")))
 
-    def add_handmade_json(self):
+    def add_photo_json(self):
         files = filedialog.askopenfilenames(
-            title=tr(self.lang, "handmade_choose_json"),
-            filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+            title=tr(self.lang, "dialog_choose_geometry_json"),
+            filetypes=[("Design JSON", "*.json"), ("All files", "*.*")],
         )
-        if not files:
-            return
         for item in files:
             path = Path(item)
-            if path.exists() and path not in self.handmade_json_files:
-                self.handmade_json_files.append(path)
-        self._render_handmade_list()
+            if path.exists() and path not in self.photo_json_files:
+                self.photo_json_files.append(path)
+        self._render_lists()
         if files:
-            self._set_handmade_preview(Path(files[0]))
+            self.show_geometry_import_preview(Path(files[0]), self.photo_import_preview_label)
 
-    def remove_selected_handmade_json(self):
-        if not hasattr(self, "handmade_json_list"):
-            return
-        selection = list(self.handmade_json_list.curselection())
+    def remove_selected_photo_json(self):
+        selection = list(self.photo_json_list.curselection())
         if not selection:
             self.log_line(tr(self.lang, "no_json_selected"))
             return
         for index in sorted(selection, reverse=True):
             try:
-                del self.handmade_json_files[index]
+                del self.photo_json_files[index]
             except IndexError:
                 pass
-        self._render_handmade_list()
-        self.handmade_preview_label.config(image="", text=tr(self.lang, "preview_hint"))
-        self.handmade_preview_label.image = None
+        self._render_lists()
+        if hasattr(self, "photo_import_preview_label"):
+            self.photo_import_preview_label.config(image="", text=tr(self.lang, "preview_hint"))
+            self.photo_import_preview_label.image = None
 
-    def _render_handmade_list(self):
-        if not hasattr(self, "handmade_json_list"):
-            return
-        self.handmade_json_list.delete(0, END)
-        for path in self.handmade_json_files:
-            self.handmade_json_list.insert(END, str(path))
-        self._update_handmade_status()
+    def add_text_import_json(self):
+        files = filedialog.askopenfilenames(
+            title=tr(self.lang, "text_dialog_add_json"),
+            filetypes=[("Design JSON", "*.json"), ("All files", "*.*")],
+        )
+        for item in files:
+            path = Path(item)
+            if path.exists() and path not in self.text_import_json_files:
+                self.text_import_json_files.append(path)
+        self._render_text_import_json_list()
+        if files:
+            self.show_geometry_import_preview(Path(files[0]), self.text_import_preview_label)
 
-    def _preview_selected_handmade_json(self, _event=None):
-        if not hasattr(self, "handmade_json_list"):
+    def remove_selected_text_import_json(self):
+        if not hasattr(self, "text_import_json_list"):
             return
-        selection = self.handmade_json_list.curselection()
-        if selection:
-            self._set_handmade_preview(self.handmade_json_files[selection[0]])
-
-    def _schedule_handmade_preview_refresh(self):
-        if not hasattr(self, "handmade_preview_label") or self.closed:
+        selection = list(self.text_import_json_list.curselection())
+        if not selection:
+            self.log_line(tr(self.lang, "no_json_selected"))
             return
-        if self._handmade_preview_job is not None:
+        for index in sorted(selection, reverse=True):
             try:
-                self.root.after_cancel(self._handmade_preview_job)
+                del self.text_import_json_files[index]
+            except IndexError:
+                pass
+        self._render_text_import_json_list()
+        if hasattr(self, "text_import_preview_label"):
+            self.text_import_preview_label.config(image="", text=tr(self.lang, "preview_hint"))
+            self.text_import_preview_label.image = None
+
+    def _render_text_import_json_list(self) -> None:
+        if not hasattr(self, "text_import_json_list"):
+            return
+        self.text_import_json_list.delete(0, END)
+        for path in self.text_import_json_files:
+            self.text_import_json_list.insert(END, self._json_list_display(path))
+        self._update_text_import_layer_info()
+
+    def _preview_selected_text_import_json(self, _event=None):
+        if not hasattr(self, "text_import_json_list"):
+            return
+        selection = self.text_import_json_list.curselection()
+        if selection:
+            path = self.text_import_json_files[selection[0]]
+            self.show_geometry_import_preview(path, self.text_import_preview_label)
+            self._update_text_import_layer_info(path)
+
+    def _schedule_text_import_preview_refresh(self):
+        if not hasattr(self, "text_import_preview_label") or self.closed:
+            return
+        if self._text_import_preview_job is not None:
+            try:
+                self.root.after_cancel(self._text_import_preview_job)
             except Exception:
                 pass
-        self._handmade_preview_job = self.root.after(180, lambda: self._refresh_handmade_preview())
+        self._text_import_preview_job = self.root.after(180, self._refresh_text_import_preview)
 
-    def _refresh_handmade_preview(self):
-        self._handmade_preview_job = None
-        path = getattr(self, "_handmade_preview_path", None)
+    def _refresh_text_import_preview(self):
+        self._text_import_preview_job = None
+        path = getattr(self, "_text_import_preview_path", None)
         if path:
-            self._set_handmade_preview(path)
+            self.show_geometry_import_preview(path, self.text_import_preview_label)
 
-    def _set_handmade_preview(self, path: Path):
-        self._handmade_preview_path = Path(path)
-        if not path or not Path(path).exists():
-            self.handmade_preview_label.config(image="", text=tr(self.lang, "preview_hint"))
-            self.handmade_preview_label.image = None
+    def _update_text_import_layer_info(self, json_path=None):
+        self._update_import_layer_info(json_path, files=self.text_import_json_files, listbox=self.text_import_json_list)
+
+    def add_pixel_import_json(self):
+        files = filedialog.askopenfilenames(
+            title=tr(self.lang, "import_pixel_choose_json"),
+            filetypes=[("Design JSON", "*.json"), ("All files", "*.*")],
+        )
+        if not files:
             return
-        data = render_geometry_json(path, self._preview_bounds(self.handmade_preview_label))
+        self.add_pixel_import_paths(files)
+        if files:
+            self._set_pixel_import_preview(Path(files[0]))
+
+    def remove_selected_pixel_json(self):
+        if not hasattr(self, "pixel_json_list"):
+            return
+        selection = list(self.pixel_json_list.curselection())
+        if not selection:
+            self.log_line(tr(self.lang, "no_json_selected"))
+            return
+        for index in sorted(selection, reverse=True):
+            try:
+                del self.pixel_json_files[index]
+            except IndexError:
+                pass
+        self._render_pixel_json_list()
+        if hasattr(self, "pixel_import_preview_label"):
+            self.pixel_import_preview_label.config(image="", text=tr(self.lang, "preview_hint"))
+            self.pixel_import_preview_label.image = None
+
+    def _render_pixel_json_list(self):
+        if not hasattr(self, "pixel_json_list"):
+            return
+        self.pixel_json_list.delete(0, END)
+        for path in self.pixel_json_files:
+            self.pixel_json_list.insert(END, str(path))
+        self._update_pixel_import_status()
+
+    def _preview_selected_pixel_json(self, _event=None):
+        if not hasattr(self, "pixel_json_list"):
+            return
+        selection = self.pixel_json_list.curselection()
+        if selection:
+            self._set_pixel_import_preview(self.pixel_json_files[selection[0]])
+
+    def _schedule_pixel_import_preview_refresh(self):
+        if not hasattr(self, "pixel_import_preview_label") or self.closed:
+            return
+        if self._pixel_import_preview_job is not None:
+            try:
+                self.root.after_cancel(self._pixel_import_preview_job)
+            except Exception:
+                pass
+        self._pixel_import_preview_job = self.root.after(180, self._refresh_pixel_import_preview)
+
+    def _refresh_pixel_import_preview(self):
+        self._pixel_import_preview_job = None
+        path = getattr(self, "_pixel_import_preview_path", None)
+        if path:
+            self._set_pixel_import_preview(path)
+
+    def _set_pixel_import_preview(self, path: Path):
+        self._pixel_import_preview_path = Path(path)
+        if not path or not Path(path).exists():
+            self.pixel_import_preview_label.config(image="", text=tr(self.lang, "preview_hint"))
+            self.pixel_import_preview_label.image = None
+            return
+        data = render_geometry_json(path, self._preview_bounds(self.pixel_import_preview_label))
         if not data:
-            self.handmade_preview_label.config(image="", text=tr(self.lang, "preview_unavailable"))
-            self.handmade_preview_label.image = None
+            self.pixel_import_preview_label.config(image="", text=tr(self.lang, "preview_unavailable"))
+            self.pixel_import_preview_label.image = None
             return
         image = PhotoImage(data=data)
-        self.handmade_preview_label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
-        self.handmade_preview_label.image = image
-        self._update_handmade_status(path)
+        self.pixel_import_preview_label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+        self.pixel_import_preview_label.image = image
+        self._update_pixel_import_status(path)
 
-    def _update_handmade_status(self, path: Path | None = None):
-        if not hasattr(self, "handmade_status_label"):
+    def _update_pixel_import_status(self, path: Path | None = None):
+        if not hasattr(self, "pixel_status_label"):
             return
         if path is None:
-            path = getattr(self, "_handmade_preview_path", None)
+            path = getattr(self, "_pixel_import_preview_path", None)
         if not path or not Path(path).exists():
-            self.handmade_status_label.config(text=tr(self.lang, "handmade_status_none"))
+            self.pixel_status_label.config(text=tr(self.lang, "import_pixel_status_none"))
             return
         try:
             summary = typecode_shape_summary(path, allow_unknown_low_byte=False)
         except Exception:
-            self.handmade_status_label.config(text=tr(self.lang, "handmade_status_none"))
+            self.pixel_status_label.config(text=tr(self.lang, "import_pixel_status_none"))
             return
-        self.handmade_status_label.config(
-            text=tr(self.lang, "handmade_status_counts").format(
+        self.pixel_status_label.config(
+            text=tr(self.lang, "import_pixel_status_counts").format(
                 total=summary.get("total", 0),
                 supported=summary.get("supported", 0),
                 unsupported=summary.get("unsupported", 0),
             )
         )
 
-    def start_import_handmade(self):
-        if not getattr(self, "handmade_json_files", None):
+    def start_import_pixel(self):
+        if not self.pixel_json_files:
             self.log_line(tr(self.lang, "no_json_selected"))
             return
         layer_count = self.layer_count.get().strip()
@@ -4414,9 +4936,9 @@ class App:
         if not pid:
             return
         self.status.set(tr(self.lang, "running"))
-        threading.Thread(target=self._import_handmade_worker, args=(pid,), daemon=True).start()
+        threading.Thread(target=self._import_pixel_worker, args=(pid,), daemon=True).start()
 
-    def _import_handmade_worker(self, pid):
+    def _import_pixel_worker(self, pid):
         game = self.selected_game.get() or "fh6"
         layer_count = self.layer_count.get().strip()
         try:
@@ -4425,7 +4947,7 @@ class App:
             self.queue.put(("log", str(exc)))
             self.queue.put(("status", tr(self.lang, "failed")))
             return
-        for path in list(self.handmade_json_files):
+        for path in list(self.pixel_json_files):
             path = Path(path)
             if not is_typecode_geometry_json(path):
                 self.queue.put(("log", tr(self.lang, "log_skipped_non_handmade").format(name=path.name)))
@@ -5227,8 +5749,9 @@ class App:
             self._schedule_preview_main_render()
         self._refresh_preview_preset_panel()
         self.text_vinyl.on_language_changed()
-        if self.photo is None and hasattr(self, "import_preview_label"):
-            self.import_preview_label.config(text=tr(self.lang, "preview_hint"))
+        self.pixel_art.on_language_changed()
+        if self.photo is None and hasattr(self, "photo_import_preview_label"):
+            self.photo_import_preview_label.config(text=tr(self.lang, "preview_hint"))
         if hasattr(self, "generate_source_before_preview"):
             self._refresh_generate_compare()
         if hasattr(self, "advanced_button"):
@@ -5236,6 +5759,7 @@ class App:
         if hasattr(self, "setting_description"):
             self._update_setting_description()
         self.text_vinyl.update_theme_hints()
+        self.pixel_art.update_theme_hints()
         self.status.set(tr(self.lang, "ready"))
 
     def _update_setting_description(self, _event=None):
@@ -5648,7 +6172,15 @@ class App:
 
     def _render_lists(self):
         self._render_image_list()
-        self._render_json_list()
+        self._render_photo_json_list()
+
+    def _render_photo_json_list(self) -> None:
+        if not hasattr(self, "photo_json_list"):
+            return
+        self.photo_json_list.delete(0, END)
+        for path in self.photo_json_files:
+            self.photo_json_list.insert(END, self._json_list_display(path))
+        self._update_import_layer_info()
 
     def _render_image_list(self) -> None:
         if not hasattr(self, "image_list"):
@@ -5658,22 +6190,14 @@ class App:
             self.image_list.insert(END, self._image_list_display(path))
         self._refresh_generate_compare()
 
-    def _render_json_list(self) -> None:
-        if not hasattr(self, "json_list"):
-            return
-        self.json_list.delete(0, END)
-        for path in self.json_files:
-            self.json_list.insert(END, self._json_list_display(path))
-        self._update_import_layer_info()
-
     def _add_json_paths(self, paths):
         added = 0
         for output in best_geometry_jsons(paths):
             output = Path(output)
             if output not in self.outputs:
                 self.outputs.append(output)
-            if output not in self.json_files:
-                self.json_files.append(output)
+            if output not in self.photo_json_files:
+                self.photo_json_files.append(output)
                 added += 1
         return added
 
@@ -5699,8 +6223,8 @@ class App:
         for output in new_outputs:
             if output not in self.outputs:
                 self.outputs.append(output)
-            if output not in self.json_files:
-                self.json_files.append(output)
+            if output not in self.photo_json_files:
+                self.photo_json_files.append(output)
             mode = normalize_preprocess_mode(preprocess_mode) if preprocess_mode else PREPROCESS_NONE
             if mode == PREPROCESS_NONE:
                 path_mode = preprocess_mode_for_path(output)
@@ -5770,8 +6294,12 @@ class App:
             f"Custom settings enabled: {self.use_custom_settings.get()}",
             f"Images: {len(self.images)}",
             *[f"  image: {path}" for path in self.images],
-            f"JSON files: {len(self.json_files)}",
-            *[f"  json: {path}" for path in self.json_files],
+            f"Photo designs: {len(self.photo_json_files)}",
+            *[f"  photo: {path}" for path in self.photo_json_files],
+            f"Text designs: {len(self.text_import_json_files)}",
+            *[f"  text: {path}" for path in self.text_import_json_files],
+            f"Pixel designs: {len(self.pixel_json_files)}",
+            *[f"  pixel: {path}" for path in self.pixel_json_files],
             f"Generated outputs: {len(self.outputs)}",
             *[f"  output: {path}" for path in self.outputs],
         ]
@@ -6233,40 +6761,21 @@ class App:
         USER_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
         os.startfile(USER_SETTINGS_DIR)
 
-    def add_json(self):
-        files = filedialog.askopenfilenames(
-            title=tr(self.lang, "dialog_choose_geometry_json"),
-            filetypes=[("Geometry JSON", "*.json"), ("All files", "*.*")],
-        )
-        for item in files:
-            path = Path(item)
-            if path.exists() and path not in self.json_files:
-                self.json_files.append(path)
-        self._render_lists()
-        if files:
-            self.show_json_preview(Path(files[0]))
-
-    def remove_selected_json(self):
-        selection = list(self.json_list.curselection())
-        if not selection:
-            self.log_line(tr(self.lang, "no_json_selected"))
-            return
-        for index in sorted(selection, reverse=True):
-            try:
-                del self.json_files[index]
-            except IndexError:
-                pass
-        self._render_lists()
-        if hasattr(self, "import_preview_label"):
-            self.import_preview_label.config(image="", text=tr(self.lang, "preview_hint"))
-            self.import_preview_label.image = None
-
     def use_generated_outputs(self):
         for path in self.outputs:
-            if path.exists() and path not in self.json_files:
-                self.json_files.append(path)
+            if path.exists() and path not in self.photo_json_files:
+                self.photo_json_files.append(path)
         self._render_lists()
         self.log_line(tr(self.lang, "log_added_generated_json").format(count=len(self.outputs)))
+
+    def _preview_selected_photo_json(self, _event=None):
+        if not hasattr(self, "photo_json_list"):
+            return
+        selection = self.photo_json_list.curselection()
+        if selection:
+            path = self.photo_json_files[selection[0]]
+            self.show_geometry_import_preview(path, self.photo_import_preview_label)
+            self._update_import_layer_info(path)
 
     def _preview_selected_image(self, _event=None):
         selection = self.image_list.curselection()
@@ -6276,27 +6785,24 @@ class App:
             self._ensure_preview_for_image(image_path)
         self._refresh_generate_compare()
 
-    def _preview_selected_json(self, _event=None):
-        selection = self.json_list.curselection()
-        if selection:
-            path = self.json_files[selection[0]]
-            self.show_json_preview(path)
-            self._update_import_layer_info(path)
-
     def _on_layer_count_changed(self, *_args):
         self._update_import_layer_info()
+        self._update_text_import_layer_info()
 
-    def _update_import_layer_info(self, json_path=None):
+    def _update_import_layer_info(self, json_path=None, *, files=None, listbox=None):
         from generator_backend import geometry_shape_count
 
-        if json_path is None:
-            selection = self.json_list.curselection()
+        files = self.photo_json_files if files is None else files
+        listbox = getattr(self, "photo_json_list", None) if listbox is None else listbox
+        if json_path is None and listbox is not None:
+            selection = listbox.curselection()
             if selection:
-                json_path = self.json_files[selection[0]]
-            elif self.json_files:
-                json_path = self.json_files[-1]
+                json_path = files[selection[0]]
+            elif files:
+                json_path = files[-1]
         if not json_path:
-            self.layer_count_info.set(tr(self.lang, "layer_import_info"))
+            if files is self.photo_json_files or files is None:
+                self.layer_count_info.set(tr(self.lang, "layer_import_info"))
             return
         try:
             json_layers = geometry_shape_count(json_path)
@@ -6321,20 +6827,37 @@ class App:
             self.layer_count_info.set(f"Selected {Path(json_path).name}: unable to read layer count ({exc})")
 
     def _active_preview_label(self):
-        if self._is_import_final_tab_active() and hasattr(self, "import_preview_label"):
-            return self.import_preview_label
+        if self._is_import_photo_tab_active() and hasattr(self, "photo_import_preview_label"):
+            return self.photo_import_preview_label
+        if self._is_import_text_tab_active() and hasattr(self, "text_import_preview_label"):
+            return self.text_import_preview_label
         return self._active_generation_result_label()
 
-    def _set_import_preview(self, data):
-        if not hasattr(self, "import_preview_label"):
+    def _set_geometry_import_preview(self, label, data):
+        if label is None:
             return
         if not data:
-            self.import_preview_label.config(image="", text=tr(self.lang, "preview_unavailable"), bg=COLOR_PREVIEW_BG, fg=COLOR_PREVIEW_FG)
-            self.import_preview_label.image = None
+            label.config(image="", text=tr(self.lang, "preview_unavailable"), bg=COLOR_PREVIEW_BG, fg=COLOR_PREVIEW_FG)
+            label.image = None
             return
         image = PhotoImage(data=data)
-        self.import_preview_label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
-        self.import_preview_label.image = image
+        label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+        label.image = image
+
+    def show_geometry_import_preview(self, path, label):
+        path = Path(path)
+        if label is self.photo_import_preview_label:
+            self._photo_import_preview_path = path
+            self.current_preview_request = ("json", path)
+        elif label is self.text_import_preview_label:
+            self._text_import_preview_path = path
+        data = render_geometry_json(path, self._preview_bounds(label))
+        self._set_geometry_import_preview(label, data)
+
+    def show_json_preview(self, path):
+        if hasattr(self, "photo_import_preview_label"):
+            self.show_geometry_import_preview(path, self.photo_import_preview_label)
+            self._update_import_layer_info(path)
 
     def _preview_bounds(self, label=None):
         label = label or self._active_preview_label()
@@ -6377,28 +6900,21 @@ class App:
             data = render_source_image(path, self._preview_bounds())
         self.show_preview(data)
 
-    def show_json_preview(self, path):
-        path = Path(path)
-        self.current_preview_request = ("json", path)
-        data = render_geometry_json(path, self._preview_bounds(self.import_preview_label))
-        self._set_import_preview(data)
-
     def show_preview(self, data):
         if not data:
             self.current_preview_request = None
             message = tr(self.lang, "preview_unavailable")
-            if self._is_import_final_tab_active():
-                self._set_import_preview(None)
-                if hasattr(self, "import_preview_label"):
-                    self.import_preview_label.config(text=message)
+            if self._is_geometry_import_tab_active() and hasattr(self, "photo_import_preview_label"):
+                self._set_geometry_import_preview(self.photo_import_preview_label, None)
+                self.photo_import_preview_label.config(text=message)
             label = self._active_generation_result_label()
             if label is not None:
                 label.config(image="", text=message, bg=COLOR_PREVIEW_BG, fg=COLOR_PREVIEW_FG)
                 label.image = None
             return
         self.photo = data
-        if self._is_import_final_tab_active():
-            self._set_import_preview(data)
+        if self._is_import_photo_tab_active() and hasattr(self, "photo_import_preview_label"):
+            self._set_geometry_import_preview(self.photo_import_preview_label, data)
             return
         label = self._active_generation_result_label()
         if label is None:
@@ -7153,72 +7669,13 @@ class App:
         except (OSError, json.JSONDecodeError):
             count = 0
         self.queue.put(("log", tr(self.lang, "typecode_export_done").format(count=count, path=output)))
-        if hasattr(self, "handmade_json_files") and output not in self.handmade_json_files:
-            self.handmade_json_files.append(output)
-            self.queue.put(("render_handmade_lists", None))
+        if hasattr(self, "pixel_json_files") and output not in self.pixel_json_files:
+            self.pixel_json_files.append(output)
+            self.queue.put(("render_pixel_lists", None))
         self.queue.put(("status", tr(self.lang, "done")))
 
     def start_import(self):
-        if not self.json_files:
-            self.log_line(tr(self.lang, "log_no_json_files_selected"))
-            return
-        layer_count = self.layer_count.get().strip()
-        if not layer_count:
-            self.log_line(tr(self.lang, "layer_count_required"))
-            if hasattr(self, "layer_count_entry"):
-                apply_entry_validation(self.layer_count_entry, invalid=True, manager=self.themes)
-            return
-        if hasattr(self, "layer_count_entry"):
-            apply_entry_validation(self.layer_count_entry, invalid=False, manager=self.themes)
-        if not self._prepare_memory_work("import"):
-            return
-        pid = self.ensure_live_game_pid()
-        if not pid:
-            return
-        self.status.set(tr(self.lang, "running"))
-        threading.Thread(target=self._import_worker, args=(pid,), daemon=True).start()
-
-    def _import_worker(self, pid):
-        game = self.selected_game.get() or "fh6"
-        layer_count = self.layer_count.get().strip()
-        try:
-            locations = self._resolve_import_locations(pid, game, layer_count)
-        except ValueError as exc:
-            self.queue.put(("log", str(exc)))
-            self.queue.put(("status", tr(self.lang, "failed")))
-            return
-        except RuntimeError:
-            self.queue.put(("status", tr(self.lang, "failed")))
-            return
-        pid = locations["pid"]
-        count_address = locations.get("count_address")
-        table_address = locations.get("table_address")
-        import_env = locations.get("import_env", {})
-        for path in list(self.json_files):
-            path = Path(path)
-            if game == "fh6" and layer_count:
-                self._check_json_layer_fit(path, layer_count)
-            if is_typecode_geometry_json(path):
-                self.queue.put(("log", tr(self.lang, "typecode_import_mode").format(name=path.name)))
-                code = self._import_typecode_json_file(path, locations, layer_count)
-                if code != 0:
-                    self.queue.put(("status", tr(self.lang, "failed")))
-                    return
-                self.queue.put(("log", tr(self.lang, "typecode_import_done").format(name=path.name)))
-                continue
-            cmd = [*helper_command("main"), "--game", game, "--no-preview", "--pid", str(pid)]
-            if count_address:
-                cmd.extend(["--layer-count-address", f"0x{int(count_address):x}"])
-            if table_address:
-                cmd.extend(["--layer-table-address", f"0x{int(table_address):x}"])
-            if game == "fh6" and layer_count:
-                cmd.extend(["--layer-count-value", str(layer_count)])
-            cmd.append(str(path.resolve()))
-            code = self.run_subprocess(cmd, extra_env=import_env)
-            if code != 0:
-                self.queue.put(("status", tr(self.lang, "failed")))
-                return
-        self.queue.put(("status", tr(self.lang, "done")))
+        self.start_import_photo()
 
     def start_diagnose(self):
         if not self._prepare_memory_work("diagnostics"):
@@ -7364,8 +7821,8 @@ class App:
                 self.show_preview_file(payload)
             elif kind == "render_lists":
                 self._render_lists()
-            elif kind == "render_handmade_lists":
-                self._render_handmade_list()
+            elif kind == "render_pixel_lists":
+                self._render_pixel_json_list()
             elif kind == "preview_filters_ready":
                 source_key, filter_payload = payload
                 self._apply_preview_filters_ready(source_key, filter_payload)
@@ -7386,6 +7843,13 @@ class App:
                 else:
                     payload, output = payload[0], payload[1]
                 self.text_vinyl.finish_json(payload, output, shape_mode=shape_mode)
+            elif kind == "pixel_json_done":
+                if len(payload) >= 3:
+                    output, layers_or_error, grid = payload[0], payload[1], payload[2]
+                else:
+                    output, layers_or_error = payload[0], payload[1]
+                    grid = None
+                self.pixel_art.finish_json(output, layers_or_error, grid=grid)
             elif kind == "text_fonts_ready":
                 self.text_vinyl.apply_fonts_by_script(payload)
             elif kind == "update_failed":

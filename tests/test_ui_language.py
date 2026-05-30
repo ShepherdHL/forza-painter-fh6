@@ -15,6 +15,14 @@ from ui_language import (  # noqa: E402
     resolve_initial_language_code,
     save_language_code,
 )
+from i18n import mark_experimental_trademark  # noqa: E402
+
+
+def test_mark_experimental_trademark():
+    assert mark_experimental_trademark("Experimental eco preset") == "Experimental™ eco preset"
+    assert mark_experimental_trademark("experimental cooldown") == "experimental™ cooldown"
+    assert mark_experimental_trademark("Experimental™ eco") == "Experimental™ eco"
+    assert mark_experimental_trademark("实验性 eco 预设") == "实验性™ eco 预设"
 
 
 def test_normalize_locale_tag():

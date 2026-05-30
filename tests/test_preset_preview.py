@@ -34,7 +34,7 @@ def test_effective_max_dimension_downscales_long_edge():
 
 
 def test_bundled_preset_badges():
-    assert preset_badge_prefix(Path("0. eco (experimental).ini"), {}, preset_index=0) == "❄▁▂"
+    assert preset_badge_prefix(Path("0. eco (experimental).ini"), {}, preset_index=0) == "🍃▁▂"
     assert preset_badge_prefix(Path("1. maximum speed.ini"), {}, preset_index=1) == "⚡▁▁"
     assert preset_badge_prefix(Path("2. fast.ini"), {}, preset_index=2) == "⏩▂▂"
     assert preset_badge_prefix(Path("3. normal.ini"), {}, preset_index=3) == "★▄▄▃"

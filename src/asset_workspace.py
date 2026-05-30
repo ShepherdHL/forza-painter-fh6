@@ -15,10 +15,11 @@ from app_paths import ROOT
 
 IMAGE_SOURCE_BASENAME = "original"
 
-WorkspaceKind = Literal["image", "text_vinyl"]
+WorkspaceKind = Literal["image", "text_vinyl", "pixel_art"]
 
 IMAGE_WORKSPACE_ROOT = ROOT / "runtime" / "workspace"
 TEXT_VINYL_WORKSPACE_ROOT = ROOT / "runtime" / "text-vinyl"
+PIXEL_ART_WORKSPACE_ROOT = ROOT / "runtime" / "pixel-art"
 
 LEGACY_GENERATOR_PREVIEW_DIR = ROOT / "runtime" / "previews"
 LEGACY_FILTER_PREVIEW_DIR = ROOT / "imgs" / "filter-previews"
@@ -27,7 +28,11 @@ _SAFE_STEM_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def workspace_root(kind: WorkspaceKind) -> Path:
-    return IMAGE_WORKSPACE_ROOT if kind == "image" else TEXT_VINYL_WORKSPACE_ROOT
+    if kind == "image":
+        return IMAGE_WORKSPACE_ROOT
+    if kind == "pixel_art":
+        return PIXEL_ART_WORKSPACE_ROOT
+    return TEXT_VINYL_WORKSPACE_ROOT
 
 
 def _hash8(value: str) -> str:

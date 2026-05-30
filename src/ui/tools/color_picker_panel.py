@@ -5,9 +5,10 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from tkinter import BOTH, HORIZONTAL, LEFT, X, Button, Canvas, Entry, Frame, Label, StringVar, filedialog, ttk
+from tkinter import BOTH, HORIZONTAL, LEFT, X, Canvas, Entry, Frame, Label, StringVar, filedialog, ttk
 
 from forza_colors import describe_color, hex_to_rgb
+from ui.saved_color_swatches import apply_themed_palette_surface, render_saved_color_swatches
 from ui.tools.panel_base import ToolPanel, build_tool_hint
 from utils import load_pillow
 
@@ -33,7 +34,7 @@ class ColorPickerToolPanel(ToolPanel):
         self.forza_h_var = StringVar()
         self.forza_s_var = StringVar()
         self.forza_b_var = StringVar()
-        self._saved_history: list[str] = []
+        self._palette_listener = self._on_shared_palette_changed
         self._pil_image = None
         self._photo = None
         self._canvas_scale = 1.0
@@ -101,18 +102,49 @@ class ColorPickerToolPanel(ToolPanel):
         self._value_row(grid, 3, "colors_hsb", self.hsb_h_var, extra=(self.hsb_s_var, self.hsb_b_var))
         self._value_row(grid, 4, "colors_forza", self.forza_h_var, extra=(self.forza_s_var, self.forza_b_var))
 
-        self._apply_formats(describe_color(128, 128, 128))
+        last = self._initial_rgb()
+        self._apply_formats(describe_color(*last))
         saved_row = Frame(right)
         saved_row.pack(fill=X, pady=(8, 0))
+        apply_themed_palette_surface(saved_row, app)
         app._label(saved_row, "colors_saved_history", anchor="w", theme_role="muted").pack(fill=X)
         self._history_frame = Frame(saved_row)
         self._history_frame.pack(fill=X, pady=(4, 0))
+        apply_themed_palette_surface(self._history_frame, app)
+        self._bind_shared_palette()
+        self._render_history()
 
         self.image_path.trace_add("write", lambda *_args: self._refresh_image())
+
+    def _initial_rgb(self) -> tuple[int, int, int]:
+        palette = getattr(self.app, "shared_colors", None)
+        if palette is not None:
+            colors = palette.saved_colors()
+            if colors:
+                r, g, b, _a = colors[0]
+                return r, g, b
+        from shared_color_palette import get_last_color
+
+        last = get_last_color()
+        if last is not None:
+            return last[0], last[1], last[2]
+        return 128, 128, 128
+
+    def _bind_shared_palette(self) -> None:
+        palette = getattr(self.app, "shared_colors", None)
+        if palette is None:
+            return
+        palette.subscribe(self._palette_listener)
+
+    def _on_shared_palette_changed(self, rgba: tuple[int, int, int, int], source: str) -> None:
+        self._render_history()
+        r, g, b, _a = rgba
+        self._apply_formats(describe_color(r, g, b))
 
     def on_tab_activated(self) -> None:
         if self._canvas is not None:
             self._redraw()
+        self._render_history()
 
     def _value_row(self, parent, row, label_key, primary_var, extra=()):
         self.app._label(parent, label_key, anchor="w").grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
@@ -299,12 +331,10 @@ class ColorPickerToolPanel(ToolPanel):
         if not formats:
             return
         self._apply_formats(formats)
+        palette = getattr(self.app, "shared_colors", None)
+        if palette is not None:
+            palette.push(formats.rgb.r, formats.rgb.g, formats.rgb.b, 255, source="push")
         hex_value = formats.hex.lower()
-        if hex_value in self._saved_history:
-            self._saved_history.remove(hex_value)
-        self._saved_history.insert(0, hex_value)
-        self._saved_history = self._saved_history[:16]
-        self._render_history()
         self.app.log_line(self._tr("colors_saved", hex=hex_value))
 
     def on_theme_changed(self) -> None:
@@ -313,35 +343,41 @@ class ColorPickerToolPanel(ToolPanel):
                 bg=self._color("COLOR_PANEL"),
                 highlightbackground=self._color("COLOR_BORDER"),
             )
+        if self._history_frame is not None:
+            apply_themed_palette_surface(self._history_frame, self.app)
         self._redraw()
         self._render_history()
 
     def _render_history(self) -> None:
         if self._history_frame is None:
             return
+        apply_themed_palette_surface(self._history_frame, self.app)
         for child in self._history_frame.winfo_children():
             child.destroy()
-        for hex_value in self._saved_history:
-            try:
-                btn = Button(
-                    self._history_frame,
-                    text="",
-                    width=3,
-                    height=1,
-                    bg=hex_value,
-                    activebackground=hex_value,
-                    relief="solid",
-                    bd=1,
-                    highlightthickness=1,
-                    highlightbackground=self._color("COLOR_BORDER"),
-                    command=lambda value=hex_value: self._recall(value),
-                )
-                btn.pack(side=LEFT, padx=(0, 4))
-            except Exception:
-                pass
+        palette = getattr(self.app, "shared_colors", None)
+        if palette is None:
+            return
+        render_saved_color_swatches(
+            self._history_frame,
+            self.app,
+            palette.saved_colors(),
+            on_select=self._recall_saved_color,
+        )
+
+    def _recall_saved_color(self, rgba: tuple[int, int, int, int]) -> None:
+        palette = getattr(self.app, "shared_colors", None)
+        if palette is not None:
+            palette.recall(rgba)
+            return
+        r, g, b, _a = rgba
+        self._apply_formats(describe_color(r, g, b))
 
     def _recall(self, hex_value: str) -> None:
         rgb = hex_to_rgb(hex_value)
         if rgb is None:
+            return
+        palette = getattr(self.app, "shared_colors", None)
+        if palette is not None:
+            palette.recall((rgb.r, rgb.g, rgb.b, 255))
             return
         self._apply_formats(describe_color(rgb.r, rgb.g, rgb.b))

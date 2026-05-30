@@ -14,6 +14,8 @@ DEFAULT_PANE_RATIOS: Dict[str, float] = {
     "text_horizontal": 0.58,
     "text_vertical": 0.78,
     "tools_color_horizontal": 0.62,
+    "pixel_horizontal": 0.40,
+    "pixel_file_compare_h": 0.50,
 }
 
 

@@ -483,6 +483,19 @@ class TextVinylWorkspace:
         browse = panel["font_path"].get().strip()
         if browse:
             return
+        text = panel["input"].get().strip()
+        if text:
+            suggest = recommend_font_label_for_text(text, script=script)
+            if suggest and suggest in labels:
+                current_path = panel["font_by_label"].get(current)
+                keep_current = (
+                    current in labels
+                    and current_path is not None
+                    and validate_text_coverage(text, current_path)[0]
+                )
+                if not keep_current:
+                    panel["font_choice"].set(suggest)
+                    return
         if labels and current not in labels:
             panel["font_choice"].set(labels[0])
         elif not labels:
@@ -607,11 +620,15 @@ class TextVinylWorkspace:
             self.text_coverage_label.config(text=message, fg=fg)
         else:
             key = coverage_message_key(text, False, missing)
+            message = self._tr(key).format(
+                count=len(missing),
+                chars=format_missing_chars(missing),
+            )
+            suggest = recommend_font_label_for_text(text, script=script)
+            if suggest:
+                message = f"{message} {self._tr('text_coverage_suggest_font').format(font=suggest)}"
             self.text_coverage_label.config(
-                text=self._tr(key).format(
-                    count=len(missing),
-                    chars=format_missing_chars(missing),
-                ),
+                text=message,
                 fg=self.app.themes.fg("error"),
             )
 
@@ -752,19 +769,8 @@ class TextVinylWorkspace:
         if not paths:
             self.app.log_line(self._tr("text_log_no_json_to_send"))
             return
-        added = 0
-        for path in paths:
-            if path not in self.app.json_files:
-                self.app.json_files.append(path)
-                added += 1
-            if path not in self.app.outputs:
-                self.app.outputs.append(path)
+        added = self.app.add_text_import_paths(paths, navigate=True)
         if added:
-            self.app._render_json_list()
-            self.app.json_list.selection_clear(0, END)
-            self.app.json_list.selection_set(len(self.app.json_files) - 1)
-            self.app.show_json_preview(self.app.json_files[-1])
-            self.app._update_import_layer_info(self.app.json_files[-1])
             self.app.log_line(self._tr("text_log_added_json_import").format(count=added))
         else:
             self.app.log_line(self._tr("text_log_json_already_import"))
