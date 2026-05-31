@@ -1,0 +1,28 @@
+Forza Painter FH6 — quick start (source download)
+================================================
+
+EASIEST (recommended for most users)
+  Download the .exe from GitHub Releases (not "Source code" ZIP):
+  https://github.com/ShepherdHL/forza-painter-fh6/releases
+
+  Put the .exe in any normal folder (e.g. Desktop\forza-painter-fh6) and run it.
+
+
+FROM SOURCE ZIP (developers / testers)
+  1. Extract the ZIP fully (do not run files from inside the .zip viewer).
+  2. Double-click:  Start Forza Painter.bat
+     (start_app.bat also works — same launcher.)
+
+  If Windows created a double folder like:
+    forza-painter-fh6-main\forza-painter-fh6-main\
+  you can run Start Forza Painter.bat from EITHER folder — the launcher finds the app.
+
+  First run installs Python dependencies (may take a few minutes).
+
+  If nothing appears, use:  Start Forza Painter (debug).bat
+  That keeps the console open and shows errors.
+
+
+Requirements (source only)
+  - Windows 10/11, 64-bit
+  - Python 3.10, 3.11, 3.12, or 3.13 (64-bit) with py launcher or python on PATH

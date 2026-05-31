@@ -10,6 +10,8 @@ cd /d "%ROOT%" || (
     pause
     exit /b 1
 )
+call "%ROOT%scripts\resolve_app_root.bat" "%ROOT%"
+if not errorlevel 1 set "ROOT=%RESOLVED_ROOT%" & cd /d "%ROOT%"
 set "ARG1=%~1"
 set "VENV_PYTHON=%ROOT%.venv\Scripts\python.exe"
 set "BOOTSTRAP=%ROOT%scripts\ensure_venv.bat"

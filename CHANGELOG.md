@@ -36,6 +36,7 @@ Release notes for Forza Painter FH6. The in-app update prompt reads from this fi
 - Preprocessed filter outputs on disk use **`variants/{name}.{filter}.ext`** (e.g. `Kiara_pr-img.bilateral.png`). Legacy `variants/{filter}.ext` files are still detected.
 - Generate **compare-column previews**, **checkpoint scans**, and **Kaomoji font picks** run off the UI thread to reduce freezes when changing filters, adding images, or inserting kaomoji.
 - Generation log shows **`Generated layer N/M`** while the GPU generator runs; benign `errorGridSize` preset lines are ignored.
+- **`Start Forza Painter.bat`** resolves the app root after GitHub ZIP extract (including double `forza-painter-fh6-main` folders), runs a startup import check, and launches with a stable working directory.
 
 ### Known issues
 

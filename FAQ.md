@@ -105,6 +105,23 @@ FH needs 4 extra boundary layers to save the cover and apply bounds correctly. E
 
 ---
 
+## Downloaded source ZIP from GitHub?
+
+**Normal users should use the `.exe` from [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases), not the automatic “Source code” ZIP.**
+
+If you are running from source:
+
+1. **Extract the full ZIP** (do not run batch files from inside the `.zip` preview in Explorer).
+2. Double-click **`Start Forza Painter.bat`** in the extracted folder (or `start_app.bat` — same launcher).
+3. First run installs Python dependencies; wait until the console finishes.
+4. If no window appears, run **`Start Forza Painter (debug).bat`** — it keeps the console open and shows errors.
+
+Windows sometimes creates a **double folder** (`forza-painter-fh6-main\forza-painter-fh6-main\`). The launcher finds the app automatically; you can run **`Start Forza Painter.bat`** from either level. See **`START_HERE.txt`** in the download.
+
+Requirements: **64-bit Python 3.10–3.13** on PATH (or the `py` launcher).
+
+---
+
 ## Runtime files
 
 The one-file EXE extracts its internal files temporarily and stores normal runtime data outside the EXE. The app shows the exact paths in the startup log and on the **Tools** page.

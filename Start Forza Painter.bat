@@ -1,4 +1,4 @@
 @echo off
-:: Legacy name — forwards to the main launcher.
+:: Main launcher — double-click this after extracting the download.
 call "%~dp0scripts\launch_app.bat" "%~dp0"
 exit /b %ERRORLEVEL%

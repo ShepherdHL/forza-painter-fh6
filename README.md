@@ -58,6 +58,8 @@ Convert PNG/JPG/BMP images into Forza Horizon 6 Vinyl Group layers. The app hand
 
 Do not download GitHub's automatic `Source code` ZIP unless you are developing the project. Normal users only need the `.exe`.
 
+**From source ZIP:** extract fully, then double-click **`Start Forza Painter.bat`** (see **`START_HERE.txt`**). The launcher handles common double-folder extracts from GitHub.
+
 ## Preview
 
 <table>
