@@ -95,10 +95,7 @@ class WorkspacePaths:
         return self
 
 
-def image_workspace(source: str | Path) -> WorkspacePaths:
-    source = Path(source)
-    workspace_id = image_workspace_id(source)
-    root = IMAGE_WORKSPACE_ROOT / workspace_id
+def _image_workspace_paths(workspace_id: str, root: Path) -> WorkspacePaths:
     preview = root / "preview"
     return WorkspacePaths(
         kind="image",
@@ -116,6 +113,22 @@ def image_workspace(source: str | Path) -> WorkspacePaths:
         cache=root / "cache",
         logs=root / "logs",
     )
+
+
+def image_workspace(source: str | Path) -> WorkspacePaths:
+    source = Path(source)
+    try:
+        resolved = source.resolve()
+        ws_root = IMAGE_WORKSPACE_ROOT.resolve()
+        if ws_root in resolved.parents:
+            workspace_id = resolved.relative_to(ws_root).parts[0]
+            root = ws_root / workspace_id
+            if root.is_dir():
+                return _image_workspace_paths(workspace_id, root)
+    except (OSError, ValueError):
+        pass
+    workspace_id = image_workspace_id(source)
+    return _image_workspace_paths(workspace_id, IMAGE_WORKSPACE_ROOT / workspace_id)
 
 
 def is_path_in_workspace(path: str | Path, paths: WorkspacePaths | None = None) -> bool:
@@ -175,10 +188,23 @@ def ensure_image_workspace_source(source: str | Path, *, copy_external: bool) ->
 
 
 def variant_image_path(source: str | Path, mode: str, *, suffix: str | None = None) -> Path:
+    """Canonical preprocessed variant path: ``variants/{stem}.{mode}{ext}``."""
     source = Path(source)
     ext = suffix or source.suffix or ".png"
     paths = image_workspace(source).ensure()
-    mode_name = mode.strip().lower()
+    mode_name = normalize_filter_mode(mode)
+    if mode_name in ("", "none"):
+        mode_name = "plain"
+    base_stem = workspace_source_stem(source)
+    return paths.variants / f"{base_stem}.{mode_name}{ext.lower()}"
+
+
+def legacy_variant_image_path(source: str | Path, mode: str, *, suffix: str | None = None) -> Path:
+    """Previous layout: ``variants/{mode}{ext}`` (still read for migration)."""
+    source = Path(source)
+    ext = suffix or source.suffix or ".png"
+    paths = image_workspace(source).ensure()
+    mode_name = normalize_filter_mode(mode)
     return paths.variants / f"{mode_name}{ext.lower()}"
 
 
@@ -195,7 +221,7 @@ def normalize_filter_mode(mode: str) -> str:
 def generator_json_output_base(source: str | Path) -> Path:
     source = Path(source)
     paths = image_workspace(source).ensure()
-    return paths.json_root / safe_stem(source.stem)
+    return paths.json_root / workspace_source_stem(source)
 
 
 def generator_live_preview_path(source: str | Path) -> Path:
@@ -255,6 +281,31 @@ def read_manifest(paths: WorkspacePaths) -> dict | None:
         return payload if isinstance(payload, dict) else None
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def workspace_display_name(source: str | Path) -> str:
+    """Human-readable filename for queue labels (manifest label, not workspace `original.*`)."""
+    source = Path(source)
+    manifest = read_manifest(image_workspace(source))
+    if manifest:
+        label = str(manifest.get("label", "")).strip()
+        if label:
+            return label
+        original = str(manifest.get("source_original", "")).strip()
+        if original:
+            return Path(original).name
+    return source.name
+
+
+def workspace_source_stem(source: str | Path) -> str:
+    """Filename stem used for variant files (manifest label stem, else source stem)."""
+    source = Path(source)
+    manifest = read_manifest(image_workspace(source))
+    if manifest:
+        label = str(manifest.get("label", "")).strip()
+        if label:
+            return safe_stem(Path(label).stem)
+    return safe_stem(source.stem)
 
 
 def iter_workspaces(kind: WorkspaceKind | None = None) -> list[WorkspacePaths]:

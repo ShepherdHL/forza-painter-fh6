@@ -9,6 +9,7 @@ import numpy as np
 from asset_workspace import (
     filter_preview_path,
     legacy_preprocessed_path,
+    legacy_variant_image_path,
     variant_image_path,
 )
 from preprocess.alpha import bgra_has_semi_transparent_alpha, defringe_alpha_bgra
@@ -105,13 +106,46 @@ def preprocess_mode_for_path(path: str | Path) -> str | None:
     stem = path.stem.lower()
     if path.parent.name.lower() == "variants":
         for mode_id in PREPROCESS_MODE_IDS:
-            if mode_id != PREPROCESS_NONE and stem == mode_id:
+            if mode_id == PREPROCESS_NONE:
+                continue
+            if stem == mode_id or stem.endswith(f".{mode_id}"):
                 return mode_id
     for mode_id in PREPROCESS_MODE_IDS:
         if mode_id != PREPROCESS_NONE and f".{mode_id}" in stem:
             return mode_id
-    if ".luma-bands" in stem or ".luma_band" in stem:
+    if ".luma-bands" in stem or ".luma_band" in stem or stem.endswith(".luma_band"):
         return PREPROCESS_LUMA
+    return None
+
+
+def _variant_read_candidates(image_path: Path, mode: str) -> tuple[Path, ...]:
+    image_path = Path(image_path)
+    ext = image_path.suffix or ".png"
+    mode = normalize_preprocess_mode(mode)
+    paths = (
+        variant_image_path(image_path, mode, suffix=ext),
+        legacy_variant_image_path(image_path, mode, suffix=ext),
+        legacy_preprocessed_path(image_path, mode),
+    )
+    seen: set[str] = set()
+    ordered: list[Path] = []
+    for path in paths:
+        key = str(path).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(path)
+    return tuple(ordered)
+
+
+def resolve_preprocessed_image_path(image_path: str | Path, mode: str) -> Path | None:
+    """Return an existing on-disk preprocessed file (new or legacy layout)."""
+    for candidate in _variant_read_candidates(Path(image_path), mode):
+        try:
+            if candidate.is_file():
+                return candidate
+        except OSError:
+            continue
     return None
 
 
@@ -123,22 +157,9 @@ def preprocessed_image_path(image_path: str | Path, mode: str) -> Path:
     return variant_image_path(image_path, mode)
 
 
-def _legacy_preprocessed_exists(image_path: Path, mode: str) -> bool:
-    path = legacy_preprocessed_path(image_path, mode)
-    try:
-        return path.is_file()
-    except OSError:
-        return False
-
 
 def preprocessed_image_exists(image_path: str | Path, mode: str) -> bool:
-    path = preprocessed_image_path(image_path, mode)
-    try:
-        if path.is_file():
-            return True
-    except OSError:
-        pass
-    return _legacy_preprocessed_exists(Path(image_path), mode)
+    return resolve_preprocessed_image_path(image_path, mode) is not None
 
 
 def apply_preprocess_bgra(bgra: np.ndarray, mode: str) -> np.ndarray:
@@ -207,10 +228,11 @@ def preprocess_image_file(image_path: str | Path, mode: str) -> Path:
     image_path = Path(image_path)
     mode = normalize_preprocess_mode(mode)
     output_path = preprocessed_image_path(image_path, mode)
+    existing = resolve_preprocessed_image_path(image_path, mode)
     if mode == PREPROCESS_NONE:
         try:
-            if output_path.exists() and output_path.stat().st_mtime >= image_path.stat().st_mtime:
-                return output_path
+            if existing and existing.stat().st_mtime >= image_path.stat().st_mtime:
+                return existing
         except OSError:
             pass
         bgra = read_bgra(image_path)
@@ -221,8 +243,8 @@ def preprocess_image_file(image_path: str | Path, mode: str) -> Path:
         return output_path
 
     try:
-        if output_path.exists() and output_path.stat().st_mtime >= image_path.stat().st_mtime:
-            return output_path
+        if existing and existing.stat().st_mtime >= image_path.stat().st_mtime:
+            return existing
     except OSError:
         pass
 

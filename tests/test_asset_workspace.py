@@ -12,6 +12,7 @@ from asset_workspace import (
     image_workspace,
     image_workspace_id,
     text_vinyl_workspace,
+    workspace_display_name,
     write_manifest,
 )
 from file_management_settings import (
@@ -49,7 +50,7 @@ def test_tier_cleanup_preserves_final_json(tmp_path, monkeypatch):
     paths.preview_generation.write_bytes(b"preview")
     paths.preview_filters.mkdir(parents=True, exist_ok=True)
     (paths.preview_filters / "luma_band.png").write_bytes(b"filter")
-    (paths.variants / "luma_band.png").write_bytes(b"variant")
+    (paths.variants / "art.luma_band.png").write_bytes(b"variant")
     (paths.json_finals / "final.json").write_text("{}", encoding="utf-8")
 
     clear_workspace_tier1(paths)
@@ -58,7 +59,7 @@ def test_tier_cleanup_preserves_final_json(tmp_path, monkeypatch):
     assert not paths.cache.exists() or not any(paths.cache.iterdir())
     assert not paths.preview_generation.exists()
     assert not (paths.preview_filters / "luma_band.png").exists()
-    assert not (paths.variants / "luma_band.png").exists()
+    assert not (paths.variants / "art.luma_band.png").exists()
     assert (paths.json_finals / "final.json").is_file()
 
 
@@ -141,3 +142,45 @@ def test_text_vinyl_workspace_paths(tmp_path, monkeypatch):
     paths = text_vinyl_workspace("typed", "hello").ensure()
     assert paths.json_finals == paths.root / "json"
     assert paths.kind == "text_vinyl"
+
+
+def test_workspace_display_name_uses_manifest_label(tmp_path, monkeypatch):
+    monkeypatch.setattr("asset_workspace.ROOT", tmp_path)
+    monkeypatch.setattr("asset_workspace.IMAGE_WORKSPACE_ROOT", tmp_path / "runtime" / "workspace")
+    source = tmp_path / "Kiara_pr-img.png"
+    source.write_bytes(b"png")
+    paths = image_workspace(source).ensure()
+    workspace_source = paths.source / "original.png"
+    workspace_source.write_bytes(b"png")
+    write_manifest(paths, {"label": "Kiara_pr-img.png", "source_original": str(source)})
+    assert workspace_display_name(workspace_source) == "Kiara_pr-img.png"
+
+
+def test_variant_image_path_uses_stem_and_mode(tmp_path, monkeypatch):
+    monkeypatch.setattr("asset_workspace.ROOT", tmp_path)
+    monkeypatch.setattr("asset_workspace.IMAGE_WORKSPACE_ROOT", tmp_path / "runtime" / "workspace")
+    from asset_workspace import variant_image_path
+
+    source = tmp_path / "Kiara_pr-img.png"
+    source.write_bytes(b"png")
+    paths = image_workspace(source).ensure()
+    workspace_source = paths.source / "original.png"
+    workspace_source.write_bytes(b"png")
+    write_manifest(paths, {"label": "Kiara_pr-img.png", "source_original": str(source)})
+    path = variant_image_path(workspace_source, "bilateral")
+    assert path.name == "Kiara_pr-img.bilateral.png"
+    assert path.parent.name == "variants"
+
+
+def test_legacy_variant_image_path_layout(tmp_path, monkeypatch):
+    monkeypatch.setattr("asset_workspace.ROOT", tmp_path)
+    monkeypatch.setattr("asset_workspace.IMAGE_WORKSPACE_ROOT", tmp_path / "runtime" / "workspace")
+    from asset_workspace import legacy_variant_image_path
+
+    source = tmp_path / "logo.png"
+    source.write_bytes(b"png")
+    paths = image_workspace(source).ensure()
+    workspace_source = paths.source / "original.png"
+    workspace_source.write_bytes(b"png")
+    write_manifest(paths, {"label": "logo.png", "source_original": str(source)})
+    assert legacy_variant_image_path(workspace_source, "bilateral").name == "bilateral.png"

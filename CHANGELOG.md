@@ -12,7 +12,38 @@ Release notes for Forza Painter FH6. The in-app update prompt reads from this fi
 
 ## Unreleased
 
-### GPU selection & generation routing
+### Text Vinyl
+
+- **Trace cell size** now defaults to **1** instead of 4 for sharper traced detail.
+- **Kaomoji** script tab: searchable paginated library, one-click insert, and automatic font recommendation for symbol-heavy text.
+
+### Hardware selection
+
+- Hardware used for generation can be selected in the header **Resource Monitor** (↻ refresh).
+- Choose among **multiple graphics adapters** (discrete or integrated). Integrated entries show **(integrated)** and require confirmation.
+- You can steer generation to an **integrated / iGPU** adapter (similar in spirit to early community builds). **Use at your own risk** — slower, hotter, and less stable than a discrete GPU.
+- **Backend** dropdown: **Auto**, **OpenCL**, or **Vulkan** for the bundled GPU generator. See [`docs/GPU_GENERATION.md`](docs/GPU_GENERATION.md).
+
+### User interface
+
+- Cleaned up UI elements, hints, and theme tokens for readability.
+- Sticky footers and pane minimums help keep main actions (**Generate**, **Import**, **Text vinyl**) visible when resizing.
+- **Image Preview → Generate JSON:** pick a preprocess filter on Preview and the same filter is active on Generate (one shared pipeline).
+- Generate image queue shows the **original filename plus filter tag** (e.g. `Kiara.png · [Bilateral]`).
+
+### Storage & stability
+
+- Preprocessed filter outputs on disk use **`variants/{name}.{filter}.ext`** (e.g. `Kiara_pr-img.bilateral.png`). Legacy `variants/{filter}.ext` files are still detected.
+- Generate **compare-column previews**, **checkpoint scans**, and **Kaomoji font picks** run off the UI thread to reduce freezes when changing filters, adding images, or inserting kaomoji.
+- Generation log shows **`Generated layer N/M`** while the GPU generator runs; benign `errorGridSize` preset lines are ignored.
+
+### Known issues
+
+- Primary layout testing was on **1920×1080**. Smaller or ultrawide displays may need splitter adjustment.
+- First **Image Preview** analysis per image still takes time (filter thumbnails computed in the background).
+- This push is **source-first / experimental** — a republished EXE may follow after wider resolution testing.
+
+### GPU selection & generation routing (detail)
 
 - **Monitor GPU** dropdown in the header Resource Monitor (↻ refresh): choose which adapter drives telemetry, eco cooldown, and generation routing. **Auto (recommended)** is the default.
 - **Integrated GPU** entries are labeled **(integrated)**; selecting one shows a confirmation dialog before saving.

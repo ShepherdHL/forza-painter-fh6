@@ -399,9 +399,23 @@ class TextVinylWorkspace:
                 pass
         self._refresh_script_font_combo(script)
         self._schedule_coverage_check()
+        threading.Thread(
+            target=self._apply_kaomoji_font_recommendation_worker,
+            args=(kaomoji, script),
+            daemon=True,
+        ).start()
+
+    def _apply_kaomoji_font_recommendation_worker(self, kaomoji: str, script: str) -> None:
         recommendation = recommend_font_for_text(kaomoji, script=script)
-        if recommendation.label:
+        if not recommendation.label:
+            return
+
+        def _apply() -> None:
+            if self.app.closed:
+                return
             self.apply_recommended_font(recommendation=recommendation, script=script)
+
+        self.app.root.after(0, _apply)
 
     def refresh_char_pickers(self) -> None:
         for script in TEXT_SCRIPT_IDS:

@@ -86,6 +86,7 @@ from image_tailored_preset import (
     save_tailored_acknowledged,
     write_tailored_profile,
 )
+from generator_log import friendly_generator_line
 from generator_launch_options import GeneratorLaunchOptions
 from generator_backend import (
     GENERATOR_EXE,
@@ -118,7 +119,7 @@ from generator_backend import (
     write_user_settings_preset,
 )
 from utils import load_cv2, load_pillow
-from asset_workspace import ensure_image_workspace_source
+from asset_workspace import ensure_image_workspace_source, workspace_display_name
 from file_management_settings import load_file_management_settings
 from preset_preview import (
     effective_max_dimension,
@@ -140,6 +141,7 @@ from preprocess.filters import (
     preprocessed_image_path,
     preprocess_mode_for_path,
     preview_output_folder,
+    resolve_preprocessed_image_path,
 )
 from security_policy import (
     GITHUB_RELEASES_API,
@@ -2913,6 +2915,7 @@ class App:
         self._layout_save_job = None
         self._layout_restore_jobs: list[str] = []
         self._generate_compare_jobs: dict[str, str] = {}
+        self._generate_compare_revision = 0
         self._eco_generation_settings = load_eco_generation_settings(ROOT)
         self.eco_gpu_cooldown = StringVar(
             value="1" if self._eco_generation_settings.cooldown_enabled else "0"
@@ -4210,7 +4213,7 @@ class App:
         self._refresh_preprocess_mode_combo()
         self._update_preprocess_filter_active_hint(mode_id)
         self._render_image_list()
-        self._refresh_generate_compare()
+        self._schedule_generate_compare_refresh()
         self._update_luma_status_label()
         self._update_compare_column_headers()
         if self._preview_filter_cards:
@@ -4219,7 +4222,7 @@ class App:
             self._schedule_preview_main_render()
         self._refresh_preview_preset_panel()
         if self._preview_filter_payload and is_tailored_experimental_preset(self._selected_setting()):
-            self._refresh_tailored_preset_for_image()
+            self.root.after(0, self._refresh_tailored_preset_for_image)
         self._refresh_generate_run_summary()
 
     def _on_preprocess_mode_combo(self, _event=None):
@@ -4229,9 +4232,10 @@ class App:
     def _image_list_display(self, image_path: Path) -> str:
         mode = self._selected_preprocess_mode()
         tag = self._filter_queue_tag(mode)
+        name = workspace_display_name(image_path)
         if mode != PREPROCESS_NONE and not preprocessed_image_exists(image_path, mode):
             tag = f"{tag} · {tr(self.lang, 'image_queue_prep_pending')}"
-        return f"{image_path.name}  ·  {tag}"
+        return f"{name}  ·  {tag}"
 
     def _json_preprocess_tag_key(self, json_path: Path) -> str:
         path_mode = preprocess_mode_for_path(json_path)
@@ -4312,7 +4316,7 @@ class App:
         self._refresh_generate_run_summary()
 
     def _generate_run_summary_image_names(self) -> str:
-        names = [Path(path).name for path in self.images]
+        names = [workspace_display_name(path) for path in self.images]
         if not names:
             return ""
         if len(names) == 1:
@@ -4466,99 +4470,8 @@ class App:
         label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
         label.image = image
 
-    def _refresh_generate_compare(self, which=None):
-        if not hasattr(self, "generate_source_before_preview"):
-            return
-        image_path = self._selected_generate_image()
-        self._generate_compare_image = image_path
-        if image_path is None:
-            if which in (None, "source_before"):
-                self.generate_source_before_preview.config(image="", text=tr(self.lang, "luma_before_hint"))
-                self.generate_source_before_preview.image = None
-            if which in (None, "source_after"):
-                self.generate_source_after_preview.config(image="", text=tr(self.lang, "luma_after_hint"))
-                self.generate_source_after_preview.image = None
-            if which in (None, "result_without"):
-                self.generate_result_without_preview.config(image="", text=tr(self.lang, "generate_no_checkpoint"))
-                self.generate_result_without_preview.image = None
-                self.generate_layers_without_label.config(text=tr(self.lang, "generate_no_checkpoint"))
-            if which in (None, "result_with"):
-                self.generate_result_with_preview.config(image="", text=tr(self.lang, "generate_no_checkpoint"))
-                self.generate_result_with_preview.image = None
-                self.generate_layers_with_label.config(text=tr(self.lang, "generate_no_checkpoint"))
-            self._update_luma_status_label()
-            self._update_compare_column_headers()
-            return
-
-        if which in (None, "source_before"):
-            self._render_label_image_preview(
-                self.generate_source_before_preview,
-                image_path,
-                "luma_before_hint",
-                min_height=GENERATE_COMPARE_SOURCE_MIN,
-            )
-        mode = self._selected_preprocess_mode()
-        if which in (None, "source_after"):
-            after_path = None
-            if mode != PREPROCESS_NONE:
-                if preprocessed_image_exists(image_path, mode):
-                    after_path = preprocessed_image_path(image_path, mode)
-                else:
-                    cached = self._preview_filter_payload.get(mode)
-                    if cached and Path(cached.get("path", "")).exists():
-                        after_path = Path(cached["path"])
-                    elif load_cv2():
-                        try:
-                            from preprocess.filters import preprocess_image_file
-
-                            after_path = preprocess_image_file(image_path, mode)
-                        except Exception:
-                            after_path = None
-            self._render_label_image_preview(
-                self.generate_source_after_preview,
-                after_path,
-                "luma_after_hint",
-                min_height=GENERATE_COMPARE_SOURCE_MIN,
-            )
-
-        without_jsons = checkpoints_for_image(image_path, preprocess_mode=PREPROCESS_NONE)
-        with_jsons = checkpoints_for_image(image_path, preprocess_mode=mode) if mode != PREPROCESS_NONE else []
-        without_json = without_jsons[0] if without_jsons else None
-        with_json = with_jsons[0] if with_jsons else None
-
-        if which in (None, "result_without"):
-            if without_json:
-                self._render_label_json_preview(
-                    self.generate_result_without_preview,
-                    without_json,
-                    "generate_no_checkpoint",
-                    min_height=GENERATE_COMPARE_RESULT_MIN,
-                )
-            else:
-                self.generate_result_without_preview.config(image="", text=tr(self.lang, "generate_no_checkpoint"))
-                self.generate_result_without_preview.image = None
-            self.generate_layers_without_label.config(
-                text=self._result_layer_label(image_path, PREPROCESS_NONE, without_json)
-            )
-        if which in (None, "result_with"):
-            if with_json:
-                self._render_label_json_preview(
-                    self.generate_result_with_preview,
-                    with_json,
-                    "generate_no_checkpoint",
-                    min_height=GENERATE_COMPARE_RESULT_MIN,
-                )
-            else:
-                self.generate_result_with_preview.config(image="", text=tr(self.lang, "generate_no_checkpoint"))
-                self.generate_result_with_preview.image = None
-            self.generate_layers_with_label.config(
-                text=self._result_layer_label(image_path, mode, with_json)
-            )
-        self._update_luma_status_label()
-        self._update_compare_column_headers()
-
     def _schedule_generate_compare_refresh(self, which=None):
-        if not hasattr(self, "_generate_compare_jobs"):
+        if not hasattr(self, "generate_source_before_preview"):
             return
         job_key = which or "all"
         job = self._generate_compare_jobs.get(job_key)
@@ -4568,15 +4481,160 @@ class App:
             except Exception:
                 pass
         self._generate_compare_jobs[job_key] = self.root.after(
-            180,
+            120,
             lambda w=which: self._run_generate_compare_refresh(w),
         )
 
-    def _run_generate_compare_refresh(self, which):
+    def _run_generate_compare_refresh(self, which=None):
         self._generate_compare_jobs.pop(which or "all", None)
         if self.closed:
             return
         self._refresh_generate_compare(which)
+
+    def _clear_generate_compare_previews(self, which=None):
+        if which in (None, "source_before"):
+            self.generate_source_before_preview.config(image="", text=tr(self.lang, "luma_before_hint"))
+            self.generate_source_before_preview.image = None
+        if which in (None, "source_after"):
+            self.generate_source_after_preview.config(image="", text=tr(self.lang, "luma_after_hint"))
+            self.generate_source_after_preview.image = None
+        if which in (None, "result_without"):
+            self.generate_result_without_preview.config(image="", text=tr(self.lang, "generate_no_checkpoint"))
+            self.generate_result_without_preview.image = None
+            self.generate_layers_without_label.config(text=tr(self.lang, "generate_no_checkpoint"))
+        if which in (None, "result_with"):
+            self.generate_result_with_preview.config(image="", text=tr(self.lang, "generate_no_checkpoint"))
+            self.generate_result_with_preview.image = None
+            self.generate_layers_with_label.config(text=tr(self.lang, "generate_no_checkpoint"))
+
+    def _generate_compare_snapshot_worker(
+        self,
+        revision: int,
+        which,
+        image_path: Path,
+        mode: str,
+        preview_payload: dict | None,
+    ) -> None:
+        snap: dict = {
+            "revision": revision,
+            "which": which,
+            "image_key": str(image_path.resolve()),
+            "mode": mode,
+            "previews": {},
+            "json": {},
+        }
+        try:
+            bounds_source = (PREVIEW_MAX, GENERATE_COMPARE_SOURCE_MIN + 40)
+            bounds_result = (PREVIEW_MAX, GENERATE_COMPARE_RESULT_MIN + 40)
+            if which in (None, "source_before"):
+                snap["previews"]["source_before"] = render_source_image(image_path, bounds_source)
+            if which in (None, "source_after"):
+                after_path = None
+                if mode != PREPROCESS_NONE:
+                    after_path = resolve_preprocessed_image_path(image_path, mode)
+                    if after_path is None and preview_payload:
+                        cached = preview_payload.get(mode)
+                        if cached and Path(cached.get("path", "")).exists():
+                            after_path = Path(cached["path"])
+                if after_path is not None:
+                    snap["previews"]["source_after"] = render_source_image(after_path, bounds_source)
+            without_jsons = checkpoints_for_image(image_path, preprocess_mode=PREPROCESS_NONE)
+            with_jsons = checkpoints_for_image(image_path, preprocess_mode=mode) if mode != PREPROCESS_NONE else []
+            without_json = without_jsons[0] if without_jsons else None
+            with_json = with_jsons[0] if with_jsons else None
+            snap["json"] = {
+                "without": str(without_json) if without_json else None,
+                "with": str(with_json) if with_json else None,
+            }
+            if which in (None, "result_without") and without_json:
+                snap["previews"]["result_without"] = render_geometry_json(without_json, bounds_result)
+            if which in (None, "result_with") and with_json:
+                snap["previews"]["result_with"] = render_geometry_json(with_json, bounds_result)
+        except Exception as exc:
+            snap["error"] = str(exc)
+        self.queue.put(("generate_compare_ready", snap))
+
+    def _apply_generate_compare_snapshot(self, snap: dict) -> None:
+        if snap.get("revision") != self._generate_compare_revision:
+            return
+        which = snap.get("which")
+        if snap.get("error"):
+            self.log_line(f"Compare preview: {snap['error']}")
+        previews = snap.get("previews") or {}
+        json_info = snap.get("json") or {}
+        image_path = None
+        image_key = snap.get("image_key")
+        if image_key:
+            try:
+                image_path = Path(image_key)
+            except OSError:
+                image_path = None
+        mode = snap.get("mode", PREPROCESS_NONE)
+
+        def _apply_photo(label, key, hint_key, min_height=0):
+            data = previews.get(key)
+            if data is None:
+                return
+            image = PhotoImage(data=data)
+            label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+            label.image = image
+
+        if which in (None, "source_before"):
+            if "source_before" in previews:
+                _apply_photo(self.generate_source_before_preview, "source_before", "luma_before_hint")
+            else:
+                self.generate_source_before_preview.config(image="", text=tr(self.lang, "luma_before_hint"))
+                self.generate_source_before_preview.image = None
+        if which in (None, "source_after"):
+            if "source_after" in previews:
+                _apply_photo(self.generate_source_after_preview, "source_after", "luma_after_hint")
+            else:
+                self.generate_source_after_preview.config(image="", text=tr(self.lang, "luma_after_hint"))
+                self.generate_source_after_preview.image = None
+        if which in (None, "result_without"):
+            if "result_without" in previews:
+                _apply_photo(self.generate_result_without_preview, "result_without", "generate_no_checkpoint")
+            else:
+                self.generate_result_without_preview.config(image="", text=tr(self.lang, "generate_no_checkpoint"))
+                self.generate_result_without_preview.image = None
+            without_json = Path(json_info["without"]) if json_info.get("without") else None
+            if image_path is not None:
+                self.generate_layers_without_label.config(
+                    text=self._result_layer_label(image_path, PREPROCESS_NONE, without_json)
+                )
+        if which in (None, "result_with"):
+            if "result_with" in previews:
+                _apply_photo(self.generate_result_with_preview, "result_with", "generate_no_checkpoint")
+            else:
+                self.generate_result_with_preview.config(image="", text=tr(self.lang, "generate_no_checkpoint"))
+                self.generate_result_with_preview.image = None
+            with_json = Path(json_info["with"]) if json_info.get("with") else None
+            if image_path is not None:
+                self.generate_layers_with_label.config(
+                    text=self._result_layer_label(image_path, mode, with_json)
+                )
+        self._update_luma_status_label()
+        self._update_compare_column_headers()
+
+    def _refresh_generate_compare(self, which=None):
+        if not hasattr(self, "generate_source_before_preview"):
+            return
+        image_path = self._selected_generate_image()
+        self._generate_compare_image = image_path
+        if image_path is None:
+            self._clear_generate_compare_previews(which)
+            self._update_luma_status_label()
+            self._update_compare_column_headers()
+            return
+        self._generate_compare_revision += 1
+        revision = self._generate_compare_revision
+        mode = self._selected_preprocess_mode()
+        payload = dict(self._preview_filter_payload) if self._preview_filter_payload else None
+        threading.Thread(
+            target=self._generate_compare_snapshot_worker,
+            args=(revision, which, Path(image_path), mode, payload),
+            daemon=True,
+        ).start()
 
     def _build_text_tab(self):
         self.text_vinyl.build(self.text_tab)
@@ -5898,7 +5956,7 @@ class App:
         self._highlight_preview_filter_cards()
         self._schedule_preview_main_render()
         self._refresh_preview_preset_panel()
-        self._refresh_generate_compare()
+        self._schedule_generate_compare_refresh()
         self._refresh_generate_run_summary()
         image_path = Path(source_key)
         if image_path.is_file():
@@ -6126,7 +6184,7 @@ class App:
         if self.photo is None and hasattr(self, "photo_import_preview_label"):
             self.photo_import_preview_label.config(text=tr(self.lang, "preview_hint"))
         if hasattr(self, "generate_source_before_preview"):
-            self._refresh_generate_compare()
+            self._schedule_generate_compare_refresh()
         if hasattr(self, "advanced_button"):
             self.advanced_button.config(text=tr(self.lang, "hide_advanced" if self.advanced_visible else "show_advanced"))
         if hasattr(self, "setting_description"):
@@ -6584,7 +6642,7 @@ class App:
             Path(image_path),
             values,
             complexity_estimate=estimate,
-            image_name=Path(image_path).name,
+            image_name=workspace_display_name(image_path),
         )
         current_setting = self._selected_setting()
         keep_path = current_setting.get("path") if current_setting else None
@@ -6743,7 +6801,7 @@ class App:
         self.image_list.delete(0, END)
         for path in self.images:
             self.image_list.insert(END, self._image_list_display(path))
-        self._refresh_generate_compare()
+        self._schedule_generate_compare_refresh()
         self._refresh_generate_run_summary()
 
     def _add_json_paths(self, paths):
@@ -6763,7 +6821,9 @@ class App:
             return 0
         added = self._add_json_paths(existing[:1])
         if added:
-            message = tr(self.lang, "existing_checkpoints_found").format(image=Path(image_path).name, count=len(existing))
+            message = tr(self.lang, "existing_checkpoints_found").format(
+                image=workspace_display_name(image_path), count=len(existing)
+            )
             if log_to_queue:
                 self.queue.put(("log", message))
             else:
@@ -7163,36 +7223,6 @@ class App:
         eta_time = datetime.fromtimestamp(now + remaining_seconds).strftime("%H:%M:%S")
         return f"{friendly} | ETA {eta_time} ({self._format_remaining_time(remaining_seconds)})"
 
-    def friendly_generator_line(self, line):
-        text = (line or "").strip()
-        if not text:
-            return None
-        progress = re.match(r"\[(\d+)/(\d+)\]\s+(.*)", text)
-        if progress:
-            current, total, detail = progress.groups()
-            if "Added rotated ellipse" in detail:
-                return f"Generated layer {current}/{total}"
-            if "Saved geometry checkpoint" in detail:
-                return f"Saved JSON checkpoint {current}/{total}"
-            if "Saved preview snapshot" in detail:
-                return f"Updated preview {current}/{total}"
-            if "Step completed" in detail:
-                return None
-            return None
-        if text.startswith("Loaded image:"):
-            return text
-        if text.startswith("Settings:"):
-            return text
-        if text.startswith("OpenCL: Selected device"):
-            return text
-        if text.startswith("Scoring mode:"):
-            return text
-        if text in ("FINISHED",):
-            return text
-        if "error" in text.lower() or "failed" in text.lower() or "panic" in text.lower():
-            return text
-        return None
-
     def queue_generator_message(self, friendly, last_message):
         if not friendly or friendly == last_message:
             return last_message
@@ -7260,14 +7290,25 @@ class App:
             if path not in self.images:
                 self.images.append(path)
                 added_paths.append(path)
-                self._load_existing_checkpoints_for_image(path)
         self._render_lists()
         if files:
             self.show_source_preview(Path(files[0]))
         if added_paths:
-            existing_added = sum(1 for path in added_paths if generated_jsons(path))
-            if existing_added:
-                self.log_line(tr(self.lang, "cannot_resume_checkpoint"))
+            threading.Thread(
+                target=self._load_added_image_checkpoints_worker,
+                args=(list(added_paths),),
+                daemon=True,
+            ).start()
+
+    def _load_added_image_checkpoints_worker(self, paths: list[Path]) -> None:
+        resume_notice = False
+        for path in paths:
+            if generated_jsons(path):
+                resume_notice = True
+            self._load_existing_checkpoints_for_image(path, log_to_queue=True)
+        if resume_notice:
+            self.queue.put(("log", tr(self.lang, "cannot_resume_checkpoint")))
+        self.queue.put(("render_lists", None))
 
     def remove_selected_image(self):
         selection = list(self.image_list.curselection())
@@ -7280,7 +7321,7 @@ class App:
             except IndexError:
                 pass
         self._render_lists()
-        self._refresh_generate_compare()
+        self._schedule_generate_compare_refresh()
 
     def _unique_preset_destination(self, source_path):
         USER_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -7339,7 +7380,7 @@ class App:
             image_path = self.images[selection[0]]
             self.show_source_preview(image_path)
             self._ensure_preview_for_image(image_path)
-        self._refresh_generate_compare()
+        self._schedule_generate_compare_refresh()
         self._refresh_generate_run_summary()
 
     def _on_layer_count_changed(self, *_args):
@@ -7483,7 +7524,7 @@ class App:
     def show_source_preview(self, path):
         path = Path(path)
         self.current_preview_request = ("source", path)
-        self._refresh_generate_compare()
+        self._schedule_generate_compare_refresh()
 
     def show_preview_file(self, path, remember=True):
         path = Path(path)
@@ -7496,7 +7537,7 @@ class App:
                     uses_filter = self._selected_preprocess_mode() != PREPROCESS_NONE
                     label = self.generate_result_with_preview if uses_filter else self.generate_result_without_preview
                     self._render_label_json_preview(label, path, "generate_no_checkpoint")
-                    self._refresh_generate_compare("result_with" if uses_filter else "result_without")
+                    self._schedule_generate_compare_refresh("result_with" if uses_filter else "result_without")
                 else:
                     self.show_preview(data)
                 return
@@ -7764,7 +7805,7 @@ class App:
                             break
                         if raw_line is None:
                             continue
-                        friendly = self.friendly_generator_line(raw_line)
+                        friendly = friendly_generator_line(raw_line)
                         last_generator_message = self.queue_generator_message(friendly, last_generator_message)
 
                 try:
@@ -8375,13 +8416,15 @@ class App:
                 self.show_preview(payload)
             elif kind == "preview_json":
                 self.show_preview_file(payload)
-                self._refresh_generate_compare()
+                self._schedule_generate_compare_refresh()
             elif kind == "preview_file":
                 self.show_preview_file(payload)
             elif kind == "render_lists":
                 self._render_lists()
             elif kind == "render_pixel_lists":
                 self._render_pixel_json_list()
+            elif kind == "generate_compare_ready":
+                self._apply_generate_compare_snapshot(payload)
             elif kind == "preview_filters_ready":
                 source_key, filter_payload = payload
                 self._apply_preview_filters_ready(source_key, filter_payload)
