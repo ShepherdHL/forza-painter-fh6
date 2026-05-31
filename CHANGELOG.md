@@ -12,6 +12,10 @@ Release notes for Forza Painter FH6. The in-app update prompt reads from this fi
 
 ## Unreleased
 
+## v1.6.X (Pre-Release) / 2026-05-30
+
+- **Pre-release** experimental build on the **1.6.X** line ([ShepherdHL/forza-painter-fh6](https://github.com/ShepherdHL/forza-painter-fh6)). Release package: `forza-painter-fh6-v1.6.X.exe`. Not affiliated with upstream Forza Painter or other FH6 fork releases.
+
 ### Text Vinyl
 
 - **Trace cell size** now defaults to **1** instead of 4 for sharper traced detail.
@@ -42,7 +46,6 @@ Release notes for Forza Painter FH6. The in-app update prompt reads from this fi
 
 - Primary layout testing was on **1920×1080**. Smaller or ultrawide displays may need splitter adjustment.
 - First **Image Preview** analysis per image still takes time (filter thumbnails computed in the background).
-- This push is **source-first / experimental** — a republished EXE may follow after wider resolution testing.
 
 ### GPU selection & generation routing (detail)
 

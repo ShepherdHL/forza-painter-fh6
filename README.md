@@ -24,12 +24,12 @@
 </p>
 
 <p align="center">
-  <code>v1.6.6</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>One-file EXE</code>
+  <code>v1.6.X (Pre-Release)</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>One-file EXE</code>
 </p>
 
 Convert PNG/JPG/BMP images into Forza Horizon 6 Vinyl Group layers. The app handles generation, preview, and import in one desktop window; normal users do not need Python, `.venv`, batch files, or manual memory addresses.
 
-> **Download the EXE:** get `forza-painter-fh6-v1.6.6.exe` from [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) and run it directly.
+> **Download the EXE:** get `forza-painter-fh6-v1.6.X.exe` from [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) and run it directly. This is a **pre-release experimental** build on the 1.6.X line from the ShepherdHL fork.
 
 > **If the result looks blurry:** raise **Random samples** first. Values above **200000** usually make a major quality difference; higher values are clearer but take much longer to generate.
 
@@ -50,7 +50,7 @@ Convert PNG/JPG/BMP images into Forza Horizon 6 Vinyl Group layers. The app hand
 
 ## Quick Start
 
-1. Download `forza-painter-fh6-v1.6.6.exe` from [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases).
+1. Download `forza-painter-fh6-v1.6.X.exe` from [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases).
 2. Put the EXE in a normal writable folder, for example `Desktop\forza-painter-fh6`.
 3. Double-click the EXE. The app starts as a standard user; when you **import or export** into FH6 it will ask for consent and, if needed, one **Administrator** prompt (UAC).
 4. In FH6, open `Create Vinyl Group` / `Vinyl Group Editor`, load a sphere template, then `Ungroup` it.
@@ -60,27 +60,40 @@ Do not download GitHub's automatic `Source code` ZIP unless you are developing t
 
 **From source ZIP:** extract fully, then double-click **`Start Forza Painter.bat`** (see **`START_HERE.txt`**). The launcher handles common double-folder extracts from GitHub.
 
-## Preview
+## App overview
+
+Each major workspace in the desktop app.
 
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/screenshots/app-import-preview.png" alt="App import page"><br>
-      <strong>App import page</strong>
+      <img src="docs/screenshots/ImagePreview_Example.png" alt="Image Preview workspace"><br>
+      <strong>Image Preview</strong><br>
+      <sub>Compare preprocess filters before generating.</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/screenshots/fh6-template-ready.png" alt="FH6 template ready"><br>
-      <strong>Template ready in FH6</strong>
+      <img src="docs/screenshots/GenerateJSON_Example.png" alt="Generate JSON workspace"><br>
+      <strong>Generate JSON</strong><br>
+      <sub>Queue images, pick quality, and run the GPU generator.</sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/screenshots/fh6-import-result.png" alt="FH6 import result"><br>
-      <strong>Imported result</strong>
+      <img src="docs/screenshots/TextVinyl_Example.png" alt="Text vinyl workspace"><br>
+      <strong>Text vinyl</strong><br>
+      <sub>Type CJK text with system fonts, or trace a reference image.</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/screenshots/fh6-car-applied.png" alt="FH6 car applied result"><br>
-      <strong>Applied to car</strong>
+      <img src="docs/screenshots/PixelArt_Example.png" alt="Pixel art workspace"><br>
+      <strong>Pixel art</strong><br>
+      <sub>Convert images to FH6 shape layers or draw in the built-in editor.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <img src="docs/screenshots/ColorPicker_Example.png" alt="Color Picker tool"><br>
+      <strong>Tools → Color Picker</strong><br>
+      <sub>Sample colors from an image and convert to Forza H/S/B values.</sub>
     </td>
   </tr>
 </table>

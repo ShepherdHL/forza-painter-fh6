@@ -24,12 +24,12 @@
 </p>
 
 <p align="center">
-  <code>v1.6.6</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>单文件 EXE</code>
+  <code>v1.6.X（预发布）</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>单文件 EXE</code>
 </p>
 
 把 PNG/JPG/BMP 图片转换成 Forza Horizon 6 的 Vinyl Group 图层。软件内完成生成、预览和导入，普通用户不需要 Python、`.venv`、批处理文件，也不需要手动填写内存地址。
 
-> **下载 EXE：** 从 [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) 下载 `forza-painter-fh6-v1.6.6.exe`，直接运行。
+> **下载 EXE：** 从 [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) 下载 `forza-painter-fh6-v1.6.X.exe`，直接运行。这是 ShepherdHL 分支的 **1.6.X 预发布实验版**。
 
 > **画面发糊先看这里：** 优先提高 **随机样本（Random samples）**。数值在 **200000 以上** 通常会有明显质变；越高越清晰，但生成时间也更长。
 
@@ -48,7 +48,7 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) 下载 `forza-painter-fh6-v1.6.6.exe`。
+1. 从 [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) 下载 `forza-painter-fh6-v1.6.X.exe`。
 2. 把 EXE 放在普通可写目录里，例如 `Desktop\forza-painter-fh6`。
 3. 双击 EXE 启动。**导入或导出**时如需权限，应用会请求确认并可能弹出一次管理员（UAC）提示。
 4. 在游戏里进入 `Create Vinyl Group` / `Vinyl Group Editor`，加载球形模板并 `Ungroup`。
@@ -56,27 +56,40 @@
 
 不要下载 GitHub 自动生成的 `Source code` ZIP，除非你要开发项目。普通用户只需要 `.exe`。
 
-## 效果预览
+## 功能概览
+
+桌面应用中各主要工作区。
 
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/screenshots/app-import-preview.png" alt="软件导入页面"><br>
-      <strong>软件导入页面</strong>
+      <img src="docs/screenshots/ImagePreview_Example.png" alt="图像预览"><br>
+      <strong>图像预览</strong><br>
+      <sub>生成前对比预处理滤镜（luma、双边、海报化、赛璐璐等）。</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/screenshots/fh6-template-ready.png" alt="FH6 模板准备"><br>
-      <strong>游戏里准备模板</strong>
+      <img src="docs/screenshots/GenerateJSON_Example.png" alt="生成 JSON"><br>
+      <strong>生成 JSON</strong><br>
+      <sub>排队图片、选择品质，并运行 GPU 生成器。</sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/screenshots/fh6-import-result.png" alt="FH6 导入效果"><br>
-      <strong>导入完成效果</strong>
+      <img src="docs/screenshots/TextVinyl_Example.png" alt="文字贴膜"><br>
+      <strong>文字贴膜</strong><br>
+      <sub>使用 GB2312 字库与系统字体输入中文/CJK，或从参考图描摹。</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/screenshots/fh6-car-applied.png" alt="FH6 车身贴图效果"><br>
-      <strong>贴到车身效果</strong>
+      <img src="docs/screenshots/PixelArt_Example.png" alt="像素艺术"><br>
+      <strong>像素艺术</strong><br>
+      <sub>将图片转为 FH6 形状图层，或使用内置编辑器绘制。</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <img src="docs/screenshots/ColorPicker_Example.png" alt="取色器"><br>
+      <strong>工具 → 取色器</strong><br>
+      <sub>从图片取样并转换为 Forza H/S/B 色值。</sub>
     </td>
   </tr>
 </table>

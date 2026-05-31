@@ -24,12 +24,12 @@
 </p>
 
 <p align="center">
-  <code>v1.6.6</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>単一 EXE</code>
+  <code>v1.6.X（プレリリース）</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>単一 EXE</code>
 </p>
 
 PNG/JPG/BMP 画像を Forza Horizon 6 の Vinyl Group レイヤーに変換します。アプリ内で生成・プレビュー・インポートまで完結し、一般ユーザーは Python、`.venv`、バッチファイル、手動のメモリアドレス入力は不要です。
 
-> **EXE のダウンロード:** [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) から `forza-painter-fh6-v1.6.6.exe` を取得し、そのまま実行してください。
+> **EXE のダウンロード:** [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) から `forza-painter-fh6-v1.6.X.exe` を取得し、そのまま実行してください。ShepherdHL フォークの **1.6.X プレリリース実験版**です。
 
 > **結果がぼやける場合:** まず **Random samples**（ランダムサンプル）を上げてください。**200000** 以上で品質が大きく変わることが多いです。
 
@@ -48,7 +48,7 @@ PNG/JPG/BMP 画像を Forza Horizon 6 の Vinyl Group レイヤーに変換し�
 
 ## クイックスタート
 
-1. [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) から `forza-painter-fh6-v1.6.6.exe` をダウンロードします。
+1. [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) から `forza-painter-fh6-v1.6.X.exe` をダウンロードします。
 2. EXE を通常の書き込み可能フォルダーに置きます（例: `Desktop\forza-painter-fh6`）。
 3. EXE をダブルクリックして起動します。**インポートまたはエクスポート**時に同意を求め、必要なら UAC（管理者）プロンプトが表示されます。
 4. FH6 で `Create Vinyl Group` / `Vinyl Group Editor` を開き、sphere テンプレートを読み込んで `Ungroup` します。
@@ -56,27 +56,40 @@ PNG/JPG/BMP 画像を Forza Horizon 6 の Vinyl Group レイヤーに変換し�
 
 開発目的でなければ、GitHub の自動 `Source code` ZIP は不要です。一般ユーザーは `.exe` のみで十分です。
 
-## プレビュー
+## アプリ概要
+
+デスクトップアプリの主要ワークスペース。
 
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/screenshots/app-import-preview.png" alt="アプリのインポート画面"><br>
-      <strong>アプリのインポート画面</strong>
+      <img src="docs/screenshots/ImagePreview_Example.png" alt="画像プレビュー"><br>
+      <strong>画像プレビュー</strong><br>
+      <sub>生成前に前処理フィルター（luma、バイラテラル、ポスタライズ、セルシェーディングなど）を比較。</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/screenshots/fh6-template-ready.png" alt="FH6 テンプレート準備完了"><br>
-      <strong>FH6 でテンプレート準備完了</strong>
+      <img src="docs/screenshots/GenerateJSON_Example.png" alt="JSON 生成"><br>
+      <strong>JSON 生成</strong><br>
+      <sub>画像をキューに追加し、品質を選んで GPU 生成器を実行。</sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/screenshots/fh6-import-result.png" alt="FH6 インポート結果"><br>
-      <strong>インポート結果</strong>
+      <img src="docs/screenshots/TextVinyl_Example.png" alt="テキストビニール"><br>
+      <strong>テキストビニール</strong><br>
+      <sub>GB2312 ライブラリとシステムフォントで CJK 入力、または参考画像からトレース。</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/screenshots/fh6-car-applied.png" alt="FH6 車への適用結果"><br>
-      <strong>車への適用結果</strong>
+      <img src="docs/screenshots/PixelArt_Example.png" alt="ピクセルアート"><br>
+      <strong>ピクセルアート</strong><br>
+      <sub>画像を FH6 形状レイヤーに変換するか、内蔵エディターで描画。</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <img src="docs/screenshots/ColorPicker_Example.png" alt="カラーピッカー"><br>
+      <strong>ツール → カラーピッカー</strong><br>
+      <sub>画像から色を取得し、Forza の H/S/B 値に変換。</sub>
     </td>
   </tr>
 </table>

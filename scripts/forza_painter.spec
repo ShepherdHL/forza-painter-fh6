@@ -29,7 +29,7 @@ DEFAULT_VARIANT = {
 }
 
 if VARIANT_FILE and Path(VARIANT_FILE).is_file():
-    VARIANT = json.loads(Path(VARIANT_FILE).read_text(encoding="utf-8"))
+    VARIANT = json.loads(Path(VARIANT_FILE).read_text(encoding="utf-8-sig"))
 else:
     VARIANT = DEFAULT_VARIANT
 
