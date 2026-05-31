@@ -138,9 +138,18 @@ def load_text_image_mask(path: Path, invert: bool = False, threshold: int = 128)
     return binary
 
 
-def decompose_mask_to_rectangles(mask, cell_size: int = 4) -> List[Rect]:
+def normalize_trace_cell_size(cell_size: int | str | None, *, default: int = 1) -> int:
+    """Clamp trace cell size to the supported 1–16 pixel grid range."""
+    try:
+        value = int(cell_size)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        value = default
+    return max(1, min(16, value))
+
+
+def decompose_mask_to_rectangles(mask, cell_size: int = 1) -> List[Rect]:
     """Merge grid cells into larger axis-aligned rectangles."""
-    cell_size = max(2, min(16, int(cell_size)))
+    cell_size = normalize_trace_cell_size(cell_size)
     width, height = mask.size
     pixels = mask.load()
     threshold = 128
@@ -328,7 +337,7 @@ def rectangles_to_shapes(
 def build_geometry_from_mask(
     mask,
     color: ColorRGBA,
-    cell_size: int = 4,
+    cell_size: int = 1,
     shape_mode: str = SHAPE_MODE_RECTANGLES,
 ) -> dict:
     rectangles = decompose_mask_to_rectangles(mask, cell_size=cell_size)
@@ -352,7 +361,7 @@ def build_geometry_from_text(
     color: ColorRGBA = (255, 255, 255, 255),
     font_path: Path | None = None,
     font_size: int = 120,
-    cell_size: int = 4,
+    cell_size: int = 1,
     bold: bool = False,
     strict_glyph_check: bool = True,
     shape_mode: str = SHAPE_MODE_RECTANGLES,
@@ -377,7 +386,7 @@ def build_geometry_from_text(
 def build_geometry_from_text_image(
     image_path: Path,
     color: ColorRGBA | None = None,
-    cell_size: int = 3,
+    cell_size: int = 1,
     invert: bool = False,
     threshold: int = 128,
     sample_text_color: bool = True,

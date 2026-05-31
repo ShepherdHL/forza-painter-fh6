@@ -38,12 +38,13 @@ Convert PNG/JPG/BMP images into Forza Horizon 6 Vinyl Group layers. The app hand
 | What it does | Details |
 | --- | --- |
 | Generate JSON | Convert images into geometry JSON with the bundled GPU/OpenCL generator. |
+| GPU / monitor | Header Resource Monitor: pick **Monitor GPU**, **Backend** (OpenCL/Vulkan), and view CPU/GPU load and temperature (MSI Afterburner when running). |
 | Image Preview | Compare preprocess filters (luma, bilateral, posterize, cel shading, etc.) before generating. |
 | Text vinyl | Type Mandarin/CJK with GB2312 picker and system fonts, or trace a reference image. |
 | Import photo | Import designs generated from photos into FH6. |
 | Import text | Import text vinyl designs into FH6. |
 | Import pixel art | Import pixel art with FH6 shape layers into FH6. |
-| Save from game | Save the open FH6 vinyl group as a design file. |
+| Save from game | **Developer Tools → Save from game** — save the open FH6 vinyl group as a design file. |
 | Safe FH6 workflow | Auto-locate and verify the editable layer table before writing. |
 | Update check | Check for new versions on startup and show changelog notes when available. |
 
@@ -105,6 +106,7 @@ Full preset table, generate/import walkthroughs, troubleshooting, and safety not
 | [.github/SUPPORT.md](.github/SUPPORT.md) | GitHub support / help entry point |
 | [docs/SAFETY.md](docs/SAFETY.md) | Memory access and trust guide |
 | [docs/TEXT_VINYL.md](docs/TEXT_VINYL.md) | Text vinyl reference |
-| [docs/HARDWARE_MONITORING.md](docs/HARDWARE_MONITORING.md) | Optional external GPU/CPU monitoring |
+| [docs/HARDWARE_MONITORING.md](docs/HARDWARE_MONITORING.md) | In-app telemetry (MSI Afterburner) + optional external tools |
+| [docs/GPU_GENERATION.md](docs/GPU_GENERATION.md) | Monitor GPU, backend selection, and generation routing |
 
 Maintainers: run `scripts/publish_wiki.ps1` after editing root docs to refresh the Wiki tab.

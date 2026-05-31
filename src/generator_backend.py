@@ -4,11 +4,11 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-
-from preset_preview import preset_badge_prefix, preset_label_with_badge
 from typing import Iterable
 
 from app_paths import RESOURCE_ROOT, ROOT
+from generator_launch_options import GeneratorLaunchOptions, append_launch_options
+from preset_preview import preset_badge_prefix, preset_label_with_badge
 from asset_workspace import (
     IMAGE_WORKSPACE_ROOT,
     generator_json_output_base,
@@ -614,13 +614,18 @@ def generator_available() -> bool:
     return GENERATOR_EXE.is_file()
 
 
-def build_generator_command(image_path: str | Path, setting) -> list[str]:
+def build_generator_command(
+    image_path: str | Path,
+    setting,
+    *,
+    launch_options: GeneratorLaunchOptions | None = None,
+) -> list[str]:
     if not generator_available():
         raise RuntimeError(
             f"GPU generator is disabled or missing: {GENERATOR_EXE}"
         )
     image_path = Path(image_path)
-    return [
+    cmd = [
         str(GENERATOR_EXE),
         str(image_path),
         "-settings",
@@ -630,3 +635,4 @@ def build_generator_command(image_path: str | Path, setting) -> list[str]:
         "-preview",
         str(generator_preview_path(image_path)),
     ]
+    return append_launch_options(cmd, launch_options)

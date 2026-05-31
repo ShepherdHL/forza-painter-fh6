@@ -9,6 +9,10 @@ from __future__ import annotations
 from typing import Any, Callable, Literal
 
 from tkinter import BOTH, LEFT, RIGHT, X, Frame, Label
+from tkinter import ttk
+
+from gpu_adapters import GpuAdapter
+from generator_gpu_settings import AUTO_BACKEND_ID, AUTO_GPU_ID, GENERATOR_BACKENDS
 
 from resource_monitor import (
     HeatState,
@@ -62,6 +66,56 @@ class HeaderTelemetryPanel:
         body = Frame(shell, bg=app_module.COLOR_PANEL)
         body.pack(fill=X, padx=10, pady=(6, 8))
         self._body = body
+
+        self._gpu_toolbar = Frame(body, bg=app_module.COLOR_PANEL)
+        self._gpu_toolbar.pack(fill=X, pady=(0, 4))
+        gpu_toolbar_left = Frame(self._gpu_toolbar, bg=app_module.COLOR_PANEL)
+        gpu_toolbar_left.pack(side=LEFT)
+        self._gpu_backend_select = ttk.Combobox(gpu_toolbar_left, state="readonly", width=10)
+        self._gpu_backend_select.pack(side=RIGHT)
+        self._gpu_backend_select.bind("<<ComboboxSelected>>", self._on_backend_selected)
+        self._gpu_backend_label = Label(
+            gpu_toolbar_left,
+            text=self._tr("resource_gpu_backend"),
+            anchor="w",
+            bg=app_module.COLOR_PANEL,
+            fg=app_module.COLOR_MUTED,
+            font=app._ui_font(8),
+        )
+        self._gpu_backend_label._theme_role = "muted"  # type: ignore[attr-defined]
+        self._gpu_backend_label.pack(side=RIGHT, padx=(0, 6))
+        self._register_translation(self._gpu_backend_label, "resource_gpu_backend")
+        gpu_toolbar_right = Frame(self._gpu_toolbar, bg=app_module.COLOR_PANEL)
+        gpu_toolbar_right.pack(side=RIGHT)
+        self._gpu_refresh = ttk.Button(
+            gpu_toolbar_right,
+            width=3,
+            text="↻",
+            command=self._refresh_gpu_adapters,
+        )
+        self._gpu_refresh.pack(side=RIGHT, padx=(4, 0))
+        self._gpu_select = ttk.Combobox(gpu_toolbar_right, state="readonly", width=22)
+        self._gpu_select.pack(side=RIGHT)
+        self._gpu_select.bind("<<ComboboxSelected>>", self._on_gpu_selected)
+        self._gpu_select_label = Label(
+            gpu_toolbar_right,
+            text=self._tr("resource_gpu_select"),
+            anchor="e",
+            bg=app_module.COLOR_PANEL,
+            fg=app_module.COLOR_MUTED,
+            font=app._ui_font(8),
+        )
+        self._gpu_select_label._theme_role = "muted"  # type: ignore[attr-defined]
+        self._gpu_select_label.pack(side=RIGHT, padx=(0, 6))
+        self._register_translation(self._gpu_select_label, "resource_gpu_select")
+        self._gpu_adapters: list[GpuAdapter] = []
+        self._gpu_id_by_label: dict[str, str] = {}
+        self._gpu_backend_by_label: dict[str, str] = {}
+        self._applied_selection_id: str = AUTO_GPU_ID
+        self._applied_backend_id: str = AUTO_BACKEND_ID
+        self._on_gpu_selection_changed: Callable[[str], bool] | None = None
+        self._on_generator_backend_changed: Callable[[str], None] | None = None
+        self._refresh_backend_choices(selected_backend=AUTO_BACKEND_ID)
 
         self._full_row = Frame(body, bg=app_module.COLOR_PANEL)
         self._compact_row = Frame(body, bg=app_module.COLOR_PANEL)
@@ -121,6 +175,96 @@ class HeaderTelemetryPanel:
     def _register_translation(self, widget: Label, key: str, *, upper: bool = False) -> None:
         option = "text_upper" if upper else "text"
         self.app.translated.append((widget, key, option))
+
+    def set_gpu_selection_callback(self, callback: Callable[[str], bool] | None) -> None:
+        self._on_gpu_selection_changed = callback
+
+    def set_generator_backend_callback(self, callback: Callable[[str], None] | None) -> None:
+        self._on_generator_backend_changed = callback
+
+    def set_generator_backend(self, backend_id: str) -> None:
+        self._refresh_backend_choices(selected_backend=backend_id)
+
+    def _backend_label(self, backend_id: str) -> str:
+        if backend_id == AUTO_BACKEND_ID:
+            return self._tr("resource_gpu_backend_auto")
+        if backend_id == "opencl":
+            return self._tr("resource_gpu_backend_opencl")
+        if backend_id == "vulkan":
+            return self._tr("resource_gpu_backend_vulkan")
+        return backend_id
+
+    def _refresh_backend_choices(self, *, selected_backend: str) -> None:
+        labels = [self._backend_label(AUTO_BACKEND_ID)]
+        self._gpu_backend_by_label = {labels[0]: AUTO_BACKEND_ID}
+        for backend_id in GENERATOR_BACKENDS:
+            label = self._backend_label(backend_id)
+            labels.append(label)
+            self._gpu_backend_by_label[label] = backend_id
+        self._gpu_backend_select["values"] = labels
+        selected_label = self._backend_label(selected_backend)
+        if selected_label not in labels:
+            selected_label = labels[0]
+            selected_backend = AUTO_BACKEND_ID
+        self._gpu_backend_select.set(selected_label)
+        self._applied_backend_id = selected_backend
+
+    def _on_backend_selected(self, _event=None) -> None:
+        label = self._gpu_backend_select.get().strip()
+        backend_id = self._gpu_backend_by_label.get(label, AUTO_BACKEND_ID)
+        if backend_id == self._applied_backend_id:
+            return
+        self._applied_backend_id = backend_id
+        if self._on_generator_backend_changed is not None:
+            self._on_generator_backend_changed(backend_id)
+
+    def set_gpu_adapters(self, adapters: list[GpuAdapter], *, selected_id: str) -> None:
+        from gpu_adapters import adapter_display_label
+
+        self._gpu_adapters = list(adapters)
+        integrated_tag = self._tr("resource_gpu_integrated_tag")
+        labels = [self._tr("resource_gpu_auto")]
+        self._gpu_id_by_label = {labels[0]: AUTO_GPU_ID}
+        for adapter in self._gpu_adapters:
+            display = adapter_display_label(adapter, integrated_tag=integrated_tag)
+            labels.append(display)
+            self._gpu_id_by_label[display] = adapter.id
+        self._gpu_select["values"] = labels
+        selected_label = labels[0]
+        if selected_id != AUTO_GPU_ID:
+            for label, adapter_id in self._gpu_id_by_label.items():
+                if adapter_id == selected_id:
+                    selected_label = label
+                    break
+        if selected_label in labels:
+            self._gpu_select.set(selected_label)
+        elif labels:
+            self._gpu_select.set(labels[0])
+        self._applied_selection_id = self._gpu_id_by_label.get(self._gpu_select.get().strip(), AUTO_GPU_ID)
+
+    def _refresh_gpu_adapters(self) -> None:
+        refresh = getattr(self.app, "request_gpu_adapter_refresh", None)
+        if callable(refresh):
+            refresh()
+
+    def _on_gpu_selected(self, _event=None) -> None:
+        label = self._gpu_select.get().strip()
+        selection_id = self._gpu_id_by_label.get(label, AUTO_GPU_ID)
+        if selection_id == self._applied_selection_id:
+            return
+        previous_id = self._applied_selection_id
+        if self._on_gpu_selection_changed is not None:
+            accepted = self._on_gpu_selection_changed(selection_id)
+            if not accepted:
+                self.set_gpu_adapters(self._gpu_adapters, selected_id=previous_id)
+                return
+        self._applied_selection_id = selection_id
+
+    def _show_gpu_toolbar(self, visible: bool) -> None:
+        if visible:
+            self._gpu_toolbar.pack(fill=X, pady=(0, 4))
+        else:
+            self._gpu_toolbar.pack_forget()
 
     def _build_full(self, parent: Frame) -> None:
         row = Frame(parent, bg=self._colors.COLOR_PANEL)
@@ -239,6 +383,7 @@ class HeaderTelemetryPanel:
                 row.pack(fill=X)
             else:
                 row.pack_forget()
+        self._show_gpu_toolbar(mode in ("full", "compact"))
         if self._snapshot is not None:
             self.apply_snapshot(self._snapshot)
         self._render_heat_chrome()
@@ -352,6 +497,7 @@ class HeaderTelemetryPanel:
             self.host,
             self._shell,
             self._body,
+            self._gpu_toolbar,
             self._full_row,
             self._compact_row,
             self._minimal_row,
@@ -359,6 +505,9 @@ class HeaderTelemetryPanel:
             self._heat_banner,
         ):
             apply_fn(widget)
+        apply_fn(self._gpu_select_label)
+        apply_fn(self._gpu_backend_label)
+        apply_fn(self._gpu_refresh)
         for donut in self._donuts:
             apply_fn(donut)
         for part_groups in self._metric_values.values():

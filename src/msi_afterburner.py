@@ -41,6 +41,7 @@ class MahmReading:
     gpu_load_pct: float | None = None
     gpu_clock_mhz: float | None = None
     gpu_temp_c: float | None = None
+    gpu_index: int | None = None
     timestamp: int | None = None
 
 
@@ -76,14 +77,14 @@ def afterburner_available() -> bool:
     return read_mahm_reading() is not None
 
 
-def read_gpu_temp_c() -> float | None:
-    reading = read_mahm_reading()
+def read_gpu_temp_c(gpu_index: int | None = None) -> float | None:
+    reading = read_mahm_reading(gpu_index=gpu_index)
     if reading is None:
         return None
     return reading.gpu_temp_c
 
 
-def read_mahm_reading() -> MahmReading | None:
+def read_mahm_reading(gpu_index: int | None = None) -> MahmReading | None:
     kernel32 = _kernel32_api()
     if kernel32 is None:
         return None
@@ -105,7 +106,9 @@ def read_mahm_reading() -> MahmReading | None:
             )
             if signature != MAHM_SIGNATURE or entry_size < 1324:
                 continue
-            return _parse_entries(view, header_size, num_entries, entry_size, timestamp)
+            return _parse_entries(
+                view, header_size, num_entries, entry_size, timestamp, gpu_index=gpu_index
+            )
         except OSError:
             continue
         finally:
@@ -130,12 +133,78 @@ def _read_bytes(view: int | ctypes.c_void_p, offset: int, size: int) -> bytes:
     return bytes(buffer)
 
 
+def list_mahm_gpu_labels() -> dict[int, str]:
+    kernel32 = _kernel32_api()
+    if kernel32 is None:
+        return {}
+
+    for name in MAHM_NAMES:
+        handle = kernel32.OpenFileMappingW(FILE_MAP_READ, False, name)
+        if not handle or handle == INVALID_HANDLE_VALUE:
+            continue
+        view = None
+        try:
+            view = kernel32.MapViewOfFile(handle, FILE_MAP_READ, 0, 0, 0)
+            if not view:
+                continue
+            header = _read_bytes(view, 0, 32)
+            if len(header) < 32:
+                continue
+            signature, _version, header_size, num_entries, entry_size, _timestamp = struct.unpack_from(
+                "<6I", header, 0
+            )
+            if signature != MAHM_SIGNATURE or entry_size < 1324:
+                continue
+            return _collect_gpu_labels(view, header_size, num_entries, entry_size)
+        except OSError:
+            continue
+        finally:
+            if view:
+                kernel32.UnmapViewOfFile(view)
+            kernel32.CloseHandle(handle)
+    return {}
+
+
+def _gpu_label_from_entry_name(name: str) -> str | None:
+    cleaned = name.strip()
+    if not cleaned:
+        return None
+    lowered = cleaned.lower()
+    if "gpu" not in lowered:
+        return None
+    return cleaned
+
+
+def _collect_gpu_labels(
+    view: int | ctypes.c_void_p,
+    header_size: int,
+    num_entries: int,
+    entry_size: int,
+) -> dict[int, str]:
+    labels: dict[int, str] = {}
+    for index in range(int(num_entries)):
+        base = int(header_size) + index * int(entry_size)
+        entry = _read_bytes(view, base, int(entry_size))
+        if len(entry) < 1324:
+            continue
+        dw_gpu = struct.unpack_from("<I", entry, 1316)[0]
+        src_name = _decode_ascii(entry, 0, MAX_PATH)
+        label = _gpu_label_from_entry_name(src_name)
+        if label and int(dw_gpu) not in labels:
+            labels[int(dw_gpu)] = label
+    for gpu_index in labels:
+        labels[gpu_index] = labels[gpu_index].replace(" temperature", "").replace(" Temperature", "")
+    return labels
+
+
 def _parse_entries(
     view: int | ctypes.c_void_p,
     header_size: int,
     num_entries: int,
     entry_size: int,
     timestamp: int,
+    *,
+    gpu_index: int | None = None,
 ) -> MahmReading:
     gpu_temps: dict[int, float] = {}
     gpu_loads: dict[int, float] = {}
@@ -177,15 +246,18 @@ def _parse_entries(
         elif src_id == SRC_CPU_CLOCK or _looks_like_cpu_clock(src_name):
             cpu_clocks.append(float(data))
 
-    gpu_index = _select_gpu_index(gpu_loads, gpu_clocks, gpu_temps)
+    selected_gpu = gpu_index if gpu_index is not None else _select_gpu_index(gpu_loads, gpu_clocks, gpu_temps)
+    if gpu_index is not None and selected_gpu not in (set(gpu_loads) | set(gpu_clocks) | set(gpu_temps)):
+        selected_gpu = _select_gpu_index(gpu_loads, gpu_clocks, gpu_temps)
 
     return MahmReading(
         cpu_load_pct=cpu_load_aggregate if cpu_load_aggregate is not None else _pick_max(cpu_loads),
         cpu_clock_mhz=cpu_clock_aggregate if cpu_clock_aggregate is not None else _pick_max(cpu_clocks),
         cpu_temp_c=_pick_max(cpu_temps),
-        gpu_load_pct=gpu_loads.get(gpu_index),
-        gpu_clock_mhz=gpu_clocks.get(gpu_index),
-        gpu_temp_c=gpu_temps.get(gpu_index),
+        gpu_load_pct=gpu_loads.get(selected_gpu),
+        gpu_clock_mhz=gpu_clocks.get(selected_gpu),
+        gpu_temp_c=gpu_temps.get(selected_gpu),
+        gpu_index=selected_gpu,
         timestamp=int(timestamp),
     )
 

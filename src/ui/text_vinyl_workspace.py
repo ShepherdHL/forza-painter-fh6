@@ -8,8 +8,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from tkinter import BOTH, END, HORIZONTAL, LEFT, RIGHT, X, Frame, Label, Listbox, PhotoImage, StringVar, filedialog, ttk
-from tkinter import Checkbutton, Entry
+from tkinter import BOTH, END, HORIZONTAL, LEFT, RIGHT, X, Button, Checkbutton, Entry, Frame, Label, Listbox, PhotoImage, StringVar, filedialog, ttk
 
 from app_paths import ROOT
 from asset_workspace import TEXT_VINYL_WORKSPACE_ROOT, text_vinyl_workspace, write_manifest, workspace_source_file
@@ -25,14 +24,16 @@ from text_char_libraries import (
 from text_fonts import (
     SCRIPT_CHINESE,
     SCRIPT_JAPANESE,
+    SCRIPT_KAOMOJI,
     SCRIPT_KOREAN,
     SCRIPT_UNIVERSAL,
     TEXT_SCRIPT_IDS,
+    FontRecommendation,
     coverage_message_key,
     discover_fonts_for_script,
     filter_font_labels,
     format_missing_chars,
-    recommend_font_label_for_text,
+    recommend_font_for_text,
     validate_text_coverage,
 )
 from text_geometry import (
@@ -40,11 +41,13 @@ from text_geometry import (
     build_geometry_from_text_image,
     estimate_layer_count,
     normalize_text_shape_mode,
+    normalize_trace_cell_size,
     TEXT_SHAPE_MODES,
     write_geometry_json,
 )
 from ui.char_grid_picker import CharGridPicker
 from ui.color_values_editor import ColorValuesEditor
+from ui.kaomoji_picker import KaomojiPicker
 
 _JAPANESE_CHAR_LIBRARIES = (
     (LIBRARY_HIRAGANA, "text_char_library_hiragana"),
@@ -64,6 +67,7 @@ class TextVinylWorkspace:
         self._reference_preview_job = None
         self._json_preview_job = None
         self._coverage_job = None
+        self._last_font_recommendation: FontRecommendation | None = None
         self.text_panels = {
             script: {
                 "input": StringVar(),
@@ -77,7 +81,7 @@ class TextVinylWorkspace:
             for script in TEXT_SCRIPT_IDS
         }
         self.text_font_size = StringVar(value="120")
-        self.text_cell_size = StringVar(value="4")
+        self.text_cell_size = StringVar(value="1")
         self.text_shape_mode = StringVar(value="rectangles")
         self.text_image_path = StringVar()
         self._color_editor: ColorValuesEditor | None = None
@@ -89,6 +93,7 @@ class TextVinylWorkspace:
         self.text_shape_combo: ttk.Combobox | None = None
         self.text_template_hint_label: Label | None = None
         self.text_coverage_label: Label | None = None
+        self._coverage_apply_button: Button | None = None
 
     @property
     def lang(self) -> str:
@@ -129,18 +134,17 @@ class TextVinylWorkspace:
         paned.add(left_outer, weight=3)
         paned.add(right, weight=2)
 
-        scroll_area, body = app._make_vertical_scroll(left_outer)
-        scroll_area.pack(fill=BOTH, expand=True, padx=0, pady=10)
+        left, action_host = app._prepare_sticky_column(left_outer)
         scroll_options_hint = app._label(
-            body, "text_scroll_options_hint", anchor="w", justify="left", theme_role="hint"
+            left, "text_scroll_options_hint", anchor="w", justify="left", theme_role="hint"
         )
         scroll_options_hint.pack(fill="x", pady=(0, 8))
-        app._bind_wraplength(scroll_options_hint, body)
-        tab_hint = app._label(body, "text_tab_hint", anchor="w", justify="left", theme_role="hint")
+        app._bind_wraplength(scroll_options_hint, left)
+        tab_hint = app._label(left, "text_tab_hint", anchor="w", justify="left", theme_role="hint")
         tab_hint.pack(fill="x", pady=(0, 8))
-        app._bind_wraplength(tab_hint, body)
+        app._bind_wraplength(tab_hint, left)
 
-        self.text_script_notebook = ttk.Notebook(body, style="Script.TNotebook")
+        self.text_script_notebook = ttk.Notebook(left, style="Script.TNotebook")
         self.text_script_notebook.pack(fill=BOTH, expand=True, pady=(0, 8))
         self.text_script_notebook.bind("<<NotebookTabChanged>>", lambda _event: self._on_script_tab_changed())
 
@@ -149,9 +153,9 @@ class TextVinylWorkspace:
             self.text_script_notebook.add(panel_frame, text=self._tr(self._script_tab_key(script)))
             self._build_script_panel(panel_frame, script)
 
-        self._build_options_panel(body)
+        self._build_options_panel(left)
 
-        outputs_box = ttk.LabelFrame(body, text=self._tr("text_outputs"))
+        outputs_box = ttk.LabelFrame(left, text=self._tr("text_outputs"))
         app.translated.append((outputs_box, "text_outputs", "text"))
         outputs_box.pack(fill="x", pady=(0, 8))
         outputs_hint = app._label(outputs_box, "text_outputs_hint", anchor="w", justify="left", theme_role="hint")
@@ -168,6 +172,20 @@ class TextVinylWorkspace:
         self.text_json_list = Listbox(list_body, height=5)
         self.text_json_list.pack(fill="x", expand=True)
         self.text_json_list.bind("<<ListboxSelect>>", self._preview_selected_json)
+
+        action_box = ttk.LabelFrame(action_host, text=self._tr("text_generate_action"))
+        app.translated.append((action_box, "text_generate_action", "text"))
+        action_box.pack(fill="x")
+        action_row = Frame(action_box)
+        action_row.pack(fill="x", padx=10, pady=(8, 12))
+        app._button(action_row, "text_font_refresh", self.refresh_fonts).pack(side=LEFT)
+        app._button(
+            action_row,
+            "text_generate_typed",
+            self.start_generate_typed,
+            font=("Segoe UI", 12, "bold"),
+            height=2,
+        ).pack(side=LEFT, padx=8, fill="x", expand=True)
 
         ref_box = ttk.LabelFrame(right, text=self._tr("text_reference_image"))
         app.translated.append((ref_box, "text_reference_image", "text"))
@@ -254,16 +272,22 @@ class TextVinylWorkspace:
         app._label(opts, "text_cell_hint", anchor="w", theme_role="muted").grid(
             row=5, column=0, columnspan=4, sticky="w", pady=(6, 0)
         )
-        self.text_coverage_label = app._label(opts, "text_coverage_ok", anchor="w", theme_role="text", justify="left")
-        self.text_coverage_label.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        coverage_row = Frame(opts)
+        coverage_row.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        coverage_row.columnconfigure(0, weight=1)
+        self.text_coverage_label = app._label(
+            coverage_row, "text_coverage_ok", anchor="w", theme_role="text", justify="left"
+        )
+        self.text_coverage_label.grid(row=0, column=0, sticky="ew")
+        self._coverage_apply_button = app._button(
+            coverage_row,
+            "text_apply_recommended_font",
+            self.apply_recommended_font,
+        )
+        self._coverage_apply_button.grid(row=0, column=1, sticky="e", padx=(8, 0))
         opts.columnconfigure(0, weight=1)
         app._bind_wraplength(self.text_coverage_label, opts, padding=8)
         self.update_shape_hint()
-
-        actions = Frame(shared)
-        actions.pack(fill="x", padx=10, pady=(0, 10))
-        app._button(actions, "text_font_refresh", self.refresh_fonts).pack(side=LEFT)
-        app._button(actions, "text_generate_typed", self.start_generate_typed).pack(side=LEFT, padx=8)
 
     def _build_script_panel(self, parent: Frame, script: str) -> None:
         app = self.app
@@ -319,6 +343,8 @@ class TextVinylWorkspace:
             self._build_char_library(parent, script, LIBRARY_HANGUL, "text_char_library_hangul")
         elif script == SCRIPT_CHINESE:
             self._build_char_library(parent, script, LIBRARY_HANZI, "text_char_library_hanzi")
+        elif script == SCRIPT_KAOMOJI:
+            self._build_kaomoji_picker(parent, script)
 
     def _build_char_library(
         self,
@@ -341,6 +367,18 @@ class TextVinylWorkspace:
         self._panel(script)["widgets"]["char_pickers"].append(picker)
         return picker
 
+    def _build_kaomoji_picker(self, parent: Frame, script: str) -> KaomojiPicker:
+        picker = KaomojiPicker(
+            parent,
+            self.app,
+            on_insert=lambda value, s=script: self._insert_kaomoji(s, value),
+            label_key="text_char_library_kaomoji",
+        )
+        picker.frame.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+        widgets = self._panel(script)["widgets"]
+        widgets.setdefault("char_pickers", []).append(picker)
+        return picker
+
     def _insert_char(self, script: str, char: str) -> None:
         panel = self._panel(script)
         panel["input"].set(panel["input"].get() + char)
@@ -350,6 +388,20 @@ class TextVinylWorkspace:
             except ValueError:
                 pass
         self._schedule_coverage_check()
+
+    def _insert_kaomoji(self, script: str, kaomoji: str) -> None:
+        panel = self._panel(script)
+        panel["input"].set(kaomoji)
+        if self.text_script_notebook is not None:
+            try:
+                self.text_script_notebook.select(TEXT_SCRIPT_IDS.index(script))
+            except ValueError:
+                pass
+        self._refresh_script_font_combo(script)
+        self._schedule_coverage_check()
+        recommendation = recommend_font_for_text(kaomoji, script=script)
+        if recommendation.label:
+            self.apply_recommended_font(recommendation=recommendation, script=script)
 
     def refresh_char_pickers(self) -> None:
         for script in TEXT_SCRIPT_IDS:
@@ -485,7 +537,8 @@ class TextVinylWorkspace:
             return
         text = panel["input"].get().strip()
         if text:
-            suggest = recommend_font_label_for_text(text, script=script)
+            recommendation = recommend_font_for_text(text, script=script)
+            suggest = recommendation.label
             if suggest and suggest in labels:
                 current_path = panel["font_by_label"].get(current)
                 keep_current = (
@@ -514,6 +567,7 @@ class TextVinylWorkspace:
                 self._tr("text_log_fonts_loaded").format(
                     latin=len(fonts_by_script.get("universal", ())),
                     japanese=len(fonts_by_script.get("japanese", ())),
+                    kaomoji=len(fonts_by_script.get("kaomoji", ())),
                     korean=len(fonts_by_script.get("korean", ())),
                     chinese=len(fonts_by_script.get("chinese", ())),
                 )
@@ -599,6 +653,9 @@ class TextVinylWorkspace:
         script = self.active_script()
         panel = self._panel(script)
         text = panel["input"].get().strip()
+        self._last_font_recommendation = None
+        if self._coverage_apply_button is not None:
+            self._coverage_apply_button.config(state="disabled")
         if not text:
             self.text_coverage_label.config(text="", fg=self.app.themes.fg("muted"))
             return
@@ -608,12 +665,13 @@ class TextVinylWorkspace:
             self.text_coverage_label.config(text=str(exc), fg=self.app.themes.fg("error"))
             return
         ok, missing = validate_text_coverage(text, font_path)
+        recommendation = recommend_font_for_text(text, script=script)
+        self._last_font_recommendation = recommendation
+        selected = panel["font_choice"].get().strip()
         if ok:
             message = self._tr(coverage_message_key(text, True, missing))
-            suggest = recommend_font_label_for_text(text, script=script)
-            selected = panel["font_choice"].get().strip()
-            if suggest and text_contains_hangul(text) and "[KR]" not in selected.upper():
-                message = self._tr("text_coverage_suggest_kr").format(font=suggest)
+            if recommendation.label and text_contains_hangul(text) and "[KR]" not in selected.upper():
+                message = self._tr("text_coverage_suggest_kr").format(font=recommendation.label)
                 fg = self.app.themes.fg("hint")
             else:
                 fg = self.app.themes.fg("success")
@@ -624,13 +682,50 @@ class TextVinylWorkspace:
                 count=len(missing),
                 chars=format_missing_chars(missing),
             )
-            suggest = recommend_font_label_for_text(text, script=script)
-            if suggest:
-                message = f"{message} {self._tr('text_coverage_suggest_font').format(font=suggest)}"
+            if recommendation.label:
+                if recommendation.complete:
+                    message = (
+                        f"{message} {self._tr('text_coverage_suggest_font').format(font=recommendation.label)}"
+                    )
+                else:
+                    message = self._tr("text_coverage_partial").format(
+                        covered=recommendation.covered,
+                        total=recommendation.total,
+                        font=recommendation.label,
+                        chars=format_missing_chars(missing),
+                    )
+            if (
+                recommendation.font is not None
+                and recommendation.label
+                and recommendation.label != selected
+                and self._coverage_apply_button is not None
+            ):
+                self._coverage_apply_button.config(state="normal")
             self.text_coverage_label.config(
                 text=message,
                 fg=self.app.themes.fg("error"),
             )
+
+    def apply_recommended_font(
+        self,
+        recommendation: FontRecommendation | None = None,
+        script: str | None = None,
+    ) -> None:
+        script = script or self.active_script()
+        rec = recommendation or self._last_font_recommendation
+        if rec is None or rec.font is None or not rec.label:
+            return
+        panel = self._panel(script)
+        panel["font_path"].set("")
+        if rec.label in panel["font_by_label"]:
+            panel["font_choice"].set(rec.label)
+        else:
+            discovered = tuple(panel["discovered"])
+            if rec.font not in discovered:
+                panel["discovered"] = discovered + (rec.font,)
+                self._refresh_script_font_combo(script)
+            panel["font_choice"].set(rec.label)
+        self.update_coverage_status()
 
     def _parse_color(self) -> tuple[int, int, int, int]:
         if self._color_editor is None:
@@ -872,7 +967,7 @@ class TextVinylWorkspace:
             self.queue.put(("log", self._tr("text_generating")))
             color = self._parse_color()
             font_size = int(self.text_font_size.get().strip() or "120")
-            cell_size = int(self.text_cell_size.get().strip() or "4")
+            cell_size = normalize_trace_cell_size(self.text_cell_size.get().strip() or "1")
             shape_mode = self._resolve_shape_mode()
             payload = build_geometry_from_text(
                 text,
@@ -901,7 +996,7 @@ class TextVinylWorkspace:
         try:
             self.queue.put(("log", self._tr("text_generating")))
             color = self._parse_color()
-            cell_size = int(self.text_cell_size.get().strip() or "4")
+            cell_size = normalize_trace_cell_size(self.text_cell_size.get().strip() or "1")
             shape_mode = self._resolve_shape_mode()
             source = Path(path)
             identity = str(source.resolve()) if source.exists() else path

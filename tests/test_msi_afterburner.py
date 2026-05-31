@@ -69,6 +69,39 @@ def test_parse_entries_reads_gpu_and_cpu_temps():
     assert reading.cpu_temp_c == 54.0
     assert reading.gpu_load_pct == 32.0
     assert reading.gpu_clock_mhz == 210.0
+    assert reading.gpu_index == 1
+
+
+def test_parse_entries_honors_explicit_gpu_index():
+    entry_size = 1324
+    header_size = 32
+    entries = [
+        _make_entry(entry_size, data=55.0, src_id=SRC_GPU_TEMPERATURE, dw_gpu=0),
+        _make_entry(entry_size, data=72.0, src_id=SRC_GPU_TEMPERATURE, dw_gpu=1),
+        _make_entry(entry_size, data=10.0, src_id=SRC_GPU_USAGE, dw_gpu=0),
+        _make_entry(entry_size, data=32.0, src_id=SRC_GPU_USAGE, dw_gpu=1),
+        _make_entry(entry_size, data=600.0, src_id=SRC_GPU_CORE_CLOCK, dw_gpu=0),
+        _make_entry(entry_size, data=210.0, src_id=SRC_GPU_CORE_CLOCK, dw_gpu=1),
+    ]
+
+    blob = bytearray(header_size + entry_size * len(entries))
+    struct.pack_into("<6I", blob, 0, MAHM_SIGNATURE, 0, header_size, len(entries), entry_size, 1234)
+    offset = header_size
+    for entry in entries:
+        blob[offset : offset + entry_size] = entry
+        offset += entry_size
+
+    original = module._read_bytes
+    module._read_bytes = lambda view, offset, size: view[offset : offset + size]
+    try:
+        reading = _parse_entries(bytes(blob), header_size, len(entries), entry_size, 1234, gpu_index=0)
+    finally:
+        module._read_bytes = original
+
+    assert reading.gpu_index == 0
+    assert reading.gpu_temp_c == 55.0
+    assert reading.gpu_load_pct == 10.0
+    assert reading.gpu_clock_mhz == 600.0
 
 
 def test_view_address_adds_offset():

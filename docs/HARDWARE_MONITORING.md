@@ -1,38 +1,60 @@
-# Hardware monitoring (external tools)
+# Hardware monitoring
 
-Forza Painter **does not include** an in-app hardware monitor. Earlier builds
-used LibreHardwareMonitor, which triggered Microsoft Defender
-(`VulnerableDriver:WinNT/Winring0`) because of the **WinRing0** driver family.
+Forza Painter includes a **header Resource Monitor** (CPU/GPU load, clock, and
+temperature) when enabled. GPU temperature and load for the selected card come
+from **MSI Afterburner** shared memory when Afterburner is running.
 
-Use the tools below on your own PC if you want CPU/GPU temperature while
-generating vinyls.
+LibreHardwareMonitor is **not** bundled. Earlier experiments used LHM, which
+triggered Microsoft Defender (`VulnerableDriver:WinNT/Winring0`) because of the
+**WinRing0** driver family.
+
+## In-app Resource Monitor
+
+When the monitor is enabled you will see:
+
+- CPU and GPU donuts (or compact text on narrow windows)
+- Green / yellow / red temperature coloring (80°C / 90°C thresholds)
+- Heat warning banners and log lines when thresholds are crossed
+- **Monitor GPU** — choose which adapter to watch and use for generation routing
+- **Backend** — Auto, OpenCL, or Vulkan for the bundled generator
+- **↻** — refresh the detected GPU list
+
+### MSI Afterburner (recommended for GPU temperature)
+
+1. Install [MSI Afterburner](https://www.msi.com/Landing/afterburner).
+2. Keep Afterburner **running** while generating (tray icon is fine).
+3. Pick your card in **Monitor GPU** if you have multiple GPUs.
+
+If Afterburner is not running, GPU temperature may show as unavailable; CPU
+metrics still work via platform APIs where supported.
 
 ## Experimental eco GPU cooldown
 
-The optional **GPU cooldown between images** (eco preset) needs a GPU
-temperature. Without a bundled sensor stack it will:
+The optional **GPU cooldown between images** (eco preset) uses the **Monitor GPU**
+selection for temperature when sensors are available:
 
-- **Pause 30 seconds** between batch images when no GPU temperature is available, or
-- Use temperature if you run a compatible external monitor that exposes data
-  (not integrated today).
+- **≤75°C** — continue to the next image when MSI Afterburner reports the selected GPU at or below target
+- **No sensor** — fixed **30 second** pause between batch images
 
-For reliable cooldown by temperature, watch GPU temp in an external tool and
-pace your batch manually, or wait between runs.
+## Multi-GPU generation routing
 
-## Recommended external tools (install separately)
+See **[GPU_GENERATION.md](GPU_GENERATION.md)** for how Monitor GPU, Backend, Windows
+GPU preference, and future `-gpu-id` binding work together.
 
-Use any tool you trust. These are common on Windows and do not ship with
-Forza Painter:
+## Optional external tools
+
+Use any tool you trust for overlays, logging, or extra sensors. These do **not**
+ship with Forza Painter:
 
 | Tool | Link | Good for |
 | --- | --- | --- |
 | **HWiNFO** | [hwinfo.com](https://www.hwinfo.com/) | CPU/GPU temps, logging, sensors |
 | **GPU-Z** | [techpowerup.com/gpuz](https://www.techpowerup.com/gpuz/) | GPU temperature and clocks |
-| **MSI Afterburner** | [msi.com/Landing/afterburner](https://www.msi.com/Landing/afterburner) | GPU temp overlay while gaming |
+| **MSI Afterburner** | [msi.com/Landing/afterburner](https://www.msi.com/Landing/afterburner) | GPU temp overlay; also feeds the in-app monitor |
 | **Windows Task Manager** | Built-in | Basic GPU utilization (Performance tab) |
 
-**Note:** Some monitoring tools also use low-level drivers. If Defender
-flags a driver, that is between you and that product’s vendor—not Forza Painter.
+**Note:** Some monitoring tools use low-level drivers. If Defender flags a driver,
+that is between you and that product’s vendor—not Forza Painter.
 
 ## Developers
 
@@ -40,3 +62,5 @@ flags a driver, that is between you and that product’s vendor—not Forza Pain
   `install_dependencies.bat` or release builds.
 - Do not re-enable LHM in `requirements.txt` or PyInstaller without addressing
   Defender’s vulnerable-driver blocklist.
+- GPU adapter enumeration: `src/gpu_adapters.py` (WMI + Afterburner label merge).
+- Generation routing: `src/windows_gpu_preference.py`, `src/generator_launch_options.py`.

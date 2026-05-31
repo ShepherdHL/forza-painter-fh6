@@ -16,7 +16,26 @@ DEFAULT_PANE_RATIOS: Dict[str, float] = {
     "tools_color_horizontal": 0.62,
     "pixel_horizontal": 0.40,
     "pixel_file_compare_h": 0.50,
+    "export_game_horizontal": 0.52,
 }
+
+# Lower bounds keep primary actions and the workspace visible after sash drags.
+MIN_PANE_RATIOS: Dict[str, float] = {
+    "main_vertical": 0.55,
+    "generate_horizontal": 0.34,
+    "preview_horizontal": 0.34,
+    "import_horizontal": 0.34,
+    "text_horizontal": 0.34,
+    "tools_color_horizontal": 0.30,
+    "pixel_horizontal": 0.22,
+    "pixel_file_compare_h": 0.30,
+    "export_game_horizontal": 0.34,
+}
+
+
+def clamp_pane_ratio(key: str, ratio: float) -> float:
+    minimum = MIN_PANE_RATIOS.get(key, 0.08)
+    return min(0.92, max(minimum, ratio))
 
 
 def layout_settings_path(root: Path) -> Path:
@@ -36,7 +55,7 @@ def load_ui_layout(root: Path) -> Dict[str, float]:
                     ratio = float(value)
                 except (TypeError, ValueError):
                     continue
-                merged[key] = min(0.92, max(0.08, ratio))
+                merged[key] = clamp_pane_ratio(key, ratio)
         return merged
     except OSError:
         return dict(DEFAULT_PANE_RATIOS)
@@ -66,7 +85,7 @@ def pane_ratio(paned, orient: str) -> float | None:
         return None
 
 
-def apply_pane_ratio(paned, orient: str, ratio: float) -> None:
+def apply_pane_ratio(paned, orient: str, ratio: float, *, layout_key: str | None = None) -> None:
     try:
         if not paned.winfo_exists():
             return
@@ -77,6 +96,28 @@ def apply_pane_ratio(paned, orient: str, ratio: float) -> None:
             total = paned.winfo_width()
         if total < 80:
             return
-        paned.sashpos(0, int(total * min(0.92, max(0.08, ratio))))
+        if layout_key:
+            ratio = clamp_pane_ratio(layout_key, ratio)
+        else:
+            ratio = min(0.92, max(0.08, ratio))
+        paned.sashpos(0, int(total * ratio))
     except Exception:
         pass
+
+
+def enforce_pane_sash_bounds(
+    paned,
+    orient: str,
+    layout_key: str,
+    *,
+    epsilon: float = 0.002,
+) -> bool:
+    """Snap an out-of-range sash to its min/max ratio. Returns True when adjusted."""
+    measured = pane_ratio(paned, orient)
+    if measured is None:
+        return False
+    clamped = clamp_pane_ratio(layout_key, measured)
+    if abs(measured - clamped) <= epsilon:
+        return False
+    apply_pane_ratio(paned, orient, clamped, layout_key=layout_key)
+    return True

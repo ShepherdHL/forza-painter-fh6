@@ -42,7 +42,7 @@ def main(argv=None):
     parser.add_argument("--font", help="Path to .ttf/.ttc/.otf font, or a discovered font label.")
     parser.add_argument("--list-fonts", action="store_true", help="List discovered CJK fonts and exit.")
     parser.add_argument("--font-size", type=int, default=120, help="Font size for --text mode.")
-    parser.add_argument("--cell-size", type=int, default=4, help="Trace grid size (larger = fewer layers).")
+    parser.add_argument("--cell-size", type=int, default=1, help="Trace grid size in pixels (1 = sharpest; larger = fewer layers).")
     parser.add_argument(
         "--shape-mode",
         choices=text_shape_mode_choices(),

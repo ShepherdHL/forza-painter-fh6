@@ -12,6 +12,19 @@ Release notes for Forza Painter FH6. The in-app update prompt reads from this fi
 
 ## Unreleased
 
+### GPU selection & generation routing
+
+- **Monitor GPU** dropdown in the header Resource Monitor (↻ refresh): choose which adapter drives telemetry, eco cooldown, and generation routing. **Auto (recommended)** is the default.
+- **Integrated GPU** entries are labeled **(integrated)**; selecting one shows a confirmation dialog before saving.
+- **Backend** dropdown: **Auto**, **OpenCL**, or **Vulkan** — passed to the bundled generator as `-backend` when not Auto.
+- **Windows GPU preference** routing for `forza-painter-geometrize-go.exe` when a discrete/integrated card is selected (Phase 2).
+- **Future-ready direct binding:** capability probe + `-list-devices` / `-gpu-id` plumbing; activates automatically when a newer bundled generator adds those flags (no app update required beyond replacing the exe).
+- Settings persist in `runtime/settings/generator_gpu.json`.
+- New modules: `gpu_adapters.py`, `generator_gpu_settings.py`, `generator_capabilities.py`, `generator_devices.py`, `generator_launch_options.py`, `windows_gpu_preference.py`.
+- FAQ troubleshooting rows for wrong GPU, backend choice, and future exact binding.
+- **Plain-language guide** to OpenCL vs Vulkan in FAQ and [`docs/GPU_GENERATION.md`](docs/GPU_GENERATION.md); explanation logged when Backend is changed.
+- See [`docs/GPU_GENERATION.md`](docs/GPU_GENERATION.md) for routing details and upstream generator contract.
+
 ### Generate presets
 
 - **Experimental tailored preset (slot 0, opt-in):** after Image Preview analyzes an image, the app writes `runtime/image-profiles/tailored-active.ini` with `stopAt`, checkpoints, samples, and resolution derived from the complexity estimate. Bundled presets Eco–Maximum Power are renumbered 1–7. **Normal remains the default** — tailored is not auto-selected after analysis; pick slot 0 when you want it.

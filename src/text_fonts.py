@@ -46,9 +46,10 @@ _CJK_HINTS = _SC_HINTS + _TC_HINTS + _JP_HINTS + _KR_HINTS
 
 SCRIPT_UNIVERSAL = "universal"
 SCRIPT_JAPANESE = "japanese"
+SCRIPT_KAOMOJI = "kaomoji"
 SCRIPT_KOREAN = "korean"
 SCRIPT_CHINESE = "chinese"
-TEXT_SCRIPT_IDS = (SCRIPT_UNIVERSAL, SCRIPT_JAPANESE, SCRIPT_KOREAN, SCRIPT_CHINESE)
+TEXT_SCRIPT_IDS = (SCRIPT_UNIVERSAL, SCRIPT_JAPANESE, SCRIPT_KAOMOJI, SCRIPT_KOREAN, SCRIPT_CHINESE)
 
 _LATIN_HINTS = (
     "segoe",
@@ -110,6 +111,8 @@ _LATIN_FALLBACKS = [
     Path(r"C:\Windows\Fonts\verdana.ttf"),
     Path(r"C:\Windows\Fonts\times.ttf"),
     Path(r"C:\Windows\Fonts\consola.ttf"),
+    Path(r"C:\Windows\Fonts\cour.ttf"),
+    Path(r"C:\Windows\Fonts\seguisym.ttf"),
 ]
 _CJK_NAME_RE = re.compile(
     r"sim|hei|song|kai|fang|yuan|ming|gothic|mincho|meiryo|malgun|gulim|batang|dotum|"
@@ -148,6 +151,7 @@ class DiscoveredFont:
     def label(self) -> str:
         tag_labels = {
             "latin": "LATIN",
+            "symbol": "SYMBOL",
             "sc": "SC",
             "tc": "TC",
             "jp": "JP",
@@ -386,6 +390,133 @@ def discover_cjk_fonts(deep_scan: bool = False) -> Tuple[DiscoveredFont, ...]:
     return tuple(sorted(by_path.values(), key=lambda item: (-item.score, item.display_name.lower())))
 
 
+def _score_symbol_font(name: str) -> int:
+    lowered = name.lower()
+    score = 60
+    if "segoe ui symbol" in lowered or "seguisym" in lowered:
+        score += 160
+    if "noto sans symbols" in lowered or "noto sans symbol" in lowered:
+        score += 150
+    if "arial unicode" in lowered:
+        score += 140
+    if "dejavu sans" in lowered:
+        score += 90
+    if "ms gothic" in lowered or "msgothic" in lowered:
+        score += 85
+    if "meiryo" in lowered:
+        score += 80
+    if "malgun" in lowered:
+        score += 70
+    if lowered.endswith("(truetype)"):
+        score -= 5
+    return score
+
+
+def _score_kaomoji_font(name: str, tags: Tuple[str, ...]) -> int:
+    lowered = name.lower()
+    if _name_is_symbol_font(lowered):
+        return _score_symbol_font(name)
+    score = _score_latin_font(name) if "latin" in tags else _score_font(name, tags)
+    if "consolas" in lowered or "courier" in lowered or "lucida console" in lowered:
+        score += 90
+    if "jp" in tags or "cjk" in tags:
+        score += 40
+    if "symbol" in tags:
+        score += 30
+    return score
+
+
+def discover_symbol_fonts(deep_scan: bool = False) -> Tuple[DiscoveredFont, ...]:
+    """Return installed symbol / emoji companion fonts useful for kaomoji."""
+    by_path: Dict[Path, DiscoveredFont] = {}
+    entries = {**_glob_font_files(), **_registry_font_entries()}
+    for display_name, path in entries.items():
+        if not _name_is_symbol_font(display_name):
+            continue
+        path = Path(path).resolve()
+        if path.suffix.lower() not in _FONT_EXTS or not path.exists():
+            continue
+        score = _score_symbol_font(display_name)
+        existing = by_path.get(path)
+        if existing is None or score > existing.score:
+            by_path[path] = DiscoveredFont(
+                display_name=display_name.replace("(TrueType)", "").strip(),
+                path=path,
+                script_tags=("symbol", "latin"),
+                score=score,
+            )
+
+    for fallback in (Path(r"C:\Windows\Fonts\seguisym.ttf"),):
+        if fallback.exists():
+            path = fallback.resolve()
+            if path not in by_path:
+                by_path[path] = DiscoveredFont(
+                    display_name="Segoe UI Symbol",
+                    path=path,
+                    script_tags=("symbol", "latin"),
+                    score=_score_symbol_font("Segoe UI Symbol"),
+                )
+
+    if deep_scan:
+        for display_name, path in entries.items():
+            path = Path(path).resolve()
+            if path in by_path or path.suffix.lower() not in _FONT_EXTS or not path.exists():
+                continue
+            if not _name_is_symbol_font(display_name):
+                continue
+            by_path[path] = DiscoveredFont(
+                display_name=display_name.replace("(TrueType)", "").strip(),
+                path=path,
+                script_tags=("symbol", "latin"),
+                score=_score_symbol_font(display_name) + 5,
+            )
+
+    return tuple(sorted(by_path.values(), key=lambda item: (-item.score, item.display_name.lower())))
+
+
+def discover_kaomoji_fonts(deep_scan: bool = False) -> Tuple[DiscoveredFont, ...]:
+    """Latin, monospace, symbol, and Japanese faces for kaomoji rendering."""
+    by_path: Dict[Path, DiscoveredFont] = {}
+
+    def merge(font: DiscoveredFont) -> None:
+        path = font.path
+        existing = by_path.get(path)
+        if existing is None:
+            by_path[path] = font
+            return
+        tags = tuple(dict.fromkeys(existing.script_tags + font.script_tags))
+        by_path[path] = DiscoveredFont(
+            display_name=existing.display_name,
+            path=path,
+            script_tags=tags,
+            score=max(existing.score, font.score),
+        )
+
+    for font in discover_latin_fonts(deep_scan):
+        merge(
+            DiscoveredFont(
+                display_name=font.display_name,
+                path=font.path,
+                script_tags=font.script_tags,
+                score=_score_kaomoji_font(font.display_name, font.script_tags),
+            )
+        )
+    for font in discover_symbol_fonts(deep_scan):
+        merge(font)
+    for font in filter_fonts_for_script(discover_cjk_fonts(deep_scan), SCRIPT_JAPANESE):
+        jp_tags = font.script_tags if "symbol" in font.script_tags else font.script_tags + ("symbol",)
+        merge(
+            DiscoveredFont(
+                display_name=font.display_name,
+                path=font.path,
+                script_tags=jp_tags,
+                score=_score_kaomoji_font(font.display_name, font.script_tags),
+            )
+        )
+
+    return tuple(sorted(by_path.values(), key=lambda item: (-item.score, item.display_name.lower())))
+
+
 def discover_latin_fonts(deep_scan: bool = False) -> Tuple[DiscoveredFont, ...]:
     """Return installed fonts suitable for Latin / universal text."""
     by_path: Dict[Path, DiscoveredFont] = {}
@@ -451,6 +582,8 @@ def font_matches_script(font: DiscoveredFont, script: str) -> bool:
         return "latin" in tags
     if script == SCRIPT_JAPANESE:
         return "jp" in tags or "cjk" in tags
+    if script == SCRIPT_KAOMOJI:
+        return "latin" in tags or "symbol" in tags or "jp" in tags or "cjk" in tags
     if script == SCRIPT_KOREAN:
         return "kr" in tags
     if script == SCRIPT_CHINESE:
@@ -479,6 +612,8 @@ def filter_font_labels(
 
 
 def discover_fonts_for_script(script: str, deep_scan: bool = False) -> Tuple[DiscoveredFont, ...]:
+    if script == SCRIPT_KAOMOJI:
+        return discover_kaomoji_fonts(deep_scan=deep_scan)
     if script == SCRIPT_UNIVERSAL:
         return discover_latin_fonts(deep_scan=deep_scan)
     return filter_fonts_for_script(discover_cjk_fonts(deep_scan=deep_scan), script)
@@ -527,10 +662,10 @@ def find_font_for_text(
     else:
         fonts = discover_cjk_fonts()
     if text.strip() and fonts:
+        recommendation = recommend_font_for_text(text, script=script)
+        if recommendation.font is not None:
+            return recommendation.font.path
         ranked = sorted(fonts, key=lambda item: (-_score_font_for_text(item, text), item.display_name.lower()))
-        for font in ranked:
-            if _font_covers_text(font, text):
-                return font.path
         return ranked[0].path
 
     return find_cjk_font()
@@ -576,34 +711,69 @@ def _load_truetype(path: Path, size: int, bold: bool = False):
     return ImageFont.truetype(str(path), size)
 
 
+@lru_cache(maxsize=256)
+def _notdef_fingerprint(path_str: str, mtime_ns: int, size: int) -> tuple[int, int, bytes] | None:
+    path = Path(path_str)
+    if not path.exists():
+        return None
+    try:
+        font = _load_truetype(path, size)
+    except OSError:
+        return None
+    for probe in ("\uFFFF", "\uFFFE", "\uFFF0"):
+        try:
+            mask = font.getmask(probe)
+            if mask.size[0] > 0 and mask.size[1] > 0:
+                payload = mask.tobytes() if hasattr(mask, "tobytes") else bytes(mask)
+                return (mask.size[0], mask.size[1], payload)
+        except Exception:
+            continue
+    return None
+
+
+def _mask_fingerprint(font, char: str) -> tuple[int, int, bytes] | None:
+    try:
+        mask = font.getmask(char)
+    except Exception:
+        return None
+    if mask.size[0] <= 0 or mask.size[1] <= 0:
+        return None
+    payload = mask.tobytes() if hasattr(mask, "tobytes") else bytes(mask)
+    return (mask.size[0], mask.size[1], payload)
+
+
 def font_has_glyph(font_path: Path, char: str, size: int = _PROBE_SIZE) -> bool:
     if len(char) != 1:
         return False
+    path = Path(font_path)
+    if not path.exists():
+        return False
     try:
-        font = _load_truetype(Path(font_path), size)
+        font = _load_truetype(path, size)
     except OSError:
         return False
 
     if hasattr(font, "has_glyph"):
         try:
-            return bool(font.has_glyph(char))
+            if not bool(font.has_glyph(char)):
+                return False
         except Exception:
             pass
 
+    fingerprint = _mask_fingerprint(font, char)
+    if fingerprint is None:
+        return False
+
     try:
-        from PIL import Image, ImageDraw
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = 0
+    notdef = _notdef_fingerprint(str(path.resolve()), mtime_ns, size)
+    if notdef is not None and fingerprint == notdef:
+        return False
 
-        draw = ImageDraw.Draw(Image.new("L", (max(size * 2, 8), max(size * 2, 8)), 0))
-        bbox = draw.textbbox((0, 0), char, font=font)
-        width = bbox[2] - bbox[0]
-        height = bbox[3] - bbox[1]
-        if width > 1 and height > 1:
-            return True
-    except Exception:
-        pass
-
-    mask = font.getmask(char)
-    return mask.size[0] > 1 and mask.size[1] > 1
+    width, height = fingerprint[0], fingerprint[1]
+    return width > 1 and height > 1
 
 
 def font_supports_sample(font_path: Path, require_hangul: bool = False) -> bool:
@@ -643,21 +813,75 @@ def coverage_message_key(text: str, ok: bool, missing: Sequence[str]) -> str:
     return "text_coverage_missing"
 
 
-def recommend_font_label_for_text(text: str, script: str | None = None) -> str | None:
+def text_looks_like_kaomoji(text: str) -> bool:
+    """Heuristic: ASCII punctuation art with optional CJK/symbol characters."""
+    stripped = (text or "").strip()
+    if len(stripped) < 3:
+        return False
+    punct = sum(1 for char in stripped if char in "()_^~*-/\\|[]<>:;.,'\"")
+    return punct >= 2
+
+
+def _count_text_chars(text: str) -> int:
+    return sum(1 for char in unique_chars(text) if not char.isspace())
+
+
+def _fonts_for_recommendation(text: str, script: str | None) -> Tuple[DiscoveredFont, ...]:
+    target = script or SCRIPT_UNIVERSAL
+    if target == SCRIPT_KAOMOJI or (target == SCRIPT_UNIVERSAL and text_looks_like_kaomoji(text)):
+        return discover_kaomoji_fonts(deep_scan=True)
+    return discover_fonts_for_script(target, deep_scan=True)
+
+
+@dataclass(frozen=True)
+class FontRecommendation:
+    font: DiscoveredFont | None
+    covered: int
+    total: int
+
+    @property
+    def complete(self) -> bool:
+        return self.font is not None and self.total > 0 and self.covered >= self.total
+
+    @property
+    def label(self) -> str | None:
+        return self.font.label if self.font else None
+
+
+def rank_fonts_for_text(
+    text: str,
+    script: str | None = None,
+    *,
+    limit: int = 12,
+) -> List[Tuple[DiscoveredFont, int, int]]:
+    """Return fonts sorted by glyph coverage (best first)."""
     if not text.strip():
-        return None
-    target_script = script or SCRIPT_UNIVERSAL
-    fonts = discover_fonts_for_script(target_script)
-    for font in fonts:
-        if _font_covers_text(font, text):
-            return font.label
-    if text_contains_hangul(text):
-        for font in fonts:
-            if "kr" in font.script_tags:
-                return font.label
-    if fonts:
-        return fonts[0].label
-    return None
+        return []
+    total = _count_text_chars(text)
+    if total <= 0:
+        return []
+    ranked: List[Tuple[DiscoveredFont, int, int]] = []
+    for font in _fonts_for_recommendation(text, script):
+        missing = missing_glyphs(text, font.path)
+        covered = max(0, total - len(missing))
+        ranked.append((font, covered, total))
+    ranked.sort(key=lambda item: (-item[1], -item[0].score, item[0].display_name.lower()))
+    return ranked[:limit]
+
+
+def recommend_font_for_text(text: str, script: str | None = None) -> FontRecommendation:
+    total = _count_text_chars(text)
+    if not text.strip() or total <= 0:
+        return FontRecommendation(font=None, covered=0, total=0)
+    ranked = rank_fonts_for_text(text, script, limit=1)
+    if not ranked:
+        return FontRecommendation(font=None, covered=0, total=total)
+    font, covered, total = ranked[0]
+    return FontRecommendation(font=font, covered=covered, total=total)
+
+
+def recommend_font_label_for_text(text: str, script: str | None = None) -> str | None:
+    return recommend_font_for_text(text, script=script).label
 
 
 def format_missing_chars(chars: Sequence[str], limit: int = 12) -> str:

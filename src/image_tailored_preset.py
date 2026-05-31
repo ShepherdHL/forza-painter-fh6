@@ -187,8 +187,8 @@ def write_tailored_profile(
     key = image_profile_key(image_path)
     description = (
         f"Tailored preset for {image_name} "
-        f"(complexity est. ~{complexity_estimate}, cap {values.get('stopAt', '?')} layers). "
-        "Approximate — results may vary."
+        f"(image complexity est. ~{complexity_estimate}, cap {values.get('stopAt', '?')}). "
+        "Heuristic — higher usually means more shapes; results may vary."
     )
     per_image = profile_path_for_key(key)
     _write_ini(per_image, values, description=description)

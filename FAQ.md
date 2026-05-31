@@ -31,8 +31,8 @@ Many people use it for anime decals, logos, and stylized artwork. High-detail ge
 
 1. Open **Create → Generate JSON**.
 2. Click **Add images** and choose PNG/JPG/BMP files.
-3. Optional: on **Image Preview**, compare preprocess filters and pick one for generation.
-4. Select a quality preset and optional **Preprocess Filter** (luma bands, bilateral, posterize, cel shading, etc.).
+3. Optional: on **Image Preview**, compare preprocess filters and pick one for generation. Filter cards show **projected image complexity** (a heuristic—higher usually means more shapes—not a guaranteed final layer count).
+4. Select a quality preset and optional **Preprocess Filter** (luma bands, bilateral, posterize, cel shading, etc.). Step 3 **Ready to generate** summarizes the queue, preset, and filter before you start.
 5. Optional: enable **Use custom settings** to change output layers, resolution, random samples, and mutated samples.
 6. Click **Start generating** and wait for the preview and logs to update.
 
@@ -84,10 +84,10 @@ The app starts as a standard user. Import and export may ask for consent and, if
 3. Import, then **save and reload the vinyl group in FH6** so shapes display correctly.
 4. Optional: trim group layer count after import; allow experimental shape codes only if you know the JSON source.
 
-### Export Game JSON
+### Save from game
 
-1. With FH6 in Vinyl Group Editor and the vinyl group you want to copy open, open **Export Game JSON**.
-2. Click **Export open FH6 group to JSON** (files go to `runtime/typecode-export/` beside the app).
+1. With FH6 in Vinyl Group Editor and the vinyl group you want to copy open, open **Developer Tools → Save from game**.
+2. Click **Save open FH6 group** (files go to `runtime/typecode-export/` beside the app).
 
 FH needs 4 extra boundary layers to save the cover and apply bounds correctly. Example: a 1000-layer JSON should use at least a 1004-layer template; a 3000-layer template can import about 2996 drawable shapes.
 
@@ -118,12 +118,36 @@ These folders can be deleted when the app is closed if you want to reset local r
 
 ---
 
+## What are OpenCL and Vulkan?
+
+Forza Painter’s JSON generator runs heavy image work on your **graphics card (GPU)**. To do
+that, it must speak to the GPU through a standard interface. The app lets you pick which
+interface — **OpenCL** or **Vulkan** — or leave **Auto** (recommended).
+
+**OpenCL** is the default path: a long-standing cross-vendor standard for GPU computing.
+It works on most NVIDIA, AMD, and Intel systems when drivers are current.
+
+**Vulkan** is a newer graphics API (widely used in games). The generator can use the same
+GPU through Vulkan instead. Some PCs run more reliably on one API than the other.
+
+You **do not** need to install OpenCL or Vulkan separately. Update your **graphics drivers**
+and keep **Backend → Auto** unless generation fails with a GPU/OpenCL/Vulkan error — then
+try the other backend once.
+
+**Backend** (OpenCL vs Vulkan) is separate from **Monitor GPU** (which physical card).
+See [`docs/GPU_GENERATION.md`](docs/GPU_GENERATION.md) for the full guide.
+
+---
+
 ## Troubleshooting
 
 | Problem | What to try |
 | --- | --- |
 | EXE will not import into FH6 | Close the app and run the EXE as administrator, or accept the UAC prompt when importing. |
-| GPU/OpenCL error | Update NVIDIA/AMD/Intel graphics drivers. The bundled generator uses OpenCL. |
+| GPU/OpenCL error | Update NVIDIA/AMD/Intel graphics drivers. Keep **Backend → Auto** first. If it still fails, try **Backend → Vulkan** (or OpenCL). See [What are OpenCL and Vulkan?](#what-are-opencl-and-vulkan) above. |
+| Wrong GPU used for generation | Use the **Monitor GPU** dropdown in the header Resource Monitor (↻ to refresh). **Auto** is recommended. Check the log for `OpenCL: Selected device` and `GPU for generation:` lines. Integrated entries are labeled **(integrated)** and show a warning if selected. |
+| OpenCL fails but Vulkan works (or vice versa) | In the Resource Monitor header, set **Backend** to **OpenCL** or **Vulkan** and retry. **Auto** leaves the generator default (OpenCL). |
+| Future exact GPU binding | When a newer bundled generator adds `-list-devices` / `-gpu-id`, the app matches **Monitor GPU** automatically. See [`docs/GPU_GENERATION.md`](docs/GPU_GENERATION.md). |
 | Template cannot be located | Confirm Vinyl Group Editor is open, the template is ungrouped, the layer count is exact, and you did not change menus during scanning. Import can take up to ~5 minutes. |
 | Imported result is blurry | Use a higher-layer JSON or increase **Output layers** / **Random samples** (200000+ often helps). |
 | Need help debugging | Use **Export detailed log** in the app and attach the log to an issue. |
@@ -136,9 +160,7 @@ These folders can be deleted when the app is closed if you want to reset local r
 
 Forza Painter reads and writes **cosmetic vinyl editor memory** in the running FH6 process through Windows APIs (similar in spirit to memory tools like Cheat Engine). It does not modify race times, credits, car stats, or other gameplay values — but any tool that touches live game memory carries **non-zero** detection risk. Read [`docs/SAFETY.md`](docs/SAFETY.md) and [`SECURITY.md`](SECURITY.md) before importing.
 
-Sharing extremely detailed vinyls may draw reports from other players. That is a community norms question as much as a technical one. Complex art is possible by hand with enough time; this tool is for people who prefer not to spend that time on every design.
-
-Keep uploads appropriate for an all-ages game.
+Forza Horizon is a series intended for all ages. Keep it professional.
 
 ---
 
@@ -148,4 +170,5 @@ Keep uploads appropriate for an all-ages game.
 - Bundled GPU generator reference: [forza-painter-geometrize-gpu](https://github.com/zjl88858/forza-painter-geometrize-gpu)
 - Safety guide: [`docs/SAFETY.md`](docs/SAFETY.md)
 - Text vinyl guide: [`docs/TEXT_VINYL.md`](docs/TEXT_VINYL.md)
-- Hardware monitoring (external tools): [`docs/HARDWARE_MONITORING.md`](docs/HARDWARE_MONITORING.md)
+- Hardware monitoring: [`docs/HARDWARE_MONITORING.md`](docs/HARDWARE_MONITORING.md)
+- GPU backends (OpenCL / Vulkan): [`docs/GPU_GENERATION.md`](docs/GPU_GENERATION.md)

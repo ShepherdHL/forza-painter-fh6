@@ -8,7 +8,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 import psutil
 
@@ -180,15 +180,20 @@ def format_temp_c(value: float | None) -> str:
 
 
 class ResourceMonitorBackend:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        gpu_index_provider: Callable[[], int | None] | None = None,
+    ) -> None:
         self._cpu_load_initialized = False
+        self._gpu_index_provider = gpu_index_provider
 
     def poll(self) -> ResourceSnapshot:
         if os.name != "nt":
             return unavailable_snapshot("Windows only")
 
+        gpu_index = self._gpu_index_provider() if self._gpu_index_provider else None
         try:
-            reading = read_mahm_reading()
+            reading = read_mahm_reading(gpu_index=gpu_index)
         except OSError:
             reading = None
         if reading is None:

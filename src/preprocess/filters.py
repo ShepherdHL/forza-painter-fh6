@@ -11,6 +11,7 @@ from asset_workspace import (
     legacy_preprocessed_path,
     variant_image_path,
 )
+from preprocess.alpha import bgra_has_semi_transparent_alpha, defringe_alpha_bgra
 from preprocess.common import atomic_cv2_write, read_bgra
 from preprocess.complexity import estimate_layers_from_bgra
 from preprocess.luma import apply_luma_bands_bgra
@@ -141,6 +142,7 @@ def preprocessed_image_exists(image_path: str | Path, mode: str) -> bool:
 
 
 def apply_preprocess_bgra(bgra: np.ndarray, mode: str) -> np.ndarray:
+    bgra = defringe_alpha_bgra(bgra)
     mode = normalize_preprocess_mode(mode)
     if mode == PREPROCESS_NONE:
         return bgra
@@ -204,10 +206,20 @@ def apply_preprocess_bgra(bgra: np.ndarray, mode: str) -> np.ndarray:
 def preprocess_image_file(image_path: str | Path, mode: str) -> Path:
     image_path = Path(image_path)
     mode = normalize_preprocess_mode(mode)
-    if mode == PREPROCESS_NONE:
-        return image_path
-
     output_path = preprocessed_image_path(image_path, mode)
+    if mode == PREPROCESS_NONE:
+        try:
+            if output_path.exists() and output_path.stat().st_mtime >= image_path.stat().st_mtime:
+                return output_path
+        except OSError:
+            pass
+        bgra = read_bgra(image_path)
+        if not bgra_has_semi_transparent_alpha(bgra):
+            return image_path
+        processed = apply_preprocess_bgra(bgra, mode)
+        atomic_cv2_write(output_path, processed)
+        return output_path
+
     try:
         if output_path.exists() and output_path.stat().st_mtime >= image_path.stat().st_mtime:
             return output_path

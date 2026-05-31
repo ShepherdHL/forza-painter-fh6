@@ -1,4 +1,4 @@
-"""Dev Tools hub: FH6 memory diagnostics (legacy Bvzray tools tab, now its own hub)."""
+"""Dev Tools hub: FH6 diagnostics sub-tab (export-from-game lives in a sibling sub-tab on the hub notebook)."""
 
 from __future__ import annotations
 

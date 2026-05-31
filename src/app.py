@@ -67,6 +67,17 @@ from eco_generation import (
     load_eco_generation_settings,
     save_eco_generation_settings,
 )
+from generator_gpu_settings import (
+    AUTO_BACKEND_ID,
+    AUTO_GPU_ID,
+    GeneratorGpuSettings,
+    load_generator_gpu_settings,
+    save_generator_gpu_settings,
+)
+from generator_capabilities import GeneratorCapabilities, probe_generator_capabilities
+from generator_devices import GeneratorDevice, list_generator_devices, match_adapter_to_device
+from gpu_adapters import GpuAdapter, adapter_for_id, list_gpu_adapters, normalize_gpu_selection, resolve_afterburner_index
+from windows_gpu_preference import apply_generator_gpu_preference
 from image_tailored_preset import (
     build_tailored_values,
     is_tailored_experimental_preset,
@@ -75,6 +86,7 @@ from image_tailored_preset import (
     save_tailored_acknowledged,
     write_tailored_profile,
 )
+from generator_launch_options import GeneratorLaunchOptions
 from generator_backend import (
     GENERATOR_EXE,
     GENERATOR_JSON_SCAN_SECONDS,
@@ -149,6 +161,8 @@ from trust_workflow import (
 from ui_layout import (
     DEFAULT_PANE_RATIOS,
     apply_pane_ratio,
+    clamp_pane_ratio,
+    enforce_pane_sash_bounds,
     load_ui_layout,
     pane_ratio,
     save_ui_layout,
@@ -310,7 +324,7 @@ TEXT = {
             "• Import — matching Photo, Text, and Pixel art tabs write designs into FH6 "
             "(consent + Administrator when prompted).\n"
             "• Tools — color picker and background removal.\n"
-            "• Dev Tools — FH6 memory diagnostics (not required for normal import).\n\n"
+            "• Dev Tools — FH6 diagnostics and Save from game (not required for normal import).\n\n"
             "Buttons marked with a shield need elevation for memory access.\n"
             "Read docs/SAFETY.md before your first import."
         ),
@@ -319,10 +333,11 @@ TEXT = {
         "text_tab": "Text vinyl",
         "text_tab_hint": "Choose a script tab, enter text, and pick a font. Use the right panel to preview reference images and generated JSON.",
         "text_scroll_options_hint": (
-            "Scroll down for Generation Options.\n"
-            "This tool can use any font from your machine. If the font is not found automatically, "
-            "try uploading it on this tab."
+            "Configure script, font, and colors in the scroll area above.\n"
+            "Generate stays pinned below. This tool can use any font from your machine—"
+            "if it is not found automatically, browse for it on this tab."
         ),
+        "text_generate_action": "Step 3 - Generate",
         "text_outputs": "Text designs",
         "text_outputs_hint": "Designs from this tab. Add files manually or continue to Import when ready.",
         "text_reference_preview": "Reference image preview",
@@ -333,10 +348,12 @@ TEXT = {
         "text_open_vinyl_folder": "Open text-vinyl folder",
         "text_script_universal": "Universal (Latin)",
         "text_script_japanese": "Japanese",
+        "text_script_kaomoji": "Kaomoji",
         "text_script_korean": "Korean",
         "text_script_chinese": "Chinese",
         "text_script_hint_universal": "Latin letters, numbers, and Western punctuation. Use a [LATIN] font such as Segoe UI or Arial.",
         "text_script_hint_japanese": "Hiragana, katakana, and kanji. Use a [JP] or [CJK] font such as Meiryo or Yu Gothic.",
+        "text_script_hint_kaomoji": "Japanese emoticon faces (kaomoji). Pick from the library below or paste your own.\n\n Use a monospace or [SYMBOL] font (Segoe UI Symbol, Consolas, Meiryo). Trace cell size 1 gives the sharpest detail.\n\n Note: Many of these can likely be made in-game. Some are more complex than others.",
         "text_script_hint_korean": "Hangul syllables. Use a [KR] font such as Malgun Gothic.",
         "text_script_hint_chinese": "Simplified or traditional hanzi. Use an [SC]/[TC] font; insert characters from the GB2312 library below.",
         "text_input": "Text (Unicode)",
@@ -350,7 +367,7 @@ TEXT = {
         "text_shape_mode": "Trace shape mode",
         "text_shape_mode_hint": "Rectangles/squares use rectangle layers; ellipses/circles/triangles/mixed use sphere layers in FH6.",
         "text_template_hint": "FH6 template: {hint}",
-        "text_cell_hint": "Larger cell = fewer vinyl layers, less fine detail.",
+        "text_cell_hint": "Pixel grid step when tracing the text mask. 1 = sharpest detail and most vinyl layers; higher values merge pixels into fewer, blockier shapes.",
         "text_color": "Color",
         "text_color_hint": "Edit hex or RGB; alpha 0–255 (255 = opaque). Forza H/S/B matches Bang's converter.",
         "text_color_invalid": "Color values must be valid hex or 0–255 channels.",
@@ -358,8 +375,10 @@ TEXT = {
         "text_coverage_ok_korean": "Korean and other characters in your text are supported by the selected font.",
         "text_coverage_missing": "Missing {count} glyph(s) in selected font: {chars}",
         "text_coverage_missing_korean": "Korean needs a [KR] font (e.g. Malgun Gothic). Missing {count} glyph(s): {chars}",
+        "text_coverage_partial": "Selected font supports {covered}/{total} characters. Still missing: {chars}. Best available: {font}.",
         "text_coverage_suggest_kr": "Korean detected — select a [KR] font such as {font}.",
         "text_coverage_suggest_font": "Try {font}.",
+        "text_apply_recommended_font": "Use recommended font",
         "text_char_library": "Mandarin character library (GB2312 hanzi)",
         "text_char_library_latin": "Latin extended & symbols",
         "text_char_library_hiragana": "Hiragana",
@@ -367,6 +386,9 @@ TEXT = {
         "text_char_library_kanji": "Kanji (JIS)",
         "text_char_library_hangul": "Hangul syllables",
         "text_char_library_hanzi": "Hanzi (GB2312)",
+        "text_char_library_kaomoji": "Kaomoji library",
+        "text_kaomoji_search": "Search kaomoji",
+        "text_kaomoji_insert": "Insert selected",
         "text_char_search": "Search character",
         "text_char_insert": "Insert selected",
         "text_char_count": "{count} characters available",
@@ -383,7 +405,7 @@ TEXT = {
         "text_failed": "Text vinyl generation failed",
         "text_log_scanning_fonts": "Scanning installed fonts for all script tabs...",
         "text_log_font_scan_failed": "Font scan failed: {error}",
-        "text_log_fonts_loaded": "Loaded fonts — Latin/Universal: {latin}, Japanese: {japanese}, Korean: {korean}, Chinese: {chinese}.",
+        "text_log_fonts_loaded": "Loaded fonts — Latin/Universal: {latin}, Japanese: {japanese}, Kaomoji: {kaomoji}, Korean: {korean}, Chinese: {chinese}.",
         "text_log_no_fonts": "No fonts found. Use Browse on each tab to pick a .ttf/.ttc/.otf file.",
         "text_log_enter_text": "Enter text to generate.",
         "text_log_choose_trace_image": "Choose a reference image to trace.",
@@ -494,35 +516,36 @@ TEXT = {
         "handmade_status_none": "Select a handmade JSON to inspect supported shapes.",
         "handmade_status_counts": "Shapes: total {total} · supported {supported} · unsupported {unsupported}",
         "preview_tab": "Image Preview",
-        "preview_tab_hint": "Compare filters and layer estimates before generating. Choose an image on the left; pick a filter on the right. Layer counts are approximate.",
+        "preview_tab_hint": "Compare filters and projected image complexity before generating. Choose an image on the left; pick a filter on the right. Higher complexity usually means more shapes.",
         "preview_choose_image": "Choose image",
-        "preview_use_generate_image": "Use selected Generate image",
+        "preview_send_to_generate": "Send to Generate JSON",
+        "preview_no_image_for_send": "Choose an image on Image Preview first (or use Choose image).",
         "preview_apply_generate": "Open Generate tab",
         "preview_open_folder": "Open preview cache",
         "preview_processing": "Building filter previews: {path}",
         "preview_failed": "Filter preview failed: {error}",
         "preview_output_folder": "Preview cache: {path}",
-        "preview_estimate": "~{count} layers (est.)",
-        "preview_estimate_unknown": "Estimate unavailable",
-        "preview_estimate_projected": "~{count} layers projected",
-        "preview_estimate_projected_capped": "~{projected} projected (est. ~{raw}, capped by preset)",
+        "preview_estimate": "~{count} complexity (est.)",
+        "preview_estimate_unknown": "Complexity estimate unavailable",
+        "preview_estimate_projected": "Projected complexity: ~{count}",
+        "preview_estimate_projected_capped": "Projected complexity: ~{projected} (est. ~{raw}, capped by preset)",
         "preview_select_filter": "Click a filter on the right to select it for generation.",
         "preview_main_heading": "Selected preview",
         "preview_filters_heading": "Filter options",
         "preview_preset_heading": "Generate preset (from Generate tab)",
-        "preview_preset_none": "Select a quality preset on the Generate tab to see projected output.",
+        "preview_preset_none": "Select a quality preset on the Generate tab to see projected image complexity.",
         "preview_preset_summary": "Preset: {name} · cap {layers} layers · {samples} random samples · {resolution}px max",
         "preview_preset_selected_filter": "Selected filter: {filter}",
-        "preview_preset_projection": "Projected output: ~{count} layers (complexity est. ~{raw} · preset cap {cap})",
-        "preview_preset_projection_simple": "Projected output: ~{count} layers",
-        "preview_preset_cap_exceeded": "Complexity est. ~{raw} exceeds preset cap ({cap}) — output may look capped or sparse on large templates.",
-        "preview_preset_cap_ok": "Complexity est. ~{raw} is within preset cap ({cap}).",
+        "preview_preset_projection": "Projected image complexity: ~{count} (raw est. ~{raw} · preset cap {cap})",
+        "preview_preset_projection_simple": "Projected image complexity: ~{count}",
+        "preview_preset_cap_exceeded": "Raw complexity ~{raw} exceeds preset cap ({cap}) — likely more shapes; output may look capped on large templates.",
+        "preview_preset_cap_ok": "Raw complexity ~{raw} is within preset cap ({cap}).",
         "preview_preset_resolution_downscale": "Source will downscale to about {width}×{height}px for generation (from {source_width}×{source_height}px).",
         "preview_preset_gpu_light": "GPU load: light",
         "preview_preset_gpu_moderate": "GPU load: moderate",
         "preview_preset_gpu_heavy": "GPU load: heavy",
         "preview_preset_gpu_extreme": "GPU load: extreme",
-        "preview_preset_disclaimer": "Projected layer count is an approximation, not a guarantee. Results may vary.",
+        "preview_preset_disclaimer": "Projected image complexity is a heuristic (higher usually means more shapes), not a guarantee of final JSON shape count. Results may vary.",
         "filter_none": "Original",
         "filter_none_hint": "Uses your image as-is with no preprocessing. Best baseline for photos, soft gradients, hair, and skin when you do not want extra simplification.",
         "filter_luma": "Luma Bands",
@@ -540,7 +563,7 @@ TEXT = {
         "filter_cel_heavy": "Heavy Ink Cel Shading",
         "filter_cel_heavy_hint": "Stronger black ink lines and flatter shading for bold comic/Borderlands-like results. Can be harsh on photos.",
         "preprocess_filter": "Preprocess Filter",
-        "preprocess_filter_hint": "Choose how the image is simplified before the GPU generator runs. Compare options on the Image Preview tab; lower estimates often mean fewer shapes.",
+        "preprocess_filter_hint": "Choose how the image is simplified before the GPU generator runs. Double-check all of your settigns in Step 3 before you hit Generate.",
         "generate_source_original": "Original",
         "generate_source_filtered": "With filter",
         "generate_result_plain": "No filter",
@@ -562,8 +585,9 @@ TEXT = {
         "tools_tab": "Tools",
         "tools_tab_hint": "Creative utilities for your convenience.",
         "dev_tools_tab_hint": (
-            "FH6 memory diagnostics: snapshot, compare, and table inspection. "
-            "Requires Forza Horizon 6 with a valid session. Not required for normal import."
+            "Advanced FH6 tools: memory diagnostics (snapshot, compare, table inspection) and "
+            "Save from game (export the open vinyl group to JSON). Requires a valid FH6 vinyl editor session. "
+            "Not required for normal import."
         ),
         "tools_panel_color_picker": "Color Picker",
         "tools_panel_bg_remove": "Background Removal",
@@ -644,6 +668,7 @@ TEXT = {
         "luma_status_last_run_unknown": "No completed generate run recorded yet for this image.",
         "luma_image_tag_ready": "luma file ready",
         "luma_image_tag_missing": "no luma file",
+        "image_queue_prep_pending": "prep pending",
         "json_tag_luma": "[Luma]",
         "json_tag_plain": "[Plain]",
         "generate_log_pipeline_filter": "Generating with {filter} (input: {path})",
@@ -661,26 +686,39 @@ TEXT = {
         "preview_image_already_on_generate": "Already on Generate image list: {name}",
         "generate_step_quality": "Step 2 - Choose Quality",
         "generate_step_quality_hint": "Fast profiles are quicker. Slow profiles use more GPU time and usually look cleaner.",
-        "preset_badge_legend": "▁▇ speed · ▁▇ detail · ▁▇ GPU · 🍃 cool · ⚡ fastest · ⏩ fast · ★ default · ⚠ extreme",
+        "preset_badge_legend": "▁▇ speed · ▁▇ detail · ▁▇ GPU · 🍃 eco · ⚡ fastest · ⏩ fast · ★ default · ⚠ extreme",
         "eco_preset_warning": "Experimental eco preset: lower GPU load and temperature, not the same quality as Slow or Maximum Quality. Optional cooldown below helps between queued images.",
         "eco_gpu_cooldown": "Experimental GPU cooldown between images",
         "eco_gpu_cooldown_hint": "After each image in a batch, waits until GPU is at or below 75°C when MSI Afterburner is running; otherwise pauses 30s. Install and keep MSI Afterburner open for temperature-aware cooldown.",
-        "resource_afterburner_recommend": "Install and run MSI Afterburner for CPU/GPU temperature readouts (msi.com/Landing/afterburner). Eco GPU cooldown also uses it when enabled.",
+        "resource_afterburner_recommend": "MSI Afterburner can be used to monitor CPU/GPU temperature. Eco GPU cooldown will refer to it when enabled.",
         "eco_preset_confirm": "You selected the experimental eco / cool GPU preset.\n\nIt uses fewer random samples and a lower resolution than slow presets, so results may look softer. It does not guarantee a maximum GPU temperature.\n\nContinue with this preset?",
         "eco_preset_active": "Experimental eco preset active: lower GPU settings than slow profiles.",
         "tailored_preset_warning": "Tailored preset (opt-in): built from Image Preview complexity. Normal is still the recommended default for most runs — use tailored when you want a per-image cap after preview.",
-        "tailored_preset_confirm": "You selected the tailored preset.\n\nIt is generated from a quick image analysis and may not match final JSON layer counts. Results vary with filter choice and image content.\n\nContinue with this preset?",
+        "tailored_preset_confirm": "You selected the tailored preset.\n\nIt is generated from a quick image complexity analysis and may not match final JSON shape counts. Results vary with filter choice and image content.\n\nContinue with this preset?",
         "tailored_preset_active": "Tailored preset active for the current analyzed image.",
-        "tailored_preset_updated": "Tailored preset ready for {name} (est. ~{estimate}, cap {cap} layers) — select slot 0 when you want it; Normal stays the default.",
-        "preview_estimate_uncapped": "~{raw} complexity est. (preset allows up to {cap})",
+        "tailored_preset_updated": "Tailored preset ready for {name} (complexity est. ~{estimate}, cap {cap}) — select slot 0 when you want it; Normal stays the default.",
+        "preview_estimate_uncapped": "~{raw} complexity (est.; preset allows up to {cap})",
         "eco_cooldown_waiting": "Experimental GPU cooldown: GPU {temp}°C — waiting until ≤ {target}°C before the next image…",
         "eco_cooldown_status": "Cooling GPU ({temp}°C)…",
         "eco_cooldown_ready": "GPU cooled to {temp}°C — continuing generation.",
         "eco_cooldown_timeout": "GPU cooldown timed out after 5 minutes — continuing with the next image.",
         "eco_cooldown_no_sensor": "GPU temperature unavailable — pausing {seconds}s before the next image (experimental cooldown).",
         "generate_step_run": "Step 3 - Generate",
+        "generate_run_summary_heading": "Ready to generate",
+        "generate_run_summary_empty": "Add images in Step 1 to see preset, filter, and queue details here.",
+        "generate_run_summary_images_one": "Images: {name}",
+        "generate_run_summary_images_many": "Images: {count} ({names})",
+        "generate_run_summary_images_more": " +{extra} more",
+        "generate_run_summary_preset": "Preset: {name} · up to {layers} layers · {samples} samples · {resolution}px max",
+        "generate_run_summary_filter": "Preprocess filter: {filter} (all queued images)",
+        "generate_run_summary_filter_link": "Matches Image Preview and Step 2 Preprocess Filter.",
+        "generate_run_summary_custom": "Custom settings: enabled (overrides preset values for this run).",
+        "generate_run_summary_selected": "Selected in list: {name}",
+        "generate_run_summary_estimate": "Projected complexity (selected): ~{count}",
+        "generate_run_summary_estimate_projected": "Projected image complexity (selected): ~{projected} (est. ~{raw}, preset cap {cap})",
+        "generate_run_summary_estimate_unknown": "Projected complexity (selected): open Image Preview to compare filters and see estimates.",
         "generate_step_run_hint": "Click once and wait. Progress appears in Logs; generated JSON is added to the Import page automatically.",
-        "scroll_hint": "Add image, choose a preset, then adjust custom settings if needed.",
+        "scroll_hint": "Steps 1–3 scroll above. Generate controls stay pinned below.",
         "start_generate": "Generate with current settings",
         "stop_generate": "Stop Current Generation",
         "open_output": "Open Output Folder",
@@ -860,6 +898,46 @@ TEXT = {
         "resource_monitor_title": "Resource monitor",
         "resource_cpu": "CPU",
         "resource_gpu": "GPU",
+        "resource_gpu_select": "Monitor GPU",
+        "resource_gpu_auto": "Auto (recommended)",
+        "gpu_integrated_confirm": (
+            "{name} appears to be integrated graphics (part of your CPU), not a separate graphics card.\n\n"
+            "This feature was kept as a legacy option from the original Forza Painter. However, it's not recommended to use it for generation.\n\n"
+            "Using it for generation may be slower, less stable, and will likely run significantly hotter than using a GPU.\n\n"
+            "Are you *sure* you want to use your CPU?"
+        ),
+        "resource_gpu_integrated_tag": "integrated",
+        "gpu_generation_auto": "GPU for generation: Auto (Windows + generator default)",
+        "gpu_generation_selected": "GPU for generation: {name} ({kind})",
+        "gpu_generation_kind_integrated": "integrated",
+        "gpu_generation_kind_discrete": "discrete",
+        "gpu_selection_missing": "Saved GPU is no longer available — using Auto.",
+        "resource_gpu_backend": "Backend",
+        "resource_gpu_backend_auto": "Auto",
+        "resource_gpu_backend_opencl": "OpenCL",
+        "resource_gpu_backend_vulkan": "Vulkan",
+        "gpu_backend_log_auto": (
+            "Backend: Auto (OpenCL — recommended).\n\n"
+            "OpenCL and Vulkan are two different ways the generator runs work on your graphics card. "
+            "Auto uses OpenCL, which works on most NVIDIA, AMD, and Intel GPUs with up-to-date drivers. "
+            "You do not need to change Backend unless generation fails with a GPU error."
+        ),
+        "gpu_backend_log_opencl": (
+            "Backend: OpenCL.\n\n"
+            "OpenCL is a standard for GPU computing — the same path Auto uses by default. "
+            "You usually only need to force OpenCL if you previously chose another backend and want to switch back. "
+            "If generation fails, update your graphics drivers or try Vulkan."
+        ),
+        "gpu_backend_log_vulkan": (
+            "Backend: Vulkan.\n\n"
+            "Vulkan is a newer graphics API. The generator can use your GPU through Vulkan instead of OpenCL. "
+            "Try this when OpenCL errors persist after updating drivers. "
+            "If generation works on Auto, switch back to Auto."
+        ),
+        "gpu_generation_backend": "Generator backend: {backend}",
+        "gpu_generation_direct": "Direct GPU binding: device {index} ({name})",
+        "gpu_device_match_failed": "Could not match {name} to a generator device — using Windows GPU preference instead.",
+        "gpu_generator_capabilities": "Generator {version}: backend flag={backend}; direct GPU binding={direct}",
         "resource_temp_nominal": "Temperature nominal.",
         "resource_temp_warning": "Temperature elevated.",
         "resource_temp_critical": "Temperature critical.",
@@ -950,9 +1028,10 @@ Notes
         "text_tab": "文字贴膜",
         "text_tab_hint": "选择文字体系标签页，输入文字并选择字体。右侧可预览参考图与生成的 JSON。",
         "text_scroll_options_hint": (
-            "向下滚动查看「生成选项」。\n"
-            "本工具可使用本机任意字体；若未自动找到字体，请在本标签页上传字体文件。"
+            "在上方滚动区域配置文字体系、字体与颜色。\n"
+            "生成按钮固定在下方。若未自动找到字体，请在本标签页浏览选择。"
         ),
+        "text_generate_action": "第 3 步 - 生成",
         "text_outputs": "文字设计",
         "text_outputs_hint": "本标签页生成的设计文件。可手动添加，或就绪后继续到「导入」。",
         "text_reference_preview": "参考图预览",
@@ -963,10 +1042,12 @@ Notes
         "text_open_vinyl_folder": "打开 text-vinyl 文件夹",
         "text_script_universal": "通用（拉丁）",
         "text_script_japanese": "日文",
+        "text_script_kaomoji": "颜文字",
         "text_script_korean": "韩文",
         "text_script_chinese": "中文",
         "text_script_hint_universal": "拉丁字母与西方标点。请选用 [LATIN] 字体，如 Segoe UI、Arial。",
         "text_script_hint_japanese": "假名与汉字。请选用 [JP] 或 [CJK] 字体，如 Meiryo。",
+        "text_script_hint_kaomoji": "日式颜文字。可从下方库中选择或粘贴。建议使用等宽或 [SYMBOL] 字体（Segoe UI Symbol、Consolas、Meiryo）。追踪栅格 1 最清晰。",
         "text_script_hint_korean": "韩文音节。请选用 [KR] 字体，如 Malgun Gothic。",
         "text_script_hint_chinese": "简繁汉字。请选用 [SC]/[TC] 字体；可从下方 GB2312 字库插入。",
         "text_input": "文字（Unicode）",
@@ -980,7 +1061,7 @@ Notes
         "text_shape_mode": "描摹形状",
         "text_shape_mode_hint": "矩形/方块用矩形图层；椭圆/圆/三角/混合建议用球形模板。",
         "text_template_hint": "FH6 模板：{hint}",
-        "text_cell_hint": "栅格越大，图层越少，细节越少。",
+        "text_cell_hint": "追踪文字遮罩时的像素栅格步长。1 = 最清晰、图层最多；数值越大越块状、图层越少。",
         "text_color": "颜色",
         "text_color_hint": "可编辑 Hex 或 RGB；透明度 0–255（255 = 不透明）。Forza H/S/B 与 Bang 转换器一致。",
         "text_color_invalid": "颜色须为有效 Hex 或 0–255 数值。",
@@ -988,8 +1069,10 @@ Notes
         "text_coverage_ok_korean": "当前字体支持输入中的韩文及其他字符。",
         "text_coverage_missing": "当前字体缺少 {count} 个字形：{chars}",
         "text_coverage_missing_korean": "韩文请选用 [KR] 字体（如 Malgun Gothic）。缺少 {count} 个字形：{chars}",
+        "text_coverage_partial": "当前字体支持 {covered}/{total} 个字符。仍缺少：{chars}。最佳可用：{font}。",
         "text_coverage_suggest_kr": "检测到韩文 — 请选择 [KR] 字体，例如 {font}。",
         "text_coverage_suggest_font": "可尝试 {font}。",
+        "text_apply_recommended_font": "使用推荐字体",
         "text_char_library": "简体字库（GB2312）",
         "text_char_library_latin": "拉丁扩展与符号",
         "text_char_library_hiragana": "平假名",
@@ -997,6 +1080,9 @@ Notes
         "text_char_library_kanji": "汉字（JIS）",
         "text_char_library_hangul": "韩文音节",
         "text_char_library_hanzi": "汉字（GB2312）",
+        "text_char_library_kaomoji": "颜文字库",
+        "text_kaomoji_search": "搜索颜文字",
+        "text_kaomoji_insert": "插入选中",
         "text_char_search": "搜索字符",
         "text_char_insert": "插入选中",
         "text_char_count": "可用 {count} 个字符",
@@ -1013,7 +1099,7 @@ Notes
         "text_failed": "文字贴膜生成失败",
         "text_log_scanning_fonts": "正在扫描各文字体系标签页的已安装字体…",
         "text_log_font_scan_failed": "字体扫描失败：{error}",
-        "text_log_fonts_loaded": "已加载字体 — 拉丁/通用：{latin}，日文：{japanese}，韩文：{korean}，中文：{chinese}。",
+        "text_log_fonts_loaded": "已加载字体 — 拉丁/通用：{latin}，日文：{japanese}，颜文字：{kaomoji}，韩文：{korean}，中文：{chinese}。",
         "text_log_no_fonts": "未找到字体。请在各标签页使用「浏览」选择 .ttf/.ttc/.otf 文件。",
         "text_log_enter_text": "请输入要生成的文字。",
         "text_log_choose_trace_image": "请选择要描摹的参考图片。",
@@ -1142,35 +1228,36 @@ Notes
         "handmade_status_none": "选择手工 JSON 后可查看支持的形状数量。",
         "handmade_status_counts": "形状：总计 {total} · 支持 {supported} · 不支持 {unsupported}",
         "preview_tab": "图像预览",
-        "preview_tab_hint": "生成前对比滤镜与层数预估。左侧选图，右侧选滤镜。层数为估算值。",
+        "preview_tab_hint": "生成前对比滤镜与预计图像复杂度。左侧选图，右侧选滤镜。复杂度越高通常意味着更多形状。",
         "preview_choose_image": "选择图片",
-        "preview_use_generate_image": "使用「生成」页所选图片",
+        "preview_send_to_generate": "发送到「生成 JSON」",
+        "preview_no_image_for_send": "请先在图像预览中选择图片（或点击「选择图片」）。",
         "preview_apply_generate": "打开「生成」页",
         "preview_open_folder": "打开预览缓存",
         "preview_processing": "正在生成滤镜预览：{path}",
         "preview_failed": "滤镜预览失败：{error}",
         "preview_output_folder": "预览缓存：{path}",
-        "preview_estimate": "约 {count} 层（预估）",
-        "preview_estimate_unknown": "无法预估",
-        "preview_estimate_projected": "约 {count} 层（预计输出）",
-        "preview_estimate_projected_capped": "约 {projected} 层预计输出（预估 ~{raw}，受预设上限限制）",
+        "preview_estimate": "约 {count} 复杂度（预估）",
+        "preview_estimate_unknown": "无法估计复杂度",
+        "preview_estimate_projected": "预计复杂度：约 {count}",
+        "preview_estimate_projected_capped": "预计复杂度：约 {projected}（预估 ~{raw}，受预设上限限制）",
         "preview_select_filter": "点击右侧滤镜以用于生成。",
         "preview_main_heading": "当前预览",
         "preview_filters_heading": "滤镜选项",
         "preview_preset_heading": "生成预设（来自「生成 JSON」页）",
-        "preview_preset_none": "请在「生成 JSON」页选择品质预设以查看预计输出。",
+        "preview_preset_none": "请在「生成 JSON」页选择品质预设以查看预计图像复杂度。",
         "preview_preset_summary": "预设：{name} · 上限 {layers} 层 · {samples} 随机样本 · 最大 {resolution}px",
         "preview_preset_selected_filter": "已选滤镜：{filter}",
-        "preview_preset_projection": "预计输出：约 {count} 层（复杂度预估 ~{raw} · 预设上限 {cap}）",
-        "preview_preset_projection_simple": "预计输出：约 {count} 层",
-        "preview_preset_cap_exceeded": "复杂度预估 ~{raw} 超过预设上限（{cap}）— 在大模板上可能显得偏空或被截断。",
-        "preview_preset_cap_ok": "复杂度预估 ~{raw} 在预设上限（{cap}）内。",
+        "preview_preset_projection": "预计图像复杂度：约 {count}（原始预估 ~{raw} · 预设上限 {cap}）",
+        "preview_preset_projection_simple": "预计图像复杂度：约 {count}",
+        "preview_preset_cap_exceeded": "原始复杂度 ~{raw} 超过预设上限（{cap}）— 通常形状更多；大模板上可能显得偏空或被截断。",
+        "preview_preset_cap_ok": "原始复杂度 ~{raw} 在预设上限（{cap}）内。",
         "preview_preset_resolution_downscale": "生成时将缩小至约 {width}×{height}px（原图 {source_width}×{source_height}px）。",
         "preview_preset_gpu_light": "GPU 负载：低",
         "preview_preset_gpu_moderate": "GPU 负载：中",
         "preview_preset_gpu_heavy": "GPU 负载：高",
         "preview_preset_gpu_extreme": "GPU 负载：极高",
-        "preview_preset_disclaimer": "预计层数为近似值，并非保证。实际结果可能有所不同。",
+        "preview_preset_disclaimer": "预计图像复杂度为启发式指标（越高通常形状越多），不保证最终 JSON 形状数量。实际结果可能有所不同。",
         "filter_none": "原图",
         "filter_none_hint": "不预处理，直接使用原图。适合照片、柔和渐变、头发和皮肤等不希望额外简化的素材。",
         "filter_luma": "亮度分带",
@@ -1209,7 +1296,7 @@ Notes
         "luma_failed": "亮度分带失败：{error}",
         "tools_tab": "工具",
         "tools_tab_hint": "创意实用工具（取色器、背景移除），与 JSON 生成流程分离。",
-        "dev_tools_tab_hint": "FH6 内存诊断：快照、对比与表检查。需要有效的 FH6 会话。正常导入不需要。",
+        "dev_tools_tab_hint": "高级 FH6 工具：内存诊断（快照、对比、表检查）与从游戏保存（导出当前贴膜组为 JSON）。需要有效的 FH6 贴膜编辑器会话。正常导入不需要。",
         "tools_panel_color_picker": "取色器",
         "tools_panel_bg_remove": "去背景",
         "tools_panel_fh6": "FH6 诊断",
@@ -1291,6 +1378,7 @@ Notes
         "luma_column_last": "（上次）",
         "luma_image_tag_ready": "已有 luma 文件",
         "luma_image_tag_missing": "无 luma 文件",
+        "image_queue_prep_pending": "预处理待生成",
         "json_tag_luma": "[Luma]",
         "json_tag_plain": "[普通]",
         "generate_log_pipeline_luma": "正在使用 Luma Prep 生成（输入：{path}）",
@@ -1316,18 +1404,31 @@ Notes
         "eco_preset_confirm": "您选择了实验性 eco / 低 GPU 负载预设。\n\n该预设的随机样本和分辨率低于 slow，效果可能更软，且不保证 GPU 最高温度。\n\n是否继续？",
         "eco_preset_active": "实验性 eco 预设已启用：GPU 参数低于 slow 配置。",
         "tailored_preset_warning": "量身定制预设（可选）：由图像预览复杂度生成。大多数情况仍推荐 Normal 作为默认；需要按图上限时再选 slot 0。",
-        "tailored_preset_confirm": "您选择了量身定制预设。\n\n该预设由快速图像分析生成，可能与最终 JSON 层数不一致。结果会随滤镜与图像内容变化。\n\n是否继续？",
+        "tailored_preset_confirm": "您选择了量身定制预设。\n\n该预设由快速图像复杂度分析生成，可能与最终 JSON 形状数量不一致。结果会随滤镜与图像内容变化。\n\n是否继续？",
         "tailored_preset_active": "当前分析图像已启用量身定制预设。",
-        "tailored_preset_updated": "已为 {name} 准备好量身定制预设（预估 ~{estimate}，上限 {cap} 层）— 需要时选 slot 0；默认仍为 Normal。",
-        "preview_estimate_uncapped": "复杂度预估 ~{raw}（预设上限 {cap}）",
+        "tailored_preset_updated": "已为 {name} 准备好量身定制预设（复杂度预估 ~{estimate}，上限 {cap}）— 需要时选 slot 0；默认仍为 Normal。",
+        "preview_estimate_uncapped": "约 {raw} 复杂度（预估；预设上限 {cap}）",
         "eco_cooldown_waiting": "实验性 GPU 冷却：当前 {temp}°C，等待降至 ≤ {target}°C 后再处理下一张…",
         "eco_cooldown_status": "GPU 冷却中（{temp}°C）…",
         "eco_cooldown_ready": "GPU 已降至 {temp}°C，继续生成。",
         "eco_cooldown_timeout": "GPU 冷却等待超过 5 分钟，继续下一张。",
         "eco_cooldown_no_sensor": "无法读取 GPU 温度，实验性冷却：暂停 {seconds} 秒后继续。",
         "generate_step_run": "第 3 步 - 开始生成",
+        "generate_run_summary_heading": "即将生成",
+        "generate_run_summary_empty": "在第 1 步添加图片后，可在此查看预设、滤镜与队列详情。",
+        "generate_run_summary_images_one": "图片：{name}",
+        "generate_run_summary_images_many": "图片：{count} 张（{names}）",
+        "generate_run_summary_images_more": " 等 {extra} 张",
+        "generate_run_summary_preset": "预设：{name} · 最多 {layers} 层 · {samples} 采样 · {resolution}px",
+        "generate_run_summary_filter": "预处理滤镜：{filter}（队列中全部图片）",
+        "generate_run_summary_filter_link": "与图像预览及第 2 步预处理滤镜一致。",
+        "generate_run_summary_custom": "自定义设置：已启用（本次生成覆盖预设值）。",
+        "generate_run_summary_selected": "列表选中：{name}",
+        "generate_run_summary_estimate": "预计复杂度（当前选中）：约 {count}",
+        "generate_run_summary_estimate_projected": "预计图像复杂度（当前选中）：约 {projected}（预估 ~{raw}，预设上限 {cap}）",
+        "generate_run_summary_estimate_unknown": "预计复杂度（当前选中）：请打开图像预览对比滤镜并查看估计值。",
         "generate_step_run_hint": "点击一次后等待。进度会显示在日志里，生成的 JSON 会自动加入导入页面。",
-        "scroll_hint": "添加图片、选择预设；需要时直接修改下方自定义参数。",
+        "scroll_hint": "第 1–3 步在上方滚动；生成按钮固定在下方。",
         "start_generate": "按当前配置生成",
         "stop_generate": "中断当前生成",
         "open_output": "打开输出目录",
@@ -1493,6 +1594,45 @@ Notes
         "resource_monitor_title": "资源监控",
         "resource_cpu": "CPU",
         "resource_gpu": "GPU",
+        "resource_gpu_select": "监控 GPU",
+        "resource_gpu_auto": "自动（推荐）",
+        "gpu_integrated_confirm": (
+            "{name} 看起来是集成显卡（CPU 内置），不是独立显卡。\n\n"
+            "用它进行生成可能更慢、更不稳定，且发热明显更高。\n\n"
+            "仍要使用此 GPU 吗？"
+        ),
+        "resource_gpu_integrated_tag": "集成",
+        "gpu_generation_auto": "生成 GPU：自动（Windows + 生成器默认）",
+        "gpu_generation_selected": "生成 GPU：{name}（{kind}）",
+        "gpu_generation_kind_integrated": "集成显卡",
+        "gpu_generation_kind_discrete": "独立显卡",
+        "gpu_selection_missing": "已保存的 GPU 不可用 — 已改回自动。",
+        "resource_gpu_backend": "后端",
+        "resource_gpu_backend_auto": "自动",
+        "resource_gpu_backend_opencl": "OpenCL",
+        "resource_gpu_backend_vulkan": "Vulkan",
+        "gpu_backend_log_auto": (
+            "后端：自动（OpenCL — 推荐）。\n\n"
+            "OpenCL 与 Vulkan 是生成器在显卡上运行工作的两种不同方式。"
+            "自动使用 OpenCL，在驱动正常的 NVIDIA、AMD、Intel 显卡上通常可用。"
+            "除非生成出现 GPU 错误，否则无需更改后端。"
+        ),
+        "gpu_backend_log_opencl": (
+            "后端：OpenCL。\n\n"
+            "OpenCL 是 GPU 计算的标准接口，与自动选项使用的路径相同。"
+            "通常仅在您曾选择其他后端并想明确改回 OpenCL 时才需要强制 OpenCL。"
+            "若仍失败，请更新显卡驱动或尝试 Vulkan。"
+        ),
+        "gpu_backend_log_vulkan": (
+            "后端：Vulkan。\n\n"
+            "Vulkan 是较新的图形 API。生成器可通过 Vulkan 而非 OpenCL 使用显卡。"
+            "请在更新驱动后 OpenCL 仍报错时再试 Vulkan。"
+            "若自动模式正常，请改回自动。"
+        ),
+        "gpu_generation_backend": "生成器后端：{backend}",
+        "gpu_generation_direct": "直接 GPU 绑定：设备 {index}（{name}）",
+        "gpu_device_match_failed": "无法将 {name} 匹配到生成器设备 — 已改用 Windows GPU 偏好设置。",
+        "gpu_generator_capabilities": "生成器 {version}：backend 标志={backend}；直接 GPU 绑定={direct}",
         "resource_temp_nominal": "温度读数正常。",
         "resource_temp_warning": "温度偏高。",
         "resource_temp_critical": "温度危险。",
@@ -1618,35 +1758,36 @@ Notes
         "handmade_status_none": "수작업 JSON을 선택하면 지원되는 도형 수를 확인할 수 있습니다.",
         "handmade_status_counts": "도형: 전체 {total} · 지원 {supported} · 미지원 {unsupported}",
         "preview_tab": "이미지 미리보기",
-        "preview_tab_hint": "생성 전 필터와 레이어 추정을 비교하세요. 왼쪽에서 이미지, 오른쪽에서 필터를 선택합니다. 레이어 수는 추정치입니다.",
+        "preview_tab_hint": "생성 전 필터와 예상 이미지 복잡도를 비교하세요. 왼쪽에서 이미지, 오른쪽에서 필터를 선택합니다. 복잡도가 높을수록 보통 도형이 더 많습니다.",
         "preview_choose_image": "이미지 선택",
-        "preview_use_generate_image": "생성 탭 선택 이미지 사용",
+        "preview_send_to_generate": "Generate JSON로 보내기",
+        "preview_no_image_for_send": "먼저 이미지 미리보기에서 이미지를 선택하세요(또는 이미지 선택 사용).",
         "preview_apply_generate": "생성 탭 열기",
         "preview_open_folder": "미리보기 캐시 열기",
         "preview_processing": "필터 미리보기 생성 중: {path}",
         "preview_failed": "필터 미리보기 실패: {error}",
         "preview_output_folder": "미리보기 캐시: {path}",
-        "preview_estimate": "약 {count} 레이어 (추정)",
-        "preview_estimate_unknown": "추정 불가",
-        "preview_estimate_projected": "약 {count} 레이어 (예상 출력)",
-        "preview_estimate_projected_capped": "약 {projected} 레이어 예상 (추정 ~{raw}, 프리셋 상한 적용)",
+        "preview_estimate": "약 {count} 복잡도 (추정)",
+        "preview_estimate_unknown": "복잡도 추정 불가",
+        "preview_estimate_projected": "예상 복잡도: 약 {count}",
+        "preview_estimate_projected_capped": "예상 복잡도: 약 {projected} (추정 ~{raw}, 프리셋 상한 적용)",
         "preview_select_filter": "오른쪽 필터를 클릭해 생성에 사용하세요.",
         "preview_main_heading": "선택 미리보기",
         "preview_filters_heading": "필터 옵션",
         "preview_preset_heading": "생성 프리셋 (Generate JSON 탭 기준)",
-        "preview_preset_none": "예상 출력을 보려면 Generate JSON 탭에서 품질 프리셋을 선택하세요.",
+        "preview_preset_none": "예상 이미지 복잡도를 보려면 Generate JSON 탭에서 품질 프리셋을 선택하세요.",
         "preview_preset_summary": "프리셋: {name} · 상한 {layers} 레이어 · {samples} 무작위 샘플 · 최대 {resolution}px",
         "preview_preset_selected_filter": "선택한 필터: {filter}",
-        "preview_preset_projection": "예상 출력: 약 {count} 레이어 (복잡도 추정 ~{raw} · 프리셋 상한 {cap})",
-        "preview_preset_projection_simple": "예상 출력: 약 {count} 레이어",
-        "preview_preset_cap_exceeded": "복잡도 추정 ~{raw}이(가) 프리셋 상한({cap})을 초과 — 큰 템플릿에서 비어 보이거나 제한될 수 있습니다.",
-        "preview_preset_cap_ok": "복잡도 추정 ~{raw} — 프리셋 상한({cap}) 이내.",
+        "preview_preset_projection": "예상 이미지 복잡도: 약 {count} (원시 추정 ~{raw} · 프리셋 상한 {cap})",
+        "preview_preset_projection_simple": "예상 이미지 복잡도: 약 {count}",
+        "preview_preset_cap_exceeded": "원시 복잡도 ~{raw}이(가) 프리셋 상한({cap}) 초과 — 보통 도형이 더 많음; 큰 템플릿에서 제한될 수 있습니다.",
+        "preview_preset_cap_ok": "원시 복잡도 ~{raw} — 프리셋 상한({cap}) 이내.",
         "preview_preset_resolution_downscale": "생성 시 약 {width}×{height}px로 축소됩니다 (원본 {source_width}×{source_height}px).",
         "preview_preset_gpu_light": "GPU 부하: 낮음",
         "preview_preset_gpu_moderate": "GPU 부하: 보통",
         "preview_preset_gpu_heavy": "GPU 부하: 높음",
         "preview_preset_gpu_extreme": "GPU 부하: 매우 높음",
-        "preview_preset_disclaimer": "예상 레이어 수는 근사치이며 보장되지 않습니다. 결과는 달라질 수 있습니다.",
+        "preview_preset_disclaimer": "예상 이미지 복잡도는 휴리스틱(높을수록 보통 도형이 많음)이며 최종 JSON 도형 수를 보장하지 않습니다. 결과는 달라질 수 있습니다.",
         "filter_none": "원본",
         "filter_none_hint": "전처리 없이 원본 이미지를 사용합니다. 사진, 부드러운 그라데이션, 머리카락·피부 등 추가 단순화를 원하지 않을 때 적합합니다.",
         "filter_luma": "루마 밴드",
@@ -1685,7 +1826,7 @@ Notes
         "luma_failed": "루마 밴드 실패: {error}",
         "tools_tab": "도구",
         "tools_tab_hint": "크리에이티브 유틸리티(색상 선택기, 배경 제거). JSON 생성과 분리됩니다.",
-        "dev_tools_tab_hint": "FH6 메모리 진단: 스냅샷, 비교, 테이블 검사. 유효한 FH6 세션 필요. 일반 가져오기에는 불필요.",
+        "dev_tools_tab_hint": "고급 FH6 도구: 메모리 진단(스냅샷, 비교, 테이블 검사) 및 게임에서 저장(열린 비닐 그룹을 JSON으로보내기). 유효한 FH6 비닐 편집기 세션 필요. 일반 가져오기에는 불필요.",
         "tools_panel_color_picker": "색상 선택기",
         "tools_panel_bg_remove": "배경 제거",
         "tools_panel_fh6": "FH6 진단",
@@ -1767,6 +1908,7 @@ Notes
         "luma_column_last": "(마지막)",
         "luma_image_tag_ready": "luma 파일 있음",
         "luma_image_tag_missing": "luma 파일 없음",
+        "image_queue_prep_pending": "전처리 대기",
         "json_tag_luma": "[Luma]",
         "json_tag_plain": "[일반]",
         "generate_log_pipeline_luma": "루마 프렙으로 생성 중(입력: {path})",
@@ -1792,18 +1934,31 @@ Notes
         "eco_preset_confirm": "실험적 eco / 저 GPU 부하 프리셋을 선택했습니다.\n\nslow보다 샘플·해상도가 낮아 결과가 더 부드러울 수 있으며 최대 GPU 온도를 보장하지 않습니다.\n\n계속할까요?",
         "eco_preset_active": "실험적 eco 프리셋 활성: slow보다 낮은 GPU 설정.",
         "tailored_preset_warning": "맞춤 프리셋(선택): 미리보기 복잡도 기반. 대부분 Normal 권장 — 이미지별 상한이 필요할 때 slot 0.",
-        "tailored_preset_confirm": "맞춤 프리셋을 선택했습니다.\n\n빠른 이미지 분석으로 생성되며 최종 JSON 레이어 수와 일치하지 않을 수 있습니다.\n\n계속할까요?",
+        "tailored_preset_confirm": "맞춤 프리셋을 선택했습니다.\n\n빠른 이미지 복잡도 분석으로 생성되며 최종 JSON 도형 수와 일치하지 않을 수 있습니다.\n\n계속할까요?",
         "tailored_preset_active": "분석된 이미지에 맞춤 프리셋이 활성화되었습니다.",
-        "tailored_preset_updated": "{name} 맞춤 프리셋 준비됨(추정 ~{estimate}, 상한 {cap}) — 필요 시 slot 0, 기본은 Normal.",
-        "preview_estimate_uncapped": "복잡도 추정 ~{raw}(프리셋 상한 {cap})",
+        "tailored_preset_updated": "{name} 맞춤 프리셋 준비됨(복잡도 추정 ~{estimate}, 상한 {cap}) — 필요 시 slot 0, 기본은 Normal.",
+        "preview_estimate_uncapped": "약 {raw} 복잡도 (추정; 프리셋 상한 {cap})",
         "eco_cooldown_waiting": "실험적 GPU 냉각: GPU {temp}°C — 다음 이미지 전 {target}°C 이하까지 대기…",
         "eco_cooldown_status": "GPU 냉각 중({temp}°C)…",
         "eco_cooldown_ready": "GPU {temp}°C — 생성 계속.",
         "eco_cooldown_timeout": "GPU 냉각 5분 초과 — 다음 이미지로 진행.",
         "eco_cooldown_no_sensor": "GPU 온도를 읽을 수 없음 — 실험적 냉각: {seconds}초 후 계속.",
         "generate_step_run": "3단계 - 생성",
+        "generate_run_summary_heading": "생성 준비",
+        "generate_run_summary_empty": "1단계에서 이미지를 추가하면 프리셋, 필터, 대기열 정보가 여기에 표시됩니다.",
+        "generate_run_summary_images_one": "이미지: {name}",
+        "generate_run_summary_images_many": "이미지: {count}개 ({names})",
+        "generate_run_summary_images_more": " 외 {extra}개",
+        "generate_run_summary_preset": "프리셋: {name} · 최대 {layers}레이어 · 샘플 {samples} · {resolution}px",
+        "generate_run_summary_filter": "전처리 필터: {filter} (대기열의 모든 이미지)",
+        "generate_run_summary_filter_link": "이미지 미리보기 및 2단계 전처리 필터와 동일합니다.",
+        "generate_run_summary_custom": "사용자 설정: 사용 중 (이번 실행에서 프리셋 값을 덮어씁니다).",
+        "generate_run_summary_selected": "목록 선택: {name}",
+        "generate_run_summary_estimate": "예상 복잡도(선택): 약 {count}",
+        "generate_run_summary_estimate_projected": "예상 이미지 복잡도(선택): 약 {projected} (추정 ~{raw}, 상한 {cap})",
+        "generate_run_summary_estimate_unknown": "예상 복잡도(선택): 이미지 미리보기에서 필터를 비교해 추정값을 확인하세요.",
         "generate_step_run_hint": "한 번 클릭한 뒤 기다리세요. 진행 상황은 로그에 표시되고, 생성된 JSON은 가져오기 페이지에 자동으로 추가됩니다.",
-        "scroll_hint": "이미지를 추가하고 프리셋을 선택한 뒤, 필요하면 사용자 설정을 조정하세요.",
+        "scroll_hint": "1–3단계는 위에서 스크롤하고, 생성 버튼은 아래에 고정됩니다.",
         "start_generate": "현재 설정으로 생성",
         "stop_generate": "현재 생성 중지",
         "open_output": "출력 폴더 열기",
@@ -1968,6 +2123,45 @@ Notes
         "resource_monitor_title": "리소스 모니터",
         "resource_cpu": "CPU",
         "resource_gpu": "GPU",
+        "resource_gpu_select": "모니터 GPU",
+        "resource_gpu_auto": "자동(권장)",
+        "gpu_integrated_confirm": (
+            "{name}은(는) 별도 그래픽 카드가 아니라 CPU 내장(통합) 그래픽으로 보입니다.\n\n"
+            "생성에 사용하면 더 느리고 불안정할 수 있으며 발열도 훨씬 커질 수 있습니다.\n\n"
+            "이 GPU를 계속 사용할까요?"
+        ),
+        "resource_gpu_integrated_tag": "통합",
+        "gpu_generation_auto": "생성 GPU: 자동(Windows + 생성기 기본값)",
+        "gpu_generation_selected": "생성 GPU: {name} ({kind})",
+        "gpu_generation_kind_integrated": "통합 그래픽",
+        "gpu_generation_kind_discrete": "독립 GPU",
+        "gpu_selection_missing": "저장된 GPU를 사용할 수 없어 자동으로 되돌렸습니다.",
+        "resource_gpu_backend": "백엔드",
+        "resource_gpu_backend_auto": "자동",
+        "resource_gpu_backend_opencl": "OpenCL",
+        "resource_gpu_backend_vulkan": "Vulkan",
+        "gpu_backend_log_auto": (
+            "백엔드: 자동(OpenCL — 권장).\n\n"
+            "OpenCL과 Vulkan은 생성기가 그래픽 카드에서 작업을 실행하는 두 가지 방식입니다. "
+            "자동은 OpenCL을 사용하며, 드라이버가 최신인 대부분의 NVIDIA/AMD/Intel GPU에서 동작합니다. "
+            "GPU 오류가 없다면 백엔드를 바꿀 필요가 없습니다."
+        ),
+        "gpu_backend_log_opencl": (
+            "백엔드: OpenCL.\n\n"
+            "OpenCL은 GPU 컴퓨팅 표준으로, 자동과 동일한 경로입니다. "
+            "다른 백엔드를 선택했다가 OpenCL로 되돌릴 때만 명시적으로 선택하세요. "
+            "실패하면 그래픽 드라이버를 업데이트하거나 Vulkan을 시도하세요."
+        ),
+        "gpu_backend_log_vulkan": (
+            "백엔드: Vulkan.\n\n"
+            "Vulkan은 더 새로운 그래픽 API입니다. 생성기는 OpenCL 대신 Vulkan으로 GPU를 사용할 수 있습니다. "
+            "드라이버 업데이트 후에도 OpenCL 오류가 계속되면 시도하세요. "
+            "자동에서 정상이면 다시 자동으로 되돌리세요."
+        ),
+        "gpu_generation_backend": "생성기 백엔드: {backend}",
+        "gpu_generation_direct": "직접 GPU 바인딩: 장치 {index} ({name})",
+        "gpu_device_match_failed": "{name}을(를) 생성기 장치와 일치시키지 못했습니다 — Windows GPU 기본 설정을 사용합니다.",
+        "gpu_generator_capabilities": "생성기 {version}: backend 플래그={backend}; 직접 GPU 바인딩={direct}",
         "resource_temp_nominal": "온도 측정값 정상.",
         "resource_temp_warning": "온도 상승.",
         "resource_temp_critical": "온도 위험.",
@@ -2297,12 +2491,32 @@ def pil_to_photo(image, max_size=None):
     return buffer.getvalue()
 
 
+def _preview_display_bg_bgr() -> tuple[int, int, int]:
+    hex_color = str(globals().get("COLOR_PREVIEW_BG", "#0a0a0a"))
+    value = hex_color.lstrip("#")
+    if len(value) != 6:
+        return (10, 10, 10)
+    r = int(value[0:2], 16)
+    g = int(value[2:4], 16)
+    b = int(value[4:6], 16)
+    return (b, g, r)
+
+
 def render_source_image(path, max_size=None):
+    from preprocess.alpha import composite_bgra_on_bgr
+
+    bg_bgr = _preview_display_bg_bgr()
     loaded = load_cv2()
     if loaded:
         cv2, _np = loaded
-        image = cv2.imread(str(path), cv2.IMREAD_COLOR)
-        if image is not None:
+        bgra = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+        if bgra is not None:
+            if bgra.ndim == 3 and bgra.shape[2] == 4:
+                image = composite_bgra_on_bgr(bgra, bg_bgr)
+            elif bgra.ndim == 2:
+                image = cv2.cvtColor(bgra, cv2.COLOR_GRAY2BGR)
+            else:
+                image = bgra
             return image_to_photo(image, max_size)
     loaded = load_pillow()
     if not loaded:
@@ -2310,6 +2524,11 @@ def render_source_image(path, max_size=None):
     Image, _ImageDraw = loaded
     try:
         with Image.open(path) as image:
+            if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+                rgba = image.convert("RGBA")
+                background = Image.new("RGBA", rgba.size, _preview_display_bg_bgr()[::-1] + (255,))
+                rgba = Image.alpha_composite(background, rgba)
+                return pil_to_photo(rgba.convert("RGB"), max_size)
             return pil_to_photo(image, max_size)
     except Exception:
         return None
@@ -2699,6 +2918,10 @@ class App:
             value="1" if self._eco_generation_settings.cooldown_enabled else "0"
         )
         self._resource_monitor_settings = load_resource_monitor_settings(ROOT)
+        self._generator_gpu_settings = load_generator_gpu_settings(ROOT)
+        self._gpu_adapters: list[GpuAdapter] = []
+        self._generator_capabilities: GeneratorCapabilities | None = None
+        self._generator_devices: list[GeneratorDevice] = []
         self._resource_monitor_backend = None
         self._resource_heat_state = "normal"
         self._resource_monitor_snapshot = None
@@ -2740,8 +2963,15 @@ class App:
 
     def _register_pane(self, paned, layout_key: str, orient: str) -> None:
         self._layout_panes[layout_key] = (paned, orient)
-        paned.bind("<ButtonRelease-1>", lambda _event: self._schedule_layout_save(), add="+")
-        paned.bind("<B1-Motion>", lambda _event: self._schedule_layout_save(), add="+")
+
+        def _on_sash_adjust(_event=None) -> None:
+            if self.closed:
+                return
+            enforce_pane_sash_bounds(paned, orient, layout_key)
+            self._schedule_layout_save()
+
+        paned.bind("<B1-Motion>", _on_sash_adjust, add="+")
+        paned.bind("<ButtonRelease-1>", _on_sash_adjust, add="+")
 
     def _widget_alive(self, widget) -> bool:
         if widget is None:
@@ -2779,7 +3009,7 @@ class App:
         for key, (paned, orient) in list(self._layout_panes.items()):
             measured = pane_ratio(paned, orient)
             if measured is not None:
-                ratios[key] = measured
+                ratios[key] = clamp_pane_ratio(key, measured)
         self._ui_layout = ratios
         save_ui_layout(ROOT, ratios)
 
@@ -2795,8 +3025,8 @@ class App:
                     continue
             except Exception:
                 continue
-            ratio = self._ui_layout.get(key, DEFAULT_PANE_RATIOS.get(key, 0.7))
-            apply_pane_ratio(paned, orient, ratio)
+            ratio = clamp_pane_ratio(key, self._ui_layout.get(key, DEFAULT_PANE_RATIOS.get(key, 0.7)))
+            apply_pane_ratio(paned, orient, ratio, layout_key=key)
 
     def _restore_all_pane_layouts(self) -> None:
         for key in list(self._layout_panes.keys()):
@@ -3026,6 +3256,26 @@ class App:
         scroll_area.bind("<Leave>", _unbind_mousewheel)
         return scroll_area, inner
 
+    def _prepare_sticky_column(self, parent, *, hint_key: str | None = None, scrollable: bool = True):
+        """Scrollable or expanding body with a grid-pinned footer that stays visible when space is tight."""
+        parent.columnconfigure(0, weight=1)
+        row = 0
+        if hint_key:
+            scroll_hint = self._label(parent, hint_key, anchor="w", justify=LEFT, theme_role="hint")
+            scroll_hint.grid(row=row, column=0, sticky="ew", pady=(0, 6))
+            self._bind_wraplength(scroll_hint, parent)
+            row += 1
+        if scrollable:
+            scroll_area, inner = self._make_vertical_scroll(parent)
+            scroll_area.grid(row=row, column=0, sticky="nsew", pady=(0, 8))
+        else:
+            inner = Frame(parent)
+            inner.grid(row=row, column=0, sticky="nsew", pady=(0, 8))
+        parent.rowconfigure(row, weight=1)
+        footer = Frame(parent)
+        footer.grid(row=row + 1, column=0, sticky="ew")
+        return inner, footer
+
     def _bind_text_mousewheel(self, widget):
         def _mousewheel(event):
             widget.yview_scroll(int(-1 * (event.delta / 120)), "units")
@@ -3121,6 +3371,9 @@ class App:
 
         if self._resource_monitor_settings.enabled:
             self._header_telemetry = HeaderTelemetryPanel(self, header)
+            self._header_telemetry.set_gpu_selection_callback(self._on_gpu_selection_changed)
+            self._header_telemetry.set_generator_backend_callback(self._on_generator_backend_changed)
+            threading.Thread(target=self._load_gpu_adapters_worker, daemon=True).start()
 
         right = Frame(header, bg=COLOR_BG)
         right._chrome_bg_locked = True
@@ -3232,11 +3485,14 @@ class App:
         self.import_photo_tab = Frame(self.import_notebook)
         self.import_text_tab = Frame(self.import_notebook)
         self.import_pixel_tab = Frame(self.import_notebook)
-        self.export_game_tab = Frame(self.import_notebook)
+
+        self.dev_tools_notebook = ttk.Notebook(self.dev_tools_hub, style="Script.TNotebook")
+        self.dev_tools_notebook.pack(fill=BOTH, expand=True, padx=8, pady=8)
+        self.dev_tools_tab = Frame(self.dev_tools_notebook)
+        self.export_game_tab = Frame(self.dev_tools_notebook)
 
         self.tools_tab = Frame(self.tools_hub)
         self.file_management_tab = Frame(self.file_management_hub)
-        self.dev_tools_tab = Frame(self.dev_tools_hub)
 
         self._build_image_preview_tab()
         self._build_generate_tab()
@@ -3254,6 +3510,8 @@ class App:
             self.create_notebook.add(frame, text=tr(self.lang, key))
         for frame, key in self._import_subtab_specs():
             self.import_notebook.add(frame, text=tr(self.lang, key))
+        for frame, key in self._dev_tools_subtab_specs():
+            self.dev_tools_notebook.add(frame, text=tr(self.lang, key))
 
         self.hub_bar.build(self.hub_shell)
 
@@ -3288,6 +3546,11 @@ class App:
             (self.import_photo_tab, "import_photo_tab"),
             (self.import_text_tab, "import_text_tab"),
             (self.import_pixel_tab, "import_pixel_tab"),
+        )
+
+    def _dev_tools_subtab_specs(self):
+        return (
+            (self.dev_tools_tab, "tools_panel_fh6"),
             (self.export_game_tab, "export_game_tab"),
         )
 
@@ -3361,6 +3624,8 @@ class App:
             self.create_notebook.bind("<<NotebookTabChanged>>", self._on_create_subtab_changed)
         if hasattr(self, "import_notebook"):
             self.import_notebook.bind("<<NotebookTabChanged>>", self._on_import_subtab_changed)
+        if hasattr(self, "dev_tools_notebook"):
+            self.dev_tools_notebook.bind("<<NotebookTabChanged>>", self._on_dev_tools_subtab_changed)
         self._workspace_bound_main = True
 
     def _is_text_tab_active(self) -> bool:
@@ -3413,7 +3678,7 @@ class App:
         if self._is_file_management_tab_active():
             self.file_management.on_tab_activated()
         if self._is_dev_tools_tab_active():
-            self.dev_tools_workspace.on_tab_activated()
+            self._on_dev_tools_subtab_changed()
         self.root.after(50, self._restore_ready_pane_layouts)
 
     def _on_create_subtab_changed(self, _event=None) -> None:
@@ -3426,6 +3691,19 @@ class App:
     def _on_import_subtab_changed(self, _event=None) -> None:
         if self._is_import_photo_tab_active():
             self.refresh_generated_runs()
+
+    def _is_dev_tools_diagnostics_active(self) -> bool:
+        try:
+            return (
+                self.hub_bar.is_active(self.dev_tools_hub)
+                and self.dev_tools_notebook.select() == str(self.dev_tools_tab)
+            )
+        except Exception:
+            return False
+
+    def _on_dev_tools_subtab_changed(self, _event=None) -> None:
+        if self._is_dev_tools_diagnostics_active():
+            self.dev_tools_workspace.on_tab_activated()
 
     def _import_lane_frame(self, lane: str):
         return {
@@ -3555,11 +3833,7 @@ class App:
         paned.add(left_outer, weight=3)
         paned.add(right, weight=2)
 
-        scroll_hint = self._label(left_outer, "scroll_hint", anchor="w", justify=LEFT, theme_role="hint")
-        scroll_hint.pack(fill=X, padx=0, pady=(0, 6))
-        self._bind_wraplength(scroll_hint, left_outer)
-        scroll_area, left = self._make_vertical_scroll(left_outer)
-        scroll_area.pack(fill=BOTH, expand=True, pady=(0, 8))
+        left, action_footer = self._prepare_sticky_column(left_outer, hint_key="scroll_hint")
 
         step1 = ttk.LabelFrame(left, text=tr(self.lang, "generate_step_image"))
         self.translated.append((step1, "generate_step_image", "text"))
@@ -3739,19 +4013,38 @@ class App:
         self._sync_custom_state()
         self.root.after_idle(self._refresh_preprocess_mode_combo)
 
-        step3 = ttk.LabelFrame(left_outer, text=tr(self.lang, "generate_step_run"))
-        self.translated.append((step3, "generate_step_run", "text"))
-        step3.pack(fill=X)
-        run_hint = self._label(step3, "generate_step_run_hint", anchor="w", justify=LEFT)
+        step3_scroll = ttk.LabelFrame(left, text=tr(self.lang, "generate_step_run"))
+        self.translated.append((step3_scroll, "generate_step_run", "text"))
+        step3_scroll.pack(fill=X, pady=(0, 6))
+        run_hint = self._label(step3_scroll, "generate_step_run_hint", anchor="w", justify=LEFT)
         run_hint.pack(fill=X, padx=10, pady=(8, 4))
-        self._bind_wraplength(run_hint, step3)
-        actions = Frame(step3)
-        actions.pack(fill=X, padx=10, pady=(4, 12))
+        self._bind_wraplength(run_hint, step3_scroll)
+        summary_box = ttk.LabelFrame(step3_scroll, text=tr(self.lang, "generate_run_summary_heading"))
+        self.translated.append((summary_box, "generate_run_summary_heading", "text"))
+        summary_box.pack(fill=X, padx=10, pady=(0, 8))
+        self.generate_run_summary_label = Label(
+            summary_box,
+            text="",
+            anchor="nw",
+            justify=LEFT,
+            bg=COLOR_PANEL,
+            fg=COLOR_TEXT,
+            wraplength=520,
+        )
+        self.generate_run_summary_label.pack(fill=X, padx=10, pady=(8, 8))
+        self._bind_wraplength(self.generate_run_summary_label, summary_box)
+
+        step3_actions = ttk.LabelFrame(action_footer, text=tr(self.lang, "generate_step_run"))
+        self.translated.append((step3_actions, "generate_step_run", "text"))
+        step3_actions.pack(fill=X)
+        actions = Frame(step3_actions)
+        actions.pack(fill=X, padx=10, pady=(8, 10))
         self.generate_button = self._button(actions, "start_generate", self.start_generate, font=("Segoe UI", 12, "bold"), height=2)
         self.generate_button.pack(side=LEFT, fill=X, expand=True)
         self.stop_generate_button = self._button(actions, "stop_generate", self.stop_generate, height=2, state="disabled")
         self.stop_generate_button.pack(side=LEFT, padx=8)
         self._button(actions, "open_output", self.open_output_folder, height=2).pack(side=LEFT)
+        self.root.after_idle(self._refresh_generate_run_summary)
 
         compare_scroll, compare_body = self._make_vertical_scroll(right)
         compare_scroll.pack(fill=BOTH, expand=True)
@@ -3879,6 +4172,13 @@ class App:
         spec = filter_spec(mode_id)
         return tr(self.lang, spec.hint_key) if spec else ""
 
+    def _filter_queue_tag(self, mode_id: str | None = None) -> str:
+        mode_id = normalize_preprocess_mode(mode_id if mode_id is not None else self._selected_preprocess_mode())
+        spec = filter_spec(mode_id)
+        if spec:
+            return tr(self.lang, spec.json_tag_key)
+        return mode_id
+
     def _update_preprocess_filter_active_hint(self, mode_id: str | None = None):
         if not hasattr(self, "preprocess_filter_active_hint"):
             return
@@ -3909,6 +4209,7 @@ class App:
             return
         self._refresh_preprocess_mode_combo()
         self._update_preprocess_filter_active_hint(mode_id)
+        self._render_image_list()
         self._refresh_generate_compare()
         self._update_luma_status_label()
         self._update_compare_column_headers()
@@ -3919,6 +4220,7 @@ class App:
         self._refresh_preview_preset_panel()
         if self._preview_filter_payload and is_tailored_experimental_preset(self._selected_setting()):
             self._refresh_tailored_preset_for_image()
+        self._refresh_generate_run_summary()
 
     def _on_preprocess_mode_combo(self, _event=None):
         mode_id = self._preprocess_mode_labels.get(self.preprocess_mode_combo.get(), PREPROCESS_NONE)
@@ -3926,12 +4228,9 @@ class App:
 
     def _image_list_display(self, image_path: Path) -> str:
         mode = self._selected_preprocess_mode()
-        if mode != PREPROCESS_NONE and preprocessed_image_exists(image_path, mode):
-            tag = tr(self.lang, "luma_image_tag_ready")
-        elif mode != PREPROCESS_NONE:
-            tag = tr(self.lang, "luma_image_tag_missing")
-        else:
-            tag = self._filter_label(PREPROCESS_NONE)
+        tag = self._filter_queue_tag(mode)
+        if mode != PREPROCESS_NONE and not preprocessed_image_exists(image_path, mode):
+            tag = f"{tag} · {tr(self.lang, 'image_queue_prep_pending')}"
         return f"{image_path.name}  ·  {tag}"
 
     def _json_preprocess_tag_key(self, json_path: Path) -> str:
@@ -4010,6 +4309,77 @@ class App:
         else:
             lines.append(tr(self.lang, "luma_status_last_run_unknown"))
         self.generate_luma_status.config(text="\n".join(lines))
+        self._refresh_generate_run_summary()
+
+    def _generate_run_summary_image_names(self) -> str:
+        names = [Path(path).name for path in self.images]
+        if not names:
+            return ""
+        if len(names) == 1:
+            return tr(self.lang, "generate_run_summary_images_one").format(name=names[0])
+        shown = names[:4]
+        label = ", ".join(shown)
+        if len(names) > 4:
+            label += tr(self.lang, "generate_run_summary_images_more").format(extra=len(names) - 4)
+        return tr(self.lang, "generate_run_summary_images_many").format(count=len(names), names=label)
+
+    def _generate_run_summary_estimate_line(self, image_path: Path | None, mode: str, values: dict[str, str]) -> str:
+        if image_path is None:
+            return tr(self.lang, "generate_run_summary_estimate_unknown")
+        raw = self._preview_estimate_for_image(image_path, mode)
+        if raw is None:
+            return tr(self.lang, "generate_run_summary_estimate_unknown")
+        stop_at = preset_setting_int(values, "stopAt")
+        projected = projected_layer_count(raw, stop_at)
+        if projected is not None:
+            return tr(self.lang, "generate_run_summary_estimate_projected").format(
+                projected=projected,
+                raw=raw,
+                cap=stop_at,
+            )
+        return tr(self.lang, "generate_run_summary_estimate").format(count=raw)
+
+    def _refresh_generate_run_summary(self) -> None:
+        label = getattr(self, "generate_run_summary_label", None)
+        if label is None or not self._widget_alive(label):
+            return
+        if not self.images:
+            label.config(text=tr(self.lang, "generate_run_summary_empty"), fg=COLOR_MUTED)
+            return
+
+        lines: list[str] = [self._generate_run_summary_image_names()]
+        values = self._preview_setting_values()
+        setting = self._selected_setting()
+        if values and setting:
+            lines.append(
+                tr(self.lang, "generate_run_summary_preset").format(
+                    name=preset_setting_name(setting),
+                    layers=preset_setting_int(values, "stopAt"),
+                    samples=f"{preset_setting_int(values, 'randomSamples'):,}",
+                    resolution=preset_setting_int(values, "maxResolution"),
+                )
+            )
+        elif setting:
+            lines.append(preset_setting_name(setting))
+        else:
+            lines.append(tr(self.lang, "no_settings_profiles"))
+
+        mode = self._selected_preprocess_mode()
+        lines.append(
+            tr(self.lang, "generate_run_summary_filter").format(filter=self._filter_label(mode))
+        )
+        lines.append(tr(self.lang, "generate_run_summary_filter_link"))
+
+        if self.use_custom_settings.get() == "1":
+            lines.append(tr(self.lang, "generate_run_summary_custom"))
+
+        selected = self._selected_generate_image()
+        if selected is not None:
+            lines.append(tr(self.lang, "generate_run_summary_selected").format(name=Path(selected).name))
+            if values:
+                lines.append(self._generate_run_summary_estimate_line(Path(selected), mode, values))
+
+        label.config(text="\n".join(lines), fg=COLOR_TEXT)
 
     def _update_compare_column_headers(self):
         if not hasattr(self, "generate_result_without_header"):
@@ -4355,11 +4725,9 @@ class App:
         self.translated.append((best_toggle, "import_photo_use_best", "text"))
         self._final_run_json_paths: list[Path] = []
 
-        self._build_geometry_import_actions(
-            right, import_key="import_photo_import", import_command=self.start_import_photo, show_advanced=True
-        )
+        right_body, right_footer = self._prepare_sticky_column(right, scrollable=False)
 
-        self.advanced_frame = ttk.LabelFrame(right, text=tr(self.lang, "advanced_options"))
+        self.advanced_frame = ttk.LabelFrame(right_body, text=tr(self.lang, "advanced_options"))
         self.translated.append((self.advanced_frame, "advanced_options", "text"))
         self._field(self.advanced_frame, "manual_count", self.count_address, row=0)
         self._field(self.advanced_frame, "manual_table", self.table_address, row=1)
@@ -4367,9 +4735,9 @@ class App:
             row=2, column=0, columnspan=2, sticky="ew", pady=(8, 4)
         )
 
-        self._label(right, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X, pady=(8, 0))
+        self._label(right_body, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X, pady=(8, 0))
         self.photo_import_preview_label = Label(
-            right,
+            right_body,
             text=tr(self.lang, "preview_hint"),
             bg=COLOR_PREVIEW_BG,
             fg=COLOR_PREVIEW_FG,
@@ -4378,6 +4746,10 @@ class App:
         )
         self.photo_import_preview_label.pack(fill=BOTH, expand=True, pady=6)
         self.photo_import_preview_label.bind("<Configure>", self._schedule_preview_refresh)
+
+        self._build_geometry_import_actions(
+            right_footer, import_key="import_photo_import", import_command=self.start_import_photo, show_advanced=True
+        )
         self.refresh_generated_runs()
 
     def _build_import_text_tab(self):
@@ -4419,11 +4791,11 @@ class App:
         files_hint.pack(fill=X, padx=10, pady=(0, 10))
         self._bind_wraplength(files_hint, files_box)
 
-        self._build_geometry_import_actions(right, import_key="import_text_import", import_command=self.start_import_text)
+        right_body, right_footer = self._prepare_sticky_column(right, scrollable=False)
 
-        self._label(right, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X, pady=(8, 0))
+        self._label(right_body, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X, pady=(8, 0))
         self.text_import_preview_label = Label(
-            right,
+            right_body,
             text=tr(self.lang, "preview_hint"),
             bg=COLOR_PREVIEW_BG,
             fg=COLOR_PREVIEW_FG,
@@ -4435,6 +4807,10 @@ class App:
             "<Configure>", lambda _e: self._schedule_text_import_preview_refresh()
         )
         self._text_import_preview_job = None
+
+        self._build_geometry_import_actions(
+            right_footer, import_key="import_text_import", import_command=self.start_import_text
+        )
 
     def _build_import_pixel_tab(self):
         paned = self._create_paned(
@@ -4986,7 +5362,7 @@ class App:
         actions = Frame(controls)
         actions.pack(fill=X, padx=10, pady=(8, 8))
         self._button(actions, "preview_choose_image", self.choose_preview_image).pack(side=LEFT)
-        self._button(actions, "preview_use_generate_image", self.use_generate_image_for_preview).pack(side=LEFT, padx=8)
+        self._button(actions, "preview_send_to_generate", self.send_preview_image_to_generate).pack(side=LEFT, padx=8)
         self._button(actions, "preview_apply_generate", self.apply_preview_filter_to_generate).pack(side=LEFT)
         self._button(actions, "preview_open_folder", self.open_preview_folder).pack(side=RIGHT)
 
@@ -5523,6 +5899,7 @@ class App:
         self._schedule_preview_main_render()
         self._refresh_preview_preset_panel()
         self._refresh_generate_compare()
+        self._refresh_generate_run_summary()
         image_path = Path(source_key)
         if image_path.is_file():
             self._refresh_tailored_preset_for_image(image_path)
@@ -5562,26 +5939,18 @@ class App:
             self._ensure_preview_for_image(select_path)
         return added_paths
 
-    def use_generate_image_for_preview(self):
-        image_path = self._selected_generate_image()
-        if image_path is None:
-            messagebox.showinfo(APP_DISPLAY_NAME, tr(self.lang, "luma_status_none"))
+    def send_preview_image_to_generate(self):
+        source = getattr(self, "_preview_source_path", None)
+        if source is None or not Path(source).is_file():
+            messagebox.showinfo(APP_DISPLAY_NAME, tr(self.lang, "preview_no_image_for_send"))
             return
-        image_path = Path(image_path)
+        image_path = Path(source)
         added = self._ensure_generate_images([image_path])
         if added:
             self.log_line(tr(self.lang, "preview_image_added_to_generate").format(name=image_path.name))
-        elif image_path in self.images:
-            try:
-                index = self.images.index(image_path)
-                self.image_list.selection_clear(0, END)
-                self.image_list.selection_set(index)
-                self.image_list.see(index)
-            except (ValueError, TclError):
-                pass
-            self.show_source_preview(image_path)
+        else:
             self.log_line(tr(self.lang, "preview_image_already_on_generate").format(name=image_path.name))
-        self._start_preview_filter_compute(image_path)
+        self._select_hub_subtab(self.create_hub, self.create_notebook, self.generate_tab)
 
     def apply_preview_filter_to_generate(self):
         self._select_hub_subtab(self.create_hub, self.create_notebook, self.generate_tab)
@@ -5617,7 +5986,6 @@ class App:
         self.file_management.build(self.file_management_tab)
 
     def _build_dev_tools_tab(self):
-        self.dev_tools_tab.pack(fill=BOTH, expand=True)
         self.dev_tools_workspace.build(self.dev_tools_tab)
 
     def _tutorial_text(self) -> str:
@@ -5712,12 +6080,17 @@ class App:
         self._refresh_header_version_row()
         if self._resource_monitor_snapshot is not None:
             self._apply_resource_snapshot(self._resource_monitor_snapshot)
+        if self._gpu_adapters:
+            self._apply_gpu_adapters(self._gpu_adapters)
         if hasattr(self, "create_notebook"):
             for frame, key in self._create_subtab_specs():
                 self.create_notebook.tab(frame, text=tr(self.lang, key))
         if hasattr(self, "import_notebook"):
             for frame, key in self._import_subtab_specs():
                 self.import_notebook.tab(frame, text=tr(self.lang, key))
+        if hasattr(self, "dev_tools_notebook"):
+            for frame, key in self._dev_tools_subtab_specs():
+                self.dev_tools_notebook.tab(frame, text=tr(self.lang, key))
         if hasattr(self, "tools_workspace"):
             self.tools_workspace.on_language_changed()
         if hasattr(self, "file_management"):
@@ -5785,6 +6158,7 @@ class App:
         self._update_eco_preset_warning()
         self._update_tailored_preset_warning()
         self._refresh_preview_preset_panel()
+        self._refresh_generate_run_summary()
 
     def _update_eco_preset_warning(self):
         label = getattr(self, "eco_preset_warning", None)
@@ -5827,12 +6201,192 @@ class App:
         snapshot = getattr(self, "_resource_monitor_snapshot", None)
         if snapshot is not None and snapshot.gpu_temp_c is not None:
             return snapshot.gpu_temp_c
-        return read_gpu_temp_c()
+        gpu_index = self._resource_monitor_gpu_index()
+        return read_gpu_temp_c(gpu_index=gpu_index)
+
+    def _resource_monitor_gpu_index(self) -> int | None:
+        return resolve_afterburner_index(self._generator_gpu_settings, self._gpu_adapters)
+
+    def _on_gpu_selection_changed(self, selection_id: str) -> bool:
+        adapter = adapter_for_id(self._gpu_adapters, selection_id)
+        if adapter is not None and adapter.is_integrated:
+            if not messagebox.askokcancel(
+                APP_DISPLAY_NAME,
+                tr(self.lang, "gpu_integrated_confirm").format(name=adapter.label),
+                parent=self.root,
+            ):
+                return False
+        self._generator_gpu_settings = self._generator_gpu_settings.with_gpu_selection(selection_id)
+        save_generator_gpu_settings(self._generator_gpu_settings, ROOT)
+        message = self._configure_generator_gpu_preference()
+        if message:
+            self.log_line(message)
+        return True
+
+    def _on_generator_backend_changed(self, backend_id: str) -> None:
+        self._generator_gpu_settings = self._generator_gpu_settings.with_generator_backend(backend_id)
+        save_generator_gpu_settings(self._generator_gpu_settings, ROOT)
+        log_key = {
+            AUTO_BACKEND_ID: "gpu_backend_log_auto",
+            "opencl": "gpu_backend_log_opencl",
+            "vulkan": "gpu_backend_log_vulkan",
+        }.get(backend_id, "gpu_backend_log_auto")
+        self.log_line(tr(self.lang, log_key))
+        self.request_gpu_adapter_refresh()
+
+    def _backend_log_message(self) -> str | None:
+        backend = self._generator_gpu_settings.generator_backend
+        if backend == AUTO_BACKEND_ID:
+            return None
+        label_key = {
+            "opencl": "resource_gpu_backend_opencl",
+            "vulkan": "resource_gpu_backend_vulkan",
+        }.get(backend)
+        backend_label = tr(self.lang, label_key) if label_key else backend
+        return tr(self.lang, "gpu_generation_backend").format(backend=backend_label)
+
+    def _build_generator_launch_options(self) -> GeneratorLaunchOptions:
+        adapter = adapter_for_id(self._gpu_adapters, self._generator_gpu_settings.gpu_selection_id)
+        backend = self._generator_gpu_settings.generator_backend
+        device_index = None
+        if adapter is not None and self._generator_capabilities is not None:
+            if self._generator_capabilities.supports_direct_gpu_binding:
+                device = match_adapter_to_device(
+                    adapter,
+                    self._generator_devices,
+                    backend=self._generator_gpu_settings.listing_backend(),
+                )
+                if device is not None:
+                    device_index = device.index
+        return GeneratorLaunchOptions(
+            backend=backend,
+            gpu_device_index=device_index,
+            capabilities=self._generator_capabilities,
+        )
+
+    def _log_generator_launch_plan(self, launch_options: GeneratorLaunchOptions) -> None:
+        caps = self._generator_capabilities
+        adapter = adapter_for_id(self._gpu_adapters, self._generator_gpu_settings.gpu_selection_id)
+        if launch_options.uses_direct_gpu_binding:
+            device = None
+            if adapter is not None:
+                device = match_adapter_to_device(
+                    adapter,
+                    self._generator_devices,
+                    backend=self._generator_gpu_settings.listing_backend(),
+                )
+            if device is not None:
+                self.queue.put(
+                    (
+                        "log",
+                        tr(self.lang, "gpu_generation_direct").format(
+                            index=device.index,
+                            name=device.name,
+                        ),
+                    )
+                )
+            backend_message = self._backend_log_message()
+            if backend_message:
+                self.queue.put(("log", backend_message))
+            return
+        if caps is not None and caps.supports_direct_gpu_binding and adapter is not None:
+            self.queue.put(
+                (
+                    "log",
+                    tr(self.lang, "gpu_device_match_failed").format(name=adapter.label),
+                )
+            )
+        message = self._configure_generator_gpu_preference()
+        if message:
+            self.queue.put(("log", message))
+        backend_message = self._backend_log_message()
+        if backend_message:
+            self.queue.put(("log", backend_message))
+
+    def _configure_generator_gpu_preference(self) -> str | None:
+        if self._build_generator_launch_options().uses_direct_gpu_binding:
+            return None
+        adapter = adapter_for_id(self._gpu_adapters, self._generator_gpu_settings.gpu_selection_id)
+        auto = self._generator_gpu_settings.gpu_selection_id == AUTO_GPU_ID
+        if not apply_generator_gpu_preference(GENERATOR_EXE, adapter, auto=auto):
+            return None
+        if auto:
+            return tr(self.lang, "gpu_generation_auto")
+        if adapter is None:
+            return None
+        kind_key = "gpu_generation_kind_integrated" if adapter.is_integrated else "gpu_generation_kind_discrete"
+        return tr(self.lang, "gpu_generation_selected").format(
+            name=adapter.label,
+            kind=tr(self.lang, kind_key),
+        )
+
+    def request_gpu_adapter_refresh(self) -> None:
+        threading.Thread(target=self._load_gpu_adapters_worker, daemon=True).start()
+
+    def _apply_generator_gpu_routing(self) -> None:
+        self._log_generator_launch_plan(self._build_generator_launch_options())
+
+    def _load_gpu_adapters_worker(self) -> None:
+        try:
+            adapters = list_gpu_adapters()
+        except Exception as exc:
+            self.queue.put(("log", f"GPU list: {exc}"))
+            adapters = []
+        capabilities = probe_generator_capabilities()
+        devices: list[GeneratorDevice] = []
+        if capabilities.supports_list_devices:
+            try:
+                backend = load_generator_gpu_settings(ROOT).listing_backend()
+                devices = list_generator_devices(backend=backend, capabilities=capabilities)
+            except Exception as exc:
+                self.queue.put(("log", f"Generator devices: {exc}"))
+        self.queue.put(("gpu_context", (adapters, capabilities, devices)))
+
+    def _apply_gpu_adapters(self, adapters: list[GpuAdapter]) -> None:
+        self._apply_gpu_context(adapters, self._generator_capabilities or GeneratorCapabilities(), self._generator_devices)
+
+    def _apply_gpu_context(
+        self,
+        adapters: list[GpuAdapter],
+        capabilities: GeneratorCapabilities,
+        devices: list[GeneratorDevice],
+    ) -> None:
+        self._gpu_adapters = list(adapters)
+        self._generator_capabilities = capabilities
+        self._generator_devices = list(devices)
+        normalized, missing = normalize_gpu_selection(self._generator_gpu_settings, self._gpu_adapters)
+        if missing:
+            self._generator_gpu_settings = normalized
+            save_generator_gpu_settings(normalized, ROOT)
+            self.log_line(tr(self.lang, "gpu_selection_missing"))
+        panel = self._header_telemetry
+        if panel is None:
+            return
+        panel.set_generator_backend(self._generator_gpu_settings.generator_backend)
+        panel.set_gpu_adapters(adapters, selected_id=self._generator_gpu_settings.gpu_selection_id)
+        version = capabilities.version or "unknown"
+        self.log_line(
+            tr(self.lang, "gpu_generator_capabilities").format(
+                version=version,
+                backend="yes" if capabilities.supports_backend else "no",
+                direct="yes" if capabilities.supports_direct_gpu_binding else "no",
+            )
+        )
+        launch_options = self._build_generator_launch_options()
+        if not launch_options.uses_direct_gpu_binding:
+            message = self._configure_generator_gpu_preference()
+            if message:
+                self.log_line(message)
+        backend_message = self._backend_log_message()
+        if backend_message:
+            self.log_line(backend_message)
 
     def _start_resource_monitor(self) -> None:
         if not self._resource_monitor_settings.enabled:
             return
-        self._resource_monitor_backend = ResourceMonitorBackend()
+        self._resource_monitor_backend = ResourceMonitorBackend(
+            gpu_index_provider=self._resource_monitor_gpu_index,
+        )
         threading.Thread(target=self._resource_monitor_worker, daemon=True).start()
 
     def _resource_monitor_worker(self) -> None:
@@ -6076,6 +6630,7 @@ class App:
         if state == "disabled":
             self._update_setting_description()
         self._refresh_preview_preset_panel()
+        self._refresh_generate_run_summary()
 
     def _effective_setting(self):
         setting = self._selected_setting()
@@ -6189,6 +6744,7 @@ class App:
         for path in self.images:
             self.image_list.insert(END, self._image_list_display(path))
         self._refresh_generate_compare()
+        self._refresh_generate_run_summary()
 
     def _add_json_paths(self, paths):
         added = 0
@@ -6784,6 +7340,7 @@ class App:
             self.show_source_preview(image_path)
             self._ensure_preview_for_image(image_path)
         self._refresh_generate_compare()
+        self._refresh_generate_run_summary()
 
     def _on_layer_count_changed(self, *_args):
         self._update_import_layer_info()
@@ -7153,8 +7710,10 @@ class App:
                         pass
                 self.queue.put(("log", f"Generating: {image_path}"))
                 self.queue.put(("preview_file", image_path))
+                launch_options = self._build_generator_launch_options()
+                self._log_generator_launch_plan(launch_options)
                 flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-                cmd = build_generator_command(input_image, setting)
+                cmd = build_generator_command(input_image, setting, launch_options=launch_options)
                 self._record_detail(f"GENERATOR COMMAND: {self._format_command(cmd)}")
                 self.queue.put(("log", f"Running GPU generator with {setting['path'].name}"))
                 if self.shutdown_event.is_set():
@@ -7860,6 +8419,11 @@ class App:
                 self._handle_update_available(payload)
             elif kind == "resource_monitor":
                 self._apply_resource_snapshot(payload)
+            elif kind == "gpu_context":
+                adapters, capabilities, devices = payload
+                self._apply_gpu_context(adapters, capabilities, devices)
+            elif kind == "gpu_adapters":
+                self._apply_gpu_adapters(payload)
         if not self.closed:
             self.root.after(100, self._poll_queue)
 

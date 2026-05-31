@@ -20,6 +20,7 @@ Use the script sub-tabs:
 |-----|---------|-----------|
 | **Universal (Latin)** | English, numbers, Western punctuation | [LATIN] fonts; **Latin extended** character grid |
 | **Japanese** | Hiragana, katakana, kanji | [JP] / [CJK] fonts; sub-tabs **Hiragana**, **Katakana**, **Kanji (JIS)** grids |
+| **Kaomoji** | Japanese emoticon faces | Monospace / [SYMBOL] fonts; **Kaomoji library** (click to insert) |
 | **Korean** | Hangul | [KR] fonts; **Hangul syllables** grid (paginated) |
 | **Chinese** | Simplified/traditional hanzi | [SC] / [TC] / [CJK] fonts; **GB2312 hanzi** grid |
 
@@ -32,7 +33,7 @@ Each tab keeps its own text, font choice, and **Search fonts** filter. Below the
 3. Click characters in the script’s **character grid** to insert symbols (or type/paste directly).
 4. Check the coverage line under the options — it reports missing glyphs for the selected font.
 5. Set **Trace shape mode** (see table below) and match your FH6 template before import.
-6. Adjust **font size** and **trace cell size** (larger cell → fewer layers, less detail).
+6. Adjust **font size** and **trace cell size** (default **1** = sharpest detail; larger → fewer layers, blockier shapes).
 7. Click **Generate from text**.
 8. Preview the design on the right, then click **Continue to Import → Text** when ready.
 9. On **Import → Import text**, confirm your design and import as usual.
