@@ -153,6 +153,7 @@ from preprocess.filters import (
     preview_output_folder,
     resolve_preprocessed_image_path,
 )
+from import_layer_guidance import format_capacity_hint
 from security_policy import (
     GITHUB_RELEASES_API,
     redact_sensitive_log_text,
@@ -1020,6 +1021,8 @@ TEXT = {
         "log_no_images_selected": "No images selected.",
         "log_missing_generator": "Missing generator: {path}",
         "log_pid_layer_required": "PID and template layer count are required.",
+        "log_session_stale_relocate": "Cached FH6 layer table is no longer valid; re-locating...",
+        "log_import_retry_relocate": "Import failed safety check; clearing cache and re-locating once...",
         "log_no_json_files_selected": "No JSON files selected.",
         "log_pid_snapshot_required": "PID and snapshot layer count are required.",
         "log_pid_snapshot_current_required": "PID, snapshot layer count, and current layer count are required.",
@@ -2518,6 +2521,22 @@ def session_matches_current_import(session, game, pid, layer_count):
         return not pid or int(pid) == session_pid
     except (TypeError, ValueError):
         return False
+
+
+def session_table_still_valid(pid, game, session, layer_count):
+    from fh6_probe import validate_table_layer_coverage
+
+    profile = PROFILES.get(game)
+    if not profile or not session:
+        return False
+    try:
+        table_address = int(session["table_address"])
+        layer_count = int(layer_count)
+        pid = int(pid)
+    except (KeyError, TypeError, ValueError):
+        return False
+    ok, _, _, _ = validate_table_layer_coverage(pid, profile, table_address, layer_count)
+    return ok
 
 
 def preview_size_tuple(max_size=None):
@@ -5060,6 +5079,44 @@ class App:
             daemon=True,
         ).start()
 
+    def _build_main_geometry_import_cmd(self, path: Path, game: str, locations: dict, layer_count: str):
+        cmd = [
+            *helper_command("main"),
+            "--game",
+            game,
+            "--no-preview",
+            "--pid",
+            str(locations["pid"]),
+        ]
+        count_address = locations.get("count_address")
+        table_address = locations.get("table_address")
+        if count_address:
+            cmd.extend(["--layer-count-address", f"0x{int(count_address):x}"])
+        if table_address:
+            cmd.extend(["--layer-table-address", f"0x{int(table_address):x}"])
+        if game == "fh6" and layer_count:
+            cmd.extend(["--layer-count-value", str(layer_count)])
+        cmd.append(str(path.resolve()))
+        return cmd
+
+    def _run_main_geometry_import(self, path: Path, game: str, layer_count: str, locations: dict) -> int:
+        import_env = dict(locations.get("import_env", {}))
+        cmd = self._build_main_geometry_import_cmd(path, game, locations, layer_count)
+        code = self.run_subprocess(cmd, extra_env=import_env)
+        if code == 0 or game != "fh6" or not layer_count:
+            return code
+        clear_session_location()
+        self.queue.put(("log", tr(self.lang, "log_import_retry_relocate")))
+        located = self._auto_locate_worker(locations["pid"], layer_count)
+        if not located:
+            return code
+        try:
+            locations = self._resolve_import_locations(locations["pid"], game, layer_count)
+        except (ValueError, RuntimeError):
+            return code
+        cmd = self._build_main_geometry_import_cmd(path, game, locations, layer_count)
+        return self.run_subprocess(cmd, extra_env=locations.get("import_env", {}))
+
     def _import_text_worker(self, pid, paths: list[Path]):
         game = self.selected_game.get() or "fh6"
         layer_count = self.layer_count.get().strip()
@@ -5087,26 +5144,13 @@ class App:
                 continue
             if game == "fh6" and layer_count:
                 self._check_json_layer_fit(path, layer_count)
-            cmd = [
-                *helper_command("main"),
-                "--game",
-                game,
-                "--no-preview",
-                "--pid",
-                str(locations["pid"]),
-            ]
-            count_address = locations.get("count_address")
-            table_address = locations.get("table_address")
-            import_env = locations.get("import_env", {})
-            if count_address:
-                cmd.extend(["--layer-count-address", f"0x{int(count_address):x}"])
-            if table_address:
-                cmd.extend(["--layer-table-address", f"0x{int(table_address):x}"])
-            if game == "fh6" and layer_count:
-                cmd.extend(["--layer-count-value", str(layer_count)])
-            cmd.append(str(path.resolve()))
-            code = self.run_subprocess(cmd, extra_env=import_env)
+            code = self._run_main_geometry_import(path, game, layer_count, locations)
             if code != 0:
+                self.queue.put(("status", tr(self.lang, "failed")))
+                return
+            try:
+                locations = self._resolve_import_locations(locations["pid"], game, layer_count)
+            except (ValueError, RuntimeError):
                 self.queue.put(("status", tr(self.lang, "failed")))
                 return
         self.queue.put(("status", tr(self.lang, "done")))
@@ -5123,10 +5167,6 @@ class App:
         except RuntimeError:
             self.queue.put(("status", tr(self.lang, "failed")))
             return
-        pid = locations["pid"]
-        count_address = locations.get("count_address")
-        table_address = locations.get("table_address")
-        import_env = locations.get("import_env", {})
         for path in paths:
             path = Path(path)
             if is_typecode_geometry_json(path):
@@ -5136,16 +5176,13 @@ class App:
                 continue
             if game == "fh6" and layer_count:
                 self._check_json_layer_fit(path, layer_count)
-            cmd = [*helper_command("main"), "--game", game, "--no-preview", "--pid", str(pid)]
-            if count_address:
-                cmd.extend(["--layer-count-address", f"0x{int(count_address):x}"])
-            if table_address:
-                cmd.extend(["--layer-table-address", f"0x{int(table_address):x}"])
-            if game == "fh6" and layer_count:
-                cmd.extend(["--layer-count-value", str(layer_count)])
-            cmd.append(str(path.resolve()))
-            code = self.run_subprocess(cmd, extra_env=import_env)
+            code = self._run_main_geometry_import(path, game, layer_count, locations)
             if code != 0:
+                self.queue.put(("status", tr(self.lang, "failed")))
+                return
+            try:
+                locations = self._resolve_import_locations(locations["pid"], game, layer_count)
+            except (ValueError, RuntimeError):
                 self.queue.put(("status", tr(self.lang, "failed")))
                 return
         self.queue.put(("status", tr(self.lang, "done")))
@@ -8036,14 +8073,14 @@ class App:
 
     def _check_json_layer_fit(self, json_path, layer_count):
         try:
-            from generator_backend import geometry_shape_count
             json_layers = geometry_shape_count(json_path)
             template_layers = int(layer_count)
         except Exception:
             return
+        hint = format_capacity_hint(json_layers, template_layers)
+        if hint:
+            self.queue.put(("log", hint))
         usable_layers = max(0, template_layers - 4)
-        if json_layers and template_layers and json_layers > usable_layers:
-            self.queue.put(("log", f"{tr(self.lang, 'json_needs_more_template_layers')} JSON={json_layers}, template={template_layers}, usable={usable_layers}"))
         if json_layers and usable_layers and json_layers < usable_layers * 0.75:
             self.queue.put(("log", f"{tr(self.lang, 'json_too_small')} JSON={json_layers}, usable={usable_layers}"))
 
@@ -8086,6 +8123,12 @@ class App:
         if is_permission_error_text(raw):
             self._saw_permission_error = True
             return tr(self.lang, "permission_denied_hint")
+        if (
+            "template capacity:" in lower
+            or "layer table safety check" in lower
+            or "layer budget:" in lower
+        ):
+            return raw
         if "openprocess" in lower or "error" in lower or "failed" in lower or "traceback" in lower:
             return raw
         if raw.startswith("<class 'SystemExit'>") or raw.startswith("SystemExit: 0"):
@@ -8163,7 +8206,15 @@ class App:
             import_env["FORZA_PAINTER_ALLOW_MANUAL_ADDRESSES"] = "1"
         if not count_address and not table_address and game == "fh6":
             session = load_session_location()
+            use_cached_session = False
             if session_matches_current_import(session, game, pid, layer_count):
+                session_pid = int(session["pid"])
+                if session_table_still_valid(session_pid, game, session, layer_count):
+                    use_cached_session = True
+                else:
+                    clear_session_location()
+                    self.queue.put(("log", tr(self.lang, "log_session_stale_relocate")))
+            if use_cached_session:
                 pid = int(session["pid"])
                 count_address = int(session["count_address"])
                 table_address = int(session["table_address"])

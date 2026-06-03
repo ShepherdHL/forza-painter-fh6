@@ -91,6 +91,8 @@ The app starts as a standard user. Import and export may ask for consent and, if
 
 FH needs 4 extra boundary layers to save the cover and apply bounds correctly. Example: a 1000-layer JSON should use at least a 1004-layer template; a 3000-layer template can import about 2996 drawable shapes.
 
+If import aborts with a **layer table safety check** message, that is usually a stale memory address or wrong editor state — not the same as needing more template layers. The console log distinguishes **Layer budget** (add N layers) from **safety check** (re-locate / fresh template). Restart FH, stay in Vinyl Group Editor, and import again.
+
 ---
 
 ## Important rules

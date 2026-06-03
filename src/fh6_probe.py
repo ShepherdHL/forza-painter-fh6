@@ -547,11 +547,13 @@ def locate_clivery_groups_by_rtti(pid, profile, layer_count, max_seconds=None):
                 score, samples = score_table(pid, profile, table_address, min(layer_count, 64))
                 if score <= 0:
                     continue
-                ok, checked, valid_entries = validate_table_layer_coverage(pid, profile, table_address, layer_count)
+                ok, checked, strict_entries, _loose = validate_table_layer_coverage(
+                    pid, profile, table_address, layer_count
+                )
                 if not ok:
                     print(
                         f"rejected RTTI group=0x{group_address:x} table=0x{table_address:x} "
-                        f"strictLayers={valid_entries}/{layer_count} scanned={checked}",
+                        f"strictLayers={strict_entries}/{layer_count} scanned={checked}",
                         flush=True,
                     )
                     continue
@@ -565,7 +567,7 @@ def locate_clivery_groups_by_rtti(pid, profile, layer_count, max_seconds=None):
                     "current_u16": current_count,
                     "current_u32": current_count,
                     "samples": samples,
-                    "validated_entries": valid_entries,
+                    "validated_entries": strict_entries,
                     "vtable": vtable,
                 })
     groups.sort(key=lambda item: item["score"], reverse=True)
@@ -650,7 +652,9 @@ def locate_clivery_groups_by_layout_count(
                 score, samples = score_table(pid, profile, table_address, min(layer_count, 64))
                 if score <= 0:
                     continue
-                ok, checked, valid_entries = validate_table_layer_coverage(pid, profile, table_address, layer_count)
+                ok, checked, strict_entries, _loose = validate_table_layer_coverage(
+                    pid, profile, table_address, layer_count
+                )
                 if not ok:
                     continue
                 groups.append({
@@ -663,11 +667,11 @@ def locate_clivery_groups_by_layout_count(
                     "current_u16": layer_count,
                     "current_u32": layer_count,
                     "samples": samples,
-                    "validated_entries": valid_entries,
+                    "validated_entries": strict_entries,
                 })
                 print(
                     f"{strategy_name} candidate group=0x{group_address:x} count=0x{count_address:x} "
-                    f"table=0x{table_address:x} validated={valid_entries}/{layer_count}",
+                    f"table=0x{table_address:x} validated={strict_entries}/{layer_count}",
                     flush=True,
                 )
             carry = memory[-(len(pattern) - 1):]
@@ -867,17 +871,19 @@ def auto_locate_count_table(pid, profile, layer_count, limit_mb, max_matches, pr
     rejected = 0
     best_rejected_strict = 0
     for table in quick:
-        ok, checked, valid_entries = validate_table_layer_coverage(pid, profile, table["table_address"], layer_count)
+        ok, checked, strict_entries, _loose = validate_table_layer_coverage(
+            pid, profile, table["table_address"], layer_count
+        )
         if not ok:
             rejected += 1
-            best_rejected_strict = max(best_rejected_strict, valid_entries)
+            best_rejected_strict = max(best_rejected_strict, strict_entries)
             print(
                 f"rejected candidate score={table['score']} count=0x{table['count_address']:x} "
-                f"table=0x{table['table_address']:x} strictLayers={valid_entries}/{layer_count} scanned={checked}",
+                f"table=0x{table['table_address']:x} strictLayers={strict_entries}/{layer_count} scanned={checked}",
                 flush=True,
             )
             continue
-        table["validated_entries"] = valid_entries
+        table["validated_entries"] = strict_entries
         best.append(table)
         print(
             f"candidate score={table['score']} count=0x{table['count_address']:x} kind={table['count_kind']} "
@@ -1005,11 +1011,12 @@ def strict_layer_pointer(pid, pointer, profile):
 
 
 def validate_table_layer_coverage(pid, profile, table_address, layer_count):
+    """Return (ok, scanned_indices, strict_valid_count, loose_valid_count)."""
     if not is_private_writable_address(pid, table_address):
-        return False, 0, 0
+        return False, 0, 0, 0
     required = min(int(layer_count), 3000)
     scan_limit = min(3000, max(required + 512, required * 2))
-    valid = 0
+    loose_valid = 0
     strict_valid = 0
     seen = set()
     for index in range(scan_limit):
@@ -1020,13 +1027,13 @@ def validate_table_layer_coverage(pid, profile, table_address, layer_count):
             score, _checks = score_layer_pointer(pid, ptr, profile)
             if score >= 3:
                 seen.add(ptr)
-                valid += 1
+                loose_valid += 1
                 if strict_layer_pointer(pid, ptr, profile):
                     strict_valid += 1
-                if valid >= required:
+                if loose_valid >= required:
                     strict_required = min(required, max(32, required // 4))
-                    return strict_valid >= strict_required, index + 1, strict_valid
-    return False, scan_limit, strict_valid
+                    return strict_valid >= strict_required, index + 1, strict_valid, loose_valid
+    return False, scan_limit, strict_valid, loose_valid
 
 
 def find_count_candidates(pid, count, limit_mb, max_matches, progress_every):

@@ -36,6 +36,12 @@ from geometry_json import (
     ROTATED_RECTANGLE,
     load_normalized_geometry,
 )
+from import_layer_guidance import (
+    FH_BOUNDARY_LAYERS,
+    format_capacity_hint,
+    format_safety_failure_lines,
+    strict_required_for_template,
+)
 from security_policy import (
     memory_addresses_allowed,
     validate_geometry_path,
@@ -50,23 +56,30 @@ from utils import load_cv2, parse_int
 FH6_DISCOVERED_TABLE_POINTER_DELTA = 0x1E
 
 
-def _validate_layer_table_before_write(pid, profile, table_address, layer_count):
+def _validate_layer_table_before_write(pid, profile, table_address, layer_count, json_drawable=None):
     from fh6_probe import validate_table_layer_coverage
 
-    ok, checked, valid_entries = validate_table_layer_coverage(
+    ok, checked, strict_valid, loose_valid = validate_table_layer_coverage(
         pid, profile, table_address, layer_count
     )
     if not ok:
-        print(
-            "Safety check failed: layer table at 0x{:x} did not pass validation "
-            "({}/{} strict layers, scanned {}). Import aborted.".format(
-                table_address, valid_entries, layer_count, checked
-            )
-        )
+        strict_required = strict_required_for_template(layer_count)
+        for line in format_safety_failure_lines(
+            template_layers=layer_count,
+            strict_valid=strict_valid,
+            strict_required=strict_required,
+            scanned=checked,
+            loose_valid=loose_valid,
+        ):
+            print(line)
+        if json_drawable is not None:
+            capacity = format_capacity_hint(json_drawable, layer_count)
+            if capacity:
+                print("Layer budget: " + capacity)
         return False
     print(
-        "Layer table safety check passed: {}/{} validated entries.".format(
-            valid_entries, layer_count
+        "Layer table safety check passed: {}/{} strict-valid entries ({} loose-valid).".format(
+            strict_valid, layer_count, loose_valid
         )
     )
     return True
@@ -408,7 +421,14 @@ def load_geometry(
         print("Invalid layer table state: {}".format(exc))
         return
 
-    if not _validate_layer_table_before_write(pid, profile, cLiveryLayerTable, current_livery_count):
+    json_drawable = len(shapes)
+    capacity_hint = format_capacity_hint(json_drawable, current_livery_count)
+    if capacity_hint:
+        print("Template capacity: " + capacity_hint)
+
+    if not _validate_layer_table_before_write(
+        pid, profile, cLiveryLayerTable, current_livery_count, json_drawable=json_drawable
+    ):
         return
 
     if cLiveryLayerTable == 0:
@@ -427,7 +447,7 @@ def load_geometry(
         Shape(1, int(image_w//2), -int(image_h//4), image_w + int(image_w), int(image_h//2), 0, Color(0,0,0,255), True),
         Shape(1, int(image_w//2), image_h + int(image_h//4), image_w + int(image_w), int(image_h//2), 0, Color(0,0,0,255), True),
     ]
-    reserved_mask_layers = len(boundary_masks)
+    reserved_mask_layers = FH_BOUNDARY_LAYERS
     drawable_capacity = max(0, min(int(current_livery_count), 3000) - reserved_mask_layers)
 
     if len(shapes) > drawable_capacity:

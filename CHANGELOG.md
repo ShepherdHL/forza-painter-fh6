@@ -12,6 +12,17 @@ Release notes for Forza Painter FH6. The in-app update prompt reads from this fi
 
 ## Unreleased
 
+## v1.6.2 / 2026-06-03
+
+Import hotfix for FH6 layer-table safety checks and template capacity messaging.
+
+- Re-validates cached FH6 session layer tables before import; stale addresses trigger automatic re-locate instead of failing mid-write.
+- On import failure, clears the session cache and retries auto-locate once before giving up.
+- Console and app log now explain **template capacity** (JSON drawable layers + 4 FH boundary layers) separately from **safety check** failures (stale table vs cleared template slots).
+- Safety-check errors report strict-valid vs required counts with actionable fixes instead of only `5/1800 strict layers`.
+
+Download `forza-painter-fh6-v1.6.2.exe` from [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases).
+
 ## v1.6.X (Beta) / 2026-06-02
 
 Beta release of the ShepherdHL **1.6.X** line ([ShepherdHL/forza-painter-fh6](https://github.com/ShepherdHL/forza-painter-fh6)).
