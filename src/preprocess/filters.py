@@ -39,6 +39,20 @@ PREPROCESS_MODE_IDS: tuple[str, ...] = (
     PREPROCESS_CEL_HEAVY,
 )
 
+# Short slugs for generated geometry JSON filenames: {stem}_{slug}_{layers}.json
+PREPROCESS_JSON_SLUGS: dict[str, str] = {
+    PREPROCESS_NONE: "og",
+    PREPROCESS_LUMA: "lu",
+    PREPROCESS_BILATERAL: "bi",
+    PREPROCESS_POSTERIZE: "po",
+    PREPROCESS_CLAHE: "cl",
+    PREPROCESS_SMOOTH: "sm",
+    PREPROCESS_CEL_SOFT: "cs",
+    PREPROCESS_CEL_HEAVY: "ch",
+}
+
+_JSON_SLUG_TO_MODE = {slug: mode for mode, slug in PREPROCESS_JSON_SLUGS.items()}
+
 
 @dataclass(frozen=True)
 class PreprocessFilterSpec:
@@ -88,6 +102,17 @@ def is_preprocess_mode(mode: str | None) -> bool:
     return normalize_preprocess_mode(mode) != PREPROCESS_NONE
 
 
+def filter_json_slug(mode: str | None) -> str:
+    mode_id = normalize_preprocess_mode(mode)
+    return PREPROCESS_JSON_SLUGS.get(mode_id, "og")
+
+
+def preprocess_mode_from_json_slug(slug: str | None) -> str | None:
+    if not slug:
+        return None
+    return _JSON_SLUG_TO_MODE.get(str(slug).strip().lower())
+
+
 def is_preprocess_variant_path(path: str | Path) -> bool:
     stem = Path(path).stem.lower()
     parent_name = Path(path).parent.name.lower()
@@ -104,6 +129,12 @@ def is_preprocess_variant_path(path: str | Path) -> bool:
 def preprocess_mode_for_path(path: str | Path) -> str | None:
     path = Path(path)
     stem = path.stem.lower()
+    if path.suffix.lower() == ".json":
+        parts = stem.rsplit("_", 2)
+        if len(parts) == 3 and parts[-1].isdigit():
+            mode = preprocess_mode_from_json_slug(parts[1])
+            if mode is not None:
+                return mode
     if path.parent.name.lower() == "variants":
         for mode_id in PREPROCESS_MODE_IDS:
             if mode_id == PREPROCESS_NONE:

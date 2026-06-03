@@ -165,6 +165,16 @@ class DiscoveredFont:
         return f"{self.display_name} [{tags}]"
 
 
+_font_file_entries_cache: Dict[str, Path] | None = None
+_discover_cache: dict[tuple[str, bool], tuple[DiscoveredFont, ...]] = {}
+
+
+def clear_font_discovery_cache() -> None:
+    global _font_file_entries_cache
+    _font_file_entries_cache = None
+    _discover_cache.clear()
+
+
 def _fonts_directory() -> Path:
     return Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
 
@@ -279,6 +289,10 @@ def _score_font(name: str, tags: Tuple[str, ...]) -> int:
 
 
 def _registry_font_entries() -> Dict[str, Path]:
+    global _font_file_entries_cache
+    if _font_file_entries_cache is not None:
+        return dict(_font_file_entries_cache)
+
     entries: Dict[str, Path] = {}
     try:
         import winreg
@@ -316,26 +330,32 @@ def _registry_font_entries() -> Dict[str, Path]:
                     entries[display_name] = path.resolve()
     except OSError:
         pass
+    _font_file_entries_cache = dict(entries)
     return entries
 
 
 def _glob_font_files() -> Dict[str, Path]:
+    return _registry_font_entries()
+
+
+def _all_font_entries() -> Dict[str, Path]:
     fonts_dir = _fonts_directory()
+    registry = _registry_font_entries()
     if not fonts_dir.exists():
-        return {}
-    found: Dict[str, Path] = {}
+        return registry
+    found: Dict[str, Path] = dict(registry)
     for path in fonts_dir.iterdir():
         if path.suffix.lower() not in _FONT_EXTS:
             continue
         if path.is_file():
-            found[path.stem] = path.resolve()
+            found.setdefault(path.stem, path.resolve())
     return found
 
 
 def discover_cjk_fonts(deep_scan: bool = False) -> Tuple[DiscoveredFont, ...]:
     """Return installed fonts likely to support CJK, best matches first."""
     by_path: Dict[Path, DiscoveredFont] = {}
-    entries = {**_glob_font_files(), **_registry_font_entries()}
+    entries = _all_font_entries()
     for display_name, path in entries.items():
         path = path.resolve()
         if path.suffix.lower() not in _FONT_EXTS:
@@ -429,7 +449,7 @@ def _score_kaomoji_font(name: str, tags: Tuple[str, ...]) -> int:
 def discover_symbol_fonts(deep_scan: bool = False) -> Tuple[DiscoveredFont, ...]:
     """Return installed symbol / emoji companion fonts useful for kaomoji."""
     by_path: Dict[Path, DiscoveredFont] = {}
-    entries = {**_glob_font_files(), **_registry_font_entries()}
+    entries = _all_font_entries()
     for display_name, path in entries.items():
         if not _name_is_symbol_font(display_name):
             continue
@@ -520,7 +540,7 @@ def discover_kaomoji_fonts(deep_scan: bool = False) -> Tuple[DiscoveredFont, ...
 def discover_latin_fonts(deep_scan: bool = False) -> Tuple[DiscoveredFont, ...]:
     """Return installed fonts suitable for Latin / universal text."""
     by_path: Dict[Path, DiscoveredFont] = {}
-    entries = {**_glob_font_files(), **_registry_font_entries()}
+    entries = _all_font_entries()
     for display_name, path in entries.items():
         path = Path(path).resolve()
         if path.suffix.lower() not in _FONT_EXTS:
@@ -617,6 +637,78 @@ def discover_fonts_for_script(script: str, deep_scan: bool = False) -> Tuple[Dis
     if script == SCRIPT_UNIVERSAL:
         return discover_latin_fonts(deep_scan=deep_scan)
     return filter_fonts_for_script(discover_cjk_fonts(deep_scan=deep_scan), script)
+
+
+def discover_fonts_for_script_cached(script: str, deep_scan: bool = False) -> Tuple[DiscoveredFont, ...]:
+    key = (script, bool(deep_scan))
+    cached = _discover_cache.get(key)
+    if cached is not None:
+        return cached
+    fonts = discover_fonts_for_script(script, deep_scan=deep_scan)
+    _discover_cache[key] = fonts
+    return fonts
+
+
+def _discovered_font_from_path(path: Path, *, script_tags: Tuple[str, ...], display_name: str | None = None) -> DiscoveredFont:
+    path = path.resolve()
+    name = (display_name or path.stem).replace("(TrueType)", "").strip()
+    tags = script_tags or _name_tags(name) or ("cjk",)
+    if "latin" in tags:
+        score = _score_latin_font(name)
+    else:
+        score = _score_font(name, tags)
+    return DiscoveredFont(display_name=name, path=path, script_tags=tags, score=score)
+
+
+def default_fonts_for_script(script: str) -> Tuple[DiscoveredFont, ...]:
+    """Fast tier-1 fonts (known paths) without scanning the full machine."""
+    by_path: Dict[Path, DiscoveredFont] = {}
+
+    def add(path: Path, tags: Tuple[str, ...], display_name: str | None = None) -> None:
+        if not path.exists():
+            return
+        resolved = path.resolve()
+        font = _discovered_font_from_path(resolved, script_tags=tags, display_name=display_name)
+        existing = by_path.get(resolved)
+        if existing is None or font.score > existing.score:
+            by_path[resolved] = font
+
+    if script == SCRIPT_UNIVERSAL:
+        for path in _LATIN_FALLBACKS:
+            add(path, ("latin",))
+    elif script == SCRIPT_KAOMOJI:
+        for path in _LATIN_FALLBACKS:
+            add(path, ("latin",))
+        add(Path(r"C:\Windows\Fonts\seguisym.ttf"), ("symbol", "latin"), "Segoe UI Symbol")
+        for path in (Path(r"C:\Windows\Fonts\meiryo.ttc"),):
+            add(path, ("jp", "symbol"))
+    elif script == SCRIPT_KOREAN:
+        for path in (
+            Path(r"C:\Windows\Fonts\malgun.ttf"),
+            Path(r"C:\Windows\Fonts\malgunbd.ttf"),
+            Path(r"C:\Windows\Fonts\NotoSansKR-VF.ttf"),
+        ):
+            add(path, ("kr",))
+    elif script == SCRIPT_JAPANESE:
+        for path in (
+            Path(r"C:\Windows\Fonts\meiryo.ttc"),
+            Path(r"C:\Windows\Fonts\YuGothM.ttc"),
+            Path(r"C:\Windows\Fonts\msgothic.ttc"),
+        ):
+            add(path, ("jp",))
+    elif script == SCRIPT_CHINESE:
+        for path in (
+            Path(r"C:\Windows\Fonts\msyh.ttc"),
+            Path(r"C:\Windows\Fonts\msyhbd.ttc"),
+            Path(r"C:\Windows\Fonts\simhei.ttf"),
+            Path(r"C:\Windows\Fonts\simsun.ttc"),
+            Path(r"C:\Windows\Fonts\NotoSansSC-VF.ttf"),
+            Path(r"C:\Windows\Fonts\NotoSansCJKsc-Regular.otf"),
+        ):
+            tags = _name_tags(path.stem) or ("sc",)
+            add(path, tags)
+
+    return tuple(sorted(by_path.values(), key=lambda item: (-item.score, item.display_name.lower())))
 
 
 def _font_covers_text(font: DiscoveredFont, text: str) -> bool:
@@ -826,11 +918,18 @@ def _count_text_chars(text: str) -> int:
     return sum(1 for char in unique_chars(text) if not char.isspace())
 
 
-def _fonts_for_recommendation(text: str, script: str | None) -> Tuple[DiscoveredFont, ...]:
+def _fonts_for_recommendation(
+    text: str,
+    script: str | None,
+    *,
+    fonts: Sequence[DiscoveredFont] | None = None,
+) -> Tuple[DiscoveredFont, ...]:
+    if fonts:
+        return tuple(fonts)
     target = script or SCRIPT_UNIVERSAL
     if target == SCRIPT_KAOMOJI or (target == SCRIPT_UNIVERSAL and text_looks_like_kaomoji(text)):
-        return discover_kaomoji_fonts(deep_scan=True)
-    return discover_fonts_for_script(target, deep_scan=True)
+        return discover_fonts_for_script_cached(SCRIPT_KAOMOJI, deep_scan=True)
+    return discover_fonts_for_script_cached(target, deep_scan=True)
 
 
 @dataclass(frozen=True)
@@ -853,6 +952,7 @@ def rank_fonts_for_text(
     script: str | None = None,
     *,
     limit: int = 12,
+    fonts: Sequence[DiscoveredFont] | None = None,
 ) -> List[Tuple[DiscoveredFont, int, int]]:
     """Return fonts sorted by glyph coverage (best first)."""
     if not text.strip():
@@ -861,7 +961,8 @@ def rank_fonts_for_text(
     if total <= 0:
         return []
     ranked: List[Tuple[DiscoveredFont, int, int]] = []
-    for font in _fonts_for_recommendation(text, script):
+    candidates = tuple(fonts) if fonts is not None else _fonts_for_recommendation(text, script)
+    for font in candidates:
         missing = missing_glyphs(text, font.path)
         covered = max(0, total - len(missing))
         ranked.append((font, covered, total))
@@ -869,19 +970,29 @@ def rank_fonts_for_text(
     return ranked[:limit]
 
 
-def recommend_font_for_text(text: str, script: str | None = None) -> FontRecommendation:
+def recommend_font_for_text(
+    text: str,
+    script: str | None = None,
+    *,
+    fonts: Sequence[DiscoveredFont] | None = None,
+) -> FontRecommendation:
     total = _count_text_chars(text)
     if not text.strip() or total <= 0:
         return FontRecommendation(font=None, covered=0, total=0)
-    ranked = rank_fonts_for_text(text, script, limit=1)
+    ranked = rank_fonts_for_text(text, script, limit=1, fonts=fonts)
     if not ranked:
         return FontRecommendation(font=None, covered=0, total=total)
     font, covered, total = ranked[0]
     return FontRecommendation(font=font, covered=covered, total=total)
 
 
-def recommend_font_label_for_text(text: str, script: str | None = None) -> str | None:
-    return recommend_font_for_text(text, script=script).label
+def recommend_font_label_for_text(
+    text: str,
+    script: str | None = None,
+    *,
+    fonts: Sequence[DiscoveredFont] | None = None,
+) -> str | None:
+    return recommend_font_for_text(text, script=script, fonts=fonts).label
 
 
 def format_missing_chars(chars: Sequence[str], limit: int = 12) -> str:

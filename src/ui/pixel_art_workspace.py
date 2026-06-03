@@ -12,6 +12,7 @@ from tkinter import BOTH, BOTTOM, END, HORIZONTAL, LEFT, RIGHT, VERTICAL, X, Y, 
 from tkinter import Checkbutton, Entry
 
 from asset_workspace import PIXEL_ART_WORKSPACE_ROOT
+from ui.workspace_signature_option import pack_workspace_signature_toggle
 from pixel_art_geometry import (
     MAX_DRAWABLE_LAYERS,
     MAX_EDITOR_DIMENSION,
@@ -83,6 +84,8 @@ class PixelArtWorkspace:
         self.merge_combo: ttk.Combobox | None = None
         self.layer_estimate_label: Label | None = None
         self._color_editor: ColorValuesEditor | None = None
+        self._editor_render_key: tuple | None = None
+        self._editor_pixel_items: dict[tuple[int, int], int] = {}
 
         self.right_host: Frame | None = None
         self.file_view: Frame | None = None
@@ -217,7 +220,7 @@ class PixelArtWorkspace:
         self.editor_canvas.bind("<Button-1>", self._on_editor_press)
         self.editor_canvas.bind("<B1-Motion>", self._on_editor_drag)
         self.editor_canvas.bind("<ButtonRelease-1>", self._on_editor_release)
-        self.editor_canvas.bind("<Configure>", lambda _e: self._render_editor())
+        self.editor_canvas.bind("<Configure>", self._on_editor_configure)
 
         self.preview_view = Frame(parent)
         preview_box = ttk.LabelFrame(self.preview_view, text=self._tr("pixel_json_preview"))
@@ -381,6 +384,13 @@ class PixelArtWorkspace:
 
         footer = Frame(parent)
         footer.pack(fill="x", padx=4, pady=(0, 8))
+        pack_workspace_signature_toggle(
+            app,
+            footer,
+            tr=lambda _lang, key: self._tr(key),
+            lang=app.lang,
+            pady=(0, 4),
+        )
         app._button(footer, "pixel_generate_editor", self.start_generate_from_editor).pack(side=LEFT)
         app._label(footer, "pixel_layer_estimate", textvariable=self.layer_estimate, anchor="w", theme_role="info").pack(
             side=LEFT, padx=(12, 0)
@@ -433,7 +443,10 @@ class PixelArtWorkspace:
         self._refresh_stats_panel()
 
     def on_theme_changed(self) -> None:
+        self._invalidate_editor_canvas()
         self.update_theme_hints()
+        if self._active_mode_index == 1:
+            self._render_editor()
 
     def update_theme_hints(self) -> None:
         preview_bg, preview_fg = self._preview_colors()
@@ -797,6 +810,44 @@ class PixelArtWorkspace:
         _render_source_image, render_geometry_json = self._preview_renderers()
         return render_geometry_json(path, self._preview_bounds(label, min_height=min_height))
 
+    def _apply_json_preview_bytes(
+        self,
+        label: Label,
+        png_bytes: bytes | None,
+        *,
+        preview_bg: str,
+        preview_fg: str,
+    ) -> None:
+        if not self.app._widget_alive(label):
+            return
+        if not png_bytes:
+            label.config(
+                image="",
+                text=self._tr("preview_unavailable"),
+                bg=preview_bg,
+                fg=preview_fg,
+            )
+            label.image = None
+            return
+        image = PhotoImage(data=png_bytes)
+        label.config(image=image, text="", bg=preview_bg)
+        label.image = image
+
+    def _schedule_json_preview_label(self, label: Label, path: Path, *, min_height: int) -> None:
+        preview_bg, preview_fg = self._preview_colors()
+        grid = self._grid_for_path.get(path)
+        if grid is not None:
+            data = render_color_grid_preview(grid, self._preview_bounds(label, min_height=min_height))
+            self._apply_json_preview_bytes(label, data, preview_bg=preview_bg, preview_fg=preview_fg)
+            return
+        slot = self.app._geometry_preview_slot_for_label(label)
+        bounds = self._preview_bounds(label, min_height=min_height)
+
+        def on_ready(png_bytes: bytes | None) -> None:
+            self._apply_json_preview_bytes(label, png_bytes, preview_bg=preview_bg, preview_fg=preview_fg)
+
+        self.app.schedule_geometry_json_preview(slot, path, bounds, on_ready)
+
     def set_json_preview(self, path: Path | None) -> None:
         if self.json_preview_label is None:
             return
@@ -807,15 +858,7 @@ class PixelArtWorkspace:
             label.config(image="", text=self._tr("preview_hint"), bg=preview_bg, fg=preview_fg)
             label.image = None
             return
-        path = Path(path)
-        data = self._json_preview_data(path, label, min_height=JSON_PREVIEW_MIN_HEIGHT)
-        if not data:
-            label.config(image="", text=self._tr("preview_unavailable"), bg=preview_bg, fg=preview_fg)
-            label.image = None
-            return
-        image = PhotoImage(data=data)
-        label.config(image=image, text="", bg=preview_bg)
-        label.image = image
+        self._schedule_json_preview_label(label, Path(path), min_height=JSON_PREVIEW_MIN_HEIGHT)
 
     def set_preview_art(self, path: Path | None) -> None:
         if self.preview_art_label is None:
@@ -827,15 +870,7 @@ class PixelArtWorkspace:
             label.config(image="", text=self._tr("preview_hint"), bg=preview_bg, fg=preview_fg)
             label.image = None
             return
-        path = Path(path)
-        data = self._json_preview_data(path, label, min_height=PREVIEW_MIN_HEIGHT)
-        if not data:
-            label.config(image="", text=self._tr("preview_unavailable"), bg=preview_bg, fg=preview_fg)
-            label.image = None
-            return
-        image = PhotoImage(data=data)
-        label.config(image=image, text="", bg=preview_bg)
-        label.image = image
+        self._schedule_json_preview_label(label, Path(path), min_height=PREVIEW_MIN_HEIGHT)
 
     def _schedule_json_preview_refresh(self) -> None:
         if self.json_preview_label is None or self.closed:
@@ -917,37 +952,90 @@ class PixelArtWorkspace:
             size = 12
         return max(6, min(48, size))
 
-    def _render_editor(self) -> None:
+    def _on_editor_configure(self, _event=None) -> None:
         if self.editor_canvas is None:
             return
         cell = self._cell_size()
         width_px = self.grid.width * cell
         height_px = self.grid.height * cell
+        self.editor_canvas.config(scrollregion=(0, 0, width_px, height_px))
+
+    def _editor_render_state(self) -> tuple:
+        return (
+            self.grid.width,
+            self.grid.height,
+            self._cell_size(),
+            self._color("COLOR_PANEL_ALT"),
+            self._color("COLOR_PREVIEW_BG"),
+        )
+
+    def _invalidate_editor_canvas(self) -> None:
+        self._editor_render_key = None
+        self._editor_pixel_items.clear()
+
+    def _render_editor_cell(self, canvas: Canvas, x: int, y: int, cell: int) -> None:
+        key = (x, y)
+        item_id = self._editor_pixel_items.pop(key, None)
+        if item_id is not None:
+            canvas.delete(item_id)
+        color = self.grid.get(x, y)
+        if color is None or color[3] <= 0:
+            return
+        x0 = x * cell
+        y0 = y * cell
+        hex_color = f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}"
+        inset = max(0, cell // 8)
+        item_id = canvas.create_rectangle(
+            x0 + inset,
+            y0 + inset,
+            x0 + cell - inset,
+            y0 + cell - inset,
+            fill=hex_color,
+            outline="",
+            tags=("editor_pixel",),
+        )
+        self._editor_pixel_items[key] = item_id
+
+    def _render_editor(self, *, changed_cells: list[tuple[int, int]] | None = None) -> None:
+        if self.editor_canvas is None:
+            return
+        cell = self._cell_size()
+        render_key = self._editor_render_state()
         canvas = self.editor_canvas
-        canvas.delete("all")
+        width_px = self.grid.width * cell
+        height_px = self.grid.height * cell
         canvas.config(scrollregion=(0, 0, width_px, height_px))
-        checker = self._color("COLOR_PANEL_ALT")
-        bg = self._color("COLOR_PREVIEW_BG")
+
+        if (
+            changed_cells
+            and self._editor_render_key == render_key
+            and self._editor_pixel_items is not None
+        ):
+            for x, y in changed_cells:
+                if 0 <= x < self.grid.width and 0 <= y < self.grid.height:
+                    self._render_editor_cell(canvas, x, y, cell)
+            return
+
+        self._editor_render_key = render_key
+        canvas.delete("all")
+        self._editor_pixel_items.clear()
+        checker = render_key[3]
+        bg = render_key[4]
         for y in range(self.grid.height):
             for x in range(self.grid.width):
                 x0 = x * cell
                 y0 = y * cell
-                if (x + y) % 2 == 0:
-                    canvas.create_rectangle(x0, y0, x0 + cell, y0 + cell, fill=checker, outline="")
-                else:
-                    canvas.create_rectangle(x0, y0, x0 + cell, y0 + cell, fill=bg, outline="")
-                color = self.grid.get(x, y)
-                if color is not None and color[3] > 0:
-                    hex_color = f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}"
-                    inset = max(0, cell // 8)
-                    canvas.create_rectangle(
-                        x0 + inset,
-                        y0 + inset,
-                        x0 + cell - inset,
-                        y0 + cell - inset,
-                        fill=hex_color,
-                        outline="",
-                    )
+                fill = checker if (x + y) % 2 == 0 else bg
+                canvas.create_rectangle(
+                    x0,
+                    y0,
+                    x0 + cell,
+                    y0 + cell,
+                    fill=fill,
+                    outline="",
+                    tags=("editor_bg",),
+                )
+                self._render_editor_cell(canvas, x, y, cell)
 
     def _canvas_to_grid(self, event) -> tuple[int, int] | None:
         cell = self._cell_size()
@@ -963,20 +1051,12 @@ class PixelArtWorkspace:
         if len(self._undo_stack) > 48:
             self._undo_stack.pop(0)
 
-    def _apply_tool(self, x: int, y: int) -> None:
-        if self.active_tool == "eraser":
-            self.grid = self.grid.set(x, y, None)
-            return
-        if self.active_tool == "fill":
-            self._flood_fill(x, y)
-            return
-        self.grid = self.grid.set(x, y, self._active_color())
-
-    def _flood_fill(self, x: int, y: int) -> None:
+    def _flood_fill(self, x: int, y: int) -> list[tuple[int, int]]:
         target = self.grid.get(x, y)
         fill = self._active_color()
         if target == fill:
-            return
+            return []
+        changed: list[tuple[int, int]] = []
         stack = [(x, y)]
         seen = set()
         while stack:
@@ -987,9 +1067,20 @@ class PixelArtWorkspace:
             if self.grid.get(cx, cy) != target:
                 continue
             self.grid = self.grid.set(cx, cy, fill)
+            changed.append((cx, cy))
             for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
                 if 0 <= nx < self.grid.width and 0 <= ny < self.grid.height:
                     stack.append((nx, ny))
+        return changed
+
+    def _apply_tool(self, x: int, y: int) -> list[tuple[int, int]]:
+        if self.active_tool == "eraser":
+            self.grid = self.grid.set(x, y, None)
+            return [(x, y)]
+        if self.active_tool == "fill":
+            return self._flood_fill(x, y)
+        self.grid = self.grid.set(x, y, self._active_color())
+        return [(x, y)]
 
     def _on_editor_press(self, event) -> None:
         coords = self._canvas_to_grid(event)
@@ -997,8 +1088,8 @@ class PixelArtWorkspace:
             return
         self._push_undo()
         self._drag_paint = True
-        self._apply_tool(*coords)
-        self._render_editor()
+        changed = self._apply_tool(*coords)
+        self._render_editor(changed_cells=changed)
         self._refresh_layer_estimate()
 
     def _on_editor_drag(self, event) -> None:
@@ -1007,8 +1098,8 @@ class PixelArtWorkspace:
         coords = self._canvas_to_grid(event)
         if coords is None:
             return
-        self._apply_tool(*coords)
-        self._render_editor()
+        changed = self._apply_tool(*coords)
+        self._render_editor(changed_cells=changed)
         self._refresh_layer_estimate()
 
     def _on_editor_release(self, _event) -> None:

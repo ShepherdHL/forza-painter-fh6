@@ -24,12 +24,12 @@
 </p>
 
 <p align="center">
-  <code>v1.6.X（プレリリース）</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>単一 EXE</code>
+  <code>v1.6.X（Beta）</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>単一 EXE</code>
 </p>
 
 PNG/JPG/BMP 画像を Forza Horizon 6 の Vinyl Group レイヤーに変換します。アプリ内で生成・プレビュー・インポートまで完結し、一般ユーザーは Python、`.venv`、バッチファイル、手動のメモリアドレス入力は不要です。
 
-> **EXE のダウンロード:** [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) から `forza-painter-fh6-v1.6.X.exe` を取得し、そのまま実行してください。ShepherdHL フォークの **1.6.X プレリリース実験版**です。
+> **EXE のダウンロード:** [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) から `forza-painter-fh6-v1.6.X.exe` を取得し、そのまま実行してください。ShepherdHL フォークの **1.6.X Beta 版**です。
 
 > **結果がぼやける場合:** まず **Random samples**（ランダムサンプル）を上げてください。**200000** 以上で品質が大きく変わることが多いです。
 

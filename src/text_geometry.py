@@ -66,11 +66,218 @@ def text_shape_mode_choices() -> List[str]:
     return list(TEXT_SHAPE_MODES)
 
 
-def template_hint_for_shape_mode(shape_mode: str) -> str:
+def template_hint_for_shape_mode(shape_mode: str, *, extra_shapes: bool = False) -> str:
+    if extra_shapes:
+        return (
+            "FH6 text vinyl with curve primitives (quarter circle, rounded square). "
+            "Use any ungrouped template with enough layers; save and reload the vinyl group after import."
+        )
     mode = normalize_text_shape_mode(shape_mode)
     if mode in (SHAPE_MODE_ELLIPSES, SHAPE_MODE_CIRCLES, SHAPE_MODE_TRIANGLES, SHAPE_MODE_MIXED):
-        return "Use an ungrouped sphere template in FH6 (ellipse / sphere layers)."
-    return "Use an ungrouped rectangle template in FH6 when possible (fewer layers)."
+        return (
+            "FH6 text vinyl uses real in-game vinyl shapes (import via Import text). "
+            "Use any ungrouped template with enough layers; save and reload the vinyl group after import."
+        )
+    return (
+        "FH6 text vinyl uses real square vinyl shapes. "
+        "Use an ungrouped template with enough layers; save and reload the vinyl group after import."
+    )
+
+
+TEXT_TYPECODE_FORMAT = "fh6_text_typecode_v1"
+TEXT_TYPECODE_COORDINATE_MODEL = "forza_painter_text_trace_v1"
+TEXT_TYPECODE_CURVED_COORDINATE_MODEL = "forza_painter_text_curved_v1"
+TEXT_TYPECODE_SCORE = 0.0
+
+
+def _typecode_rotation_for_rect(shape_mode: str, width: int, height: int) -> float:
+    mode = normalize_text_shape_mode(shape_mode)
+    if mode == SHAPE_MODE_TRIANGLES:
+        if width > height * 1.35:
+            return 0.0
+        if height > width * 1.35:
+            return 90.0
+        return 0.0
+    if mode == SHAPE_MODE_MIXED:
+        aspect = max(width, height) / max(1, min(width, height))
+        if aspect >= 2.2:
+            return 0.0
+        return 45.0 if width != height else 0.0
+    return 0.0
+
+
+def _fh6_type_code_for_shape_mode(shape_mode: str, width: int, height: int) -> int:
+    from fh6_shape_catalog import get_primitive_type_code, get_square_type_code
+
+    mode = normalize_text_shape_mode(shape_mode)
+    if mode in (SHAPE_MODE_RECTANGLES, SHAPE_MODE_SQUARES):
+        return get_square_type_code()
+    if mode == SHAPE_MODE_CIRCLES:
+        return get_primitive_type_code("Circle") or 1048687
+    if mode == SHAPE_MODE_ELLIPSES:
+        return get_primitive_type_code("Ellipse") or 1048715
+    if mode in (SHAPE_MODE_TRIANGLES, SHAPE_MODE_MIXED):
+        return get_primitive_type_code("Triangle") or 1048697
+    return get_square_type_code()
+
+
+def _rect_to_typecode_shape(
+    x0: int,
+    y0: int,
+    width: int,
+    height: int,
+    color: ColorRGBA,
+    shape_mode: str,
+) -> dict:
+    from pixel_art_geometry import POSITION_SCALE, SIZE_SCALE
+
+    if width <= 0 or height <= 0:
+        raise ValueError("invalid trace rectangle")
+    cx = (float(x0) + float(width) / 2.0) * POSITION_SCALE
+    cy = (float(y0) + float(height) / 2.0) * POSITION_SCALE
+    mode = normalize_text_shape_mode(shape_mode)
+    if mode == SHAPE_MODE_CIRCLES:
+        diameter = max(1, min(width, height))
+        sx = float(diameter) * SIZE_SCALE
+        sy = sx
+    elif mode == SHAPE_MODE_TRIANGLES:
+        if width > height * 1.35:
+            sx = float(width) * SIZE_SCALE
+            sy = float(max(1, height // 2)) * SIZE_SCALE
+        elif height > width * 1.35:
+            sx = float(max(1, width // 2)) * SIZE_SCALE
+            sy = float(height) * SIZE_SCALE
+        else:
+            side = float(max(1, min(width, height))) * SIZE_SCALE
+            sx = side
+            sy = side
+    else:
+        sx = float(width) * SIZE_SCALE
+        sy = float(height) * SIZE_SCALE
+    rotation = _typecode_rotation_for_rect(shape_mode, width, height)
+    return {
+        "type": _fh6_type_code_for_shape_mode(shape_mode, width, height),
+        "data": [cx, cy, sx, sy, rotation, 0.0, 0],
+        "color": [int(color[0]), int(color[1]), int(color[2]), int(color[3])],
+        "score": TEXT_TYPECODE_SCORE,
+    }
+
+
+def rectangles_to_typecode_shapes(
+    rectangles: Sequence[Rect],
+    color: ColorRGBA,
+    shape_mode: str = SHAPE_MODE_RECTANGLES,
+) -> List[dict]:
+    return [
+        _rect_to_typecode_shape(x0, y0, width, height, color, shape_mode)
+        for x0, y0, width, height in rectangles
+    ]
+
+
+def build_typecode_payload_from_mask(
+    mask,
+    color: ColorRGBA,
+    cell_size: int = 1,
+    shape_mode: str = SHAPE_MODE_RECTANGLES,
+    *,
+    extra_shapes: bool = False,
+) -> dict:
+    if extra_shapes:
+        from text_curved_trace import build_curved_typecode_shapes
+
+        shapes = build_curved_typecode_shapes(mask, color, cell_size=cell_size)
+        coordinate_model = TEXT_TYPECODE_CURVED_COORDINATE_MODEL
+    else:
+        rectangles = decompose_mask_to_rectangles(mask, cell_size=cell_size)
+        if not rectangles:
+            raise ValueError("No text pixels detected in image mask")
+        shapes = rectangles_to_typecode_shapes(rectangles, color, shape_mode=shape_mode)
+        coordinate_model = TEXT_TYPECODE_COORDINATE_MODEL
+    if not shapes:
+        raise ValueError("No text pixels detected in image mask")
+    if len(shapes) > MAX_GEOMETRY_SHAPES:
+        raise ValueError(
+            f"Text trace produced {len(shapes)} shapes (limit {MAX_GEOMETRY_SHAPES}). "
+            "Increase cell size, choose a simpler shape mode, or reduce font size / resolution."
+        )
+    return {
+        "format": TEXT_TYPECODE_FORMAT,
+        "created_by": "forza-painter-fh6",
+        "coordinate_model": coordinate_model,
+        "shapes": shapes,
+    }
+
+
+def build_typecode_from_text(
+    text: str,
+    color: ColorRGBA = (255, 255, 255, 255),
+    font_path: Path | None = None,
+    font_size: int = 120,
+    cell_size: int = 1,
+    bold: bool = False,
+    strict_glyph_check: bool = True,
+    shape_mode: str = SHAPE_MODE_RECTANGLES,
+    *,
+    extra_shapes: bool = False,
+) -> dict:
+    resolved_font = Path(font_path) if font_path else find_font_for_text(text)
+    if strict_glyph_check:
+        ok, missing = validate_text_coverage(text, resolved_font)
+        if not ok:
+            hint = (
+                " For Korean, choose a [KR] font such as Malgun Gothic."
+                if any(is_hangul_char(char) for char in text)
+                else " Choose a text font that supports every character in your input."
+            )
+            raise ValueError(
+                f"Font {resolved_font.name} is missing {len(missing)} character(s): "
+                f"{format_missing_chars(missing)}. Choose another font or install a fuller CJK face.{hint}"
+            )
+    mask = render_text_mask(text, font_path=resolved_font, font_size=font_size, bold=bold)
+    return build_typecode_payload_from_mask(
+        mask,
+        color=color,
+        cell_size=cell_size,
+        shape_mode=shape_mode,
+        extra_shapes=extra_shapes,
+    )
+
+
+def build_typecode_from_text_image(
+    image_path: Path,
+    color: ColorRGBA | None = None,
+    cell_size: int = 1,
+    invert: bool = False,
+    threshold: int = 128,
+    sample_text_color: bool = True,
+    shape_mode: str = SHAPE_MODE_RECTANGLES,
+    *,
+    extra_shapes: bool = False,
+) -> dict:
+    mask = load_text_image_mask(image_path, invert=invert, threshold=threshold)
+    if color is None and sample_text_color:
+        color = _sample_ink_color(image_path, mask, threshold, invert)
+    if color is None:
+        color = (255, 255, 255, 255)
+    return build_typecode_payload_from_mask(
+        mask,
+        color=color,
+        cell_size=cell_size,
+        shape_mode=shape_mode,
+        extra_shapes=extra_shapes,
+    )
+
+
+def is_text_typecode_payload(payload: dict) -> bool:
+    return "typecode" in str(payload.get("format", "")).lower()
+
+
+def write_text_design_json(path: Path, payload: dict) -> Path:
+    if is_text_typecode_payload(payload):
+        from pixel_art_geometry import write_typecode_json
+
+        return write_typecode_json(path, payload)
+    return write_geometry_json(path, payload)
 
 
 def _load_pillow():
@@ -258,8 +465,7 @@ def _rect_to_primitive_shapes(
         ]
 
     if mode == SHAPE_MODE_TRIANGLES:
-        # FH6 import only supports rectangles and rotated ellipses; diamond ellipses
-        # give a sharper, triangle-like look for katakana strokes.
+        # Legacy geometry JSON: diamond ellipses approximate sharp strokes.
         diameter = max(1, min(w, h))
         if w > h * 1.35:
             rot = 0
@@ -444,4 +650,171 @@ def contains_cjk(text: str) -> bool:
 
 
 def estimate_layer_count(payload: dict) -> int:
+    if is_text_typecode_payload(payload):
+        return len(payload.get("shapes", []))
     return max(0, len(payload.get("shapes", [])) - 1)
+
+
+def count_trace_layers_from_mask(
+    mask,
+    *,
+    cell_size: int = 1,
+    shape_mode: str = SHAPE_MODE_RECTANGLES,
+    extra_shapes: bool = False,
+) -> int:
+    if extra_shapes:
+        from text_curved_trace import count_curved_shapes_from_mask
+
+        return count_curved_shapes_from_mask(mask, cell_size=cell_size)
+    rectangles = decompose_mask_to_rectangles(mask, cell_size=cell_size)
+    if not rectangles:
+        return 0
+    shapes = rectangles_to_typecode_shapes(rectangles, (255, 255, 255, 255), shape_mode=shape_mode)
+    return len(shapes)
+
+
+def estimate_traced_text_layers(
+    text: str,
+    *,
+    font_path: Path | None = None,
+    font_size: int = 120,
+    cell_size: int = 1,
+    shape_mode: str = SHAPE_MODE_RECTANGLES,
+    bold: bool = False,
+    extra_shapes: bool = False,
+) -> int:
+    resolved_font = Path(font_path) if font_path else find_font_for_text(text)
+    mask = render_text_mask(text, font_path=resolved_font, font_size=font_size, bold=bold)
+    return count_trace_layers_from_mask(
+        mask,
+        cell_size=cell_size,
+        shape_mode=shape_mode,
+        extra_shapes=extra_shapes,
+    )
+
+
+def resolve_cell_size_for_layer_budget(
+    text: str,
+    *,
+    font_path: Path | None = None,
+    font_size: int = 120,
+    shape_mode: str = SHAPE_MODE_RECTANGLES,
+    max_layers: int,
+    bold: bool = False,
+    extra_shapes: bool = False,
+) -> tuple[int, int]:
+    """Increase cell_size until traced layer count is <= max_layers (or cell_size is 16)."""
+    budget = max(1, int(max_layers))
+    last_count = 0
+    for cell_size in range(1, 17):
+        last_count = estimate_traced_text_layers(
+            text,
+            font_path=font_path,
+            font_size=font_size,
+            cell_size=cell_size,
+            shape_mode=shape_mode,
+            bold=bold,
+            extra_shapes=extra_shapes,
+        )
+        if last_count <= budget:
+            return cell_size, last_count
+    return 16, last_count
+
+
+def build_typecode_from_text_with_options(
+    text: str,
+    *,
+    color: ColorRGBA = (255, 255, 255, 255),
+    font_path: Path | None = None,
+    font_size: int = 120,
+    cell_size: int = 1,
+    bold: bool = False,
+    strict_glyph_check: bool = True,
+    shape_mode: str = SHAPE_MODE_RECTANGLES,
+    use_forza_font: bool = False,
+    forza_font_index: int = 1,
+    fit_layer_budget: bool = False,
+    max_drawable_layers: int | None = None,
+    extra_shapes: bool = False,
+) -> tuple[dict, int]:
+    """Build type-code JSON; return (payload, cell_size_used)."""
+    if use_forza_font:
+        from text_forza_fonts import build_typecode_from_forza_font
+
+        payload = build_typecode_from_forza_font(
+            text,
+            font_index=forza_font_index,
+            color=color,
+            font_size=font_size,
+        )
+        return payload, 1
+
+    resolved_cell = normalize_trace_cell_size(cell_size)
+    if fit_layer_budget and max_drawable_layers is not None:
+        resolved_cell, _ = resolve_cell_size_for_layer_budget(
+            text,
+            font_path=font_path,
+            font_size=font_size,
+            shape_mode=shape_mode,
+            max_layers=max_drawable_layers,
+            bold=bold,
+            extra_shapes=extra_shapes,
+        )
+
+    payload = build_typecode_from_text(
+        text,
+        color=color,
+        font_path=font_path,
+        font_size=font_size,
+        cell_size=resolved_cell,
+        bold=bold,
+        strict_glyph_check=strict_glyph_check,
+        shape_mode=shape_mode,
+        extra_shapes=extra_shapes,
+    )
+    return payload, resolved_cell
+
+
+def estimate_typed_text_layers(
+    text: str,
+    *,
+    font_path: Path | None = None,
+    font_size: int = 120,
+    cell_size: int = 1,
+    shape_mode: str = SHAPE_MODE_RECTANGLES,
+    use_forza_font: bool = False,
+    forza_font_index: int = 1,
+    fit_layer_budget: bool = False,
+    max_drawable_layers: int | None = None,
+    extra_shapes: bool = False,
+) -> tuple[int, int]:
+    """Return (estimated_layers, cell_size_used_for_estimate)."""
+    if not text or not text.strip():
+        return 0, normalize_trace_cell_size(cell_size)
+
+    if use_forza_font:
+        from text_forza_fonts import estimate_forza_font_layer_count
+
+        return estimate_forza_font_layer_count(text), 1
+
+    resolved_cell = normalize_trace_cell_size(cell_size)
+    if fit_layer_budget and max_drawable_layers is not None:
+        resolved_cell, count = resolve_cell_size_for_layer_budget(
+            text,
+            font_path=font_path,
+            font_size=font_size,
+            shape_mode=shape_mode,
+            max_layers=max_drawable_layers,
+            extra_shapes=extra_shapes,
+        )
+        return count, resolved_cell
+
+    count = estimate_traced_text_layers(
+        text,
+        font_path=font_path,
+        font_size=font_size,
+        cell_size=resolved_cell,
+        shape_mode=shape_mode,
+        extra_shapes=extra_shapes,
+    )
+    return count, resolved_cell

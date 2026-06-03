@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
@@ -11,15 +12,18 @@ from generator_launch_options import GeneratorLaunchOptions, append_launch_optio
 from preset_preview import preset_badge_prefix, preset_label_with_badge
 from asset_workspace import (
     IMAGE_WORKSPACE_ROOT,
+    canonicalize_generator_json_outputs,
     generator_json_output_base,
     generator_live_preview_path,
     image_workspace,
     json_search_roots,
+    workspace_json_stem,
 )
 from geometry_json import drawable_shape_count
 from preprocess.filters import (
     PREPROCESS_LUMA,
     PREPROCESS_NONE,
+    filter_json_slug,
     is_preprocess_variant_path,
     normalize_preprocess_mode,
     preprocessed_image_exists,
@@ -423,7 +427,43 @@ def checkpoints_for_image(image_path, *, luma=None, preprocess_mode=None):
     return best_geometry_jsons(filtered)
 
 
-def generated_jsons(image_path: str | Path) -> list[Path]:
+GENERATOR_JSON_SCAN_SECONDS = 2.0
+GENERATOR_POLL_SLEEP_SECONDS = 0.2
+GENERATED_JSON_CACHE_TTL_SECONDS = 2.0
+
+_GENERATED_JSON_CACHE: dict[str, tuple[float, list[Path]]] = {}
+
+
+def _generated_json_cache_key(image_path: Path) -> str:
+    try:
+        return str(image_path.resolve()).lower()
+    except OSError:
+        return str(image_path).lower()
+
+
+def invalidate_generated_jsons_cache(image_path: str | Path | None = None) -> None:
+    """Drop cached JSON listings so new generator output is visible immediately."""
+    if image_path is None:
+        _GENERATED_JSON_CACHE.clear()
+        return
+    _GENERATED_JSON_CACHE.pop(_generated_json_cache_key(Path(image_path)), None)
+
+
+def generated_jsons(image_path: str | Path, *, force_refresh: bool = False) -> list[Path]:
+    image_path = Path(image_path)
+    key = _generated_json_cache_key(image_path)
+    if not force_refresh:
+        cached = _GENERATED_JSON_CACHE.get(key)
+        if cached is not None:
+            cached_at, paths = cached
+            if time.monotonic() - cached_at < GENERATED_JSON_CACHE_TTL_SECONDS:
+                return paths
+    paths = _scan_generated_jsons(image_path)
+    _GENERATED_JSON_CACHE[key] = (time.monotonic(), paths)
+    return paths
+
+
+def _scan_generated_jsons(image_path: Path) -> list[Path]:
     image_path = Path(image_path)
     candidates: list[Path] = []
     for folder in json_search_roots(image_path):
@@ -446,12 +486,15 @@ def generated_jsons(image_path: str | Path) -> list[Path]:
                 candidates.extend(folder.rglob("*.json"))
             except OSError:
                 continue
+    json_stem = workspace_json_stem(image_path)
     prefixes = {
         image_path.stem,
         image_path.name,
         legacy_base.name,
         image_path.stem.split(".", 1)[0],
         legacy_base.name.split(".", 1)[0],
+        json_stem,
+        f"{json_stem}_",
     }
     patterns = {f"{prefix}*.json" for prefix in prefixes if prefix}
     for pattern in patterns:
@@ -469,14 +512,21 @@ def generated_jsons(image_path: str | Path) -> list[Path]:
 
 
 def geometry_shape_count(path: str | Path) -> int:
-    return drawable_shape_count(path)
+    from preview.geometry_preview_cache import drawable_shape_count_cached
+
+    return drawable_shape_count_cached(Path(path))
+
+
+def _json_checkpoint_group_stem(stem: str) -> str:
+    base = re.sub(r"_(\d+)$", "", stem)
+    return re.sub(r"\.\d+$", "", base)
 
 
 def best_geometry_jsons(paths: Iterable[str | Path]) -> list[Path]:
     best_by_stem: dict[str, tuple[tuple[int, float], Path]] = {}
     for path in paths:
         path = Path(path)
-        base_name = re.sub(r"\.\d+$", "", path.stem)
+        base_name = _json_checkpoint_group_stem(path.stem)
         key = str(path.with_name(base_name).resolve()).lower()
         score = (geometry_shape_count(path), path.stat().st_mtime)
         current = best_by_stem.get(key)
@@ -509,8 +559,28 @@ def generated_preview_files(image_path: str | Path) -> list[Path]:
     return sorted(set(candidates), key=lambda p: p.stat().st_mtime, reverse=True)
 
 
-def generator_output_base(image_path: str | Path) -> Path:
-    return generator_json_output_base(image_path)
+def generator_output_base(image_path: str | Path, preprocess_mode: str | None = None) -> Path:
+    return generator_json_output_base(image_path, preprocess_mode)
+
+
+def generator_json_naming(
+    image_path: str | Path, preprocess_mode: str | None = None
+) -> tuple[str, str, str]:
+    mode = normalize_preprocess_mode(preprocess_mode)
+    stem = workspace_json_stem(image_path)
+    slug = filter_json_slug(mode)
+    return stem, slug, mode
+
+
+def canonicalize_generator_jsons_for_image(
+    image_path: str | Path, preprocess_mode: str | None = None
+) -> list[Path]:
+    stem, slug, _mode = generator_json_naming(image_path, preprocess_mode)
+    paths = image_workspace(image_path).ensure()
+    renamed = canonicalize_generator_json_outputs(paths.json_root, stem, slug)
+    if renamed:
+        invalidate_generated_jsons_cache(image_path)
+    return renamed
 
 
 GENERATED_RUN_ROOTS = ("imgs/generated", "generated")
@@ -527,6 +597,86 @@ def generated_run_search_roots(repo_root: str | Path) -> list[Path]:
     if imgs.is_dir():
         roots.append(imgs)
     return roots
+
+
+_JSON_LAYER_SUFFIX_RE = re.compile(r"_(\d+)$")
+
+
+def _json_variant_sort_key(path: Path) -> tuple[int, str, float]:
+    match = _JSON_LAYER_SUFFIX_RE.search(path.stem)
+    layers = int(match.group(1)) if match else -1
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return (layers, path.name.lower(), mtime)
+
+
+def all_geometry_jsons_in_folder(folder: str | Path) -> list[Path]:
+    """Every geometry JSON under a run/workspace folder (no best-of collapsing)."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        return []
+    try:
+        paths = [path for path in folder.rglob("*.json") if path.is_file()]
+    except OSError:
+        return []
+    unique: dict[str, Path] = {}
+    for path in paths:
+        try:
+            key = str(path.resolve()).lower()
+        except OSError:
+            key = str(path).lower()
+        unique[key] = path
+    return sorted(unique.values(), key=_json_variant_sort_key)
+
+
+def discover_import_json_dirs(repo_root: str | Path) -> list[Path]:
+    """One json directory per image workspace (avoids duplicate json/json/finals rows)."""
+    repo_root = Path(repo_root)
+    seen_workspaces: set[str] = set()
+    dirs: list[Path] = []
+
+    if IMAGE_WORKSPACE_ROOT.is_dir():
+        for workspace in sorted(
+            IMAGE_WORKSPACE_ROOT.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True
+        ):
+            if not workspace.is_dir():
+                continue
+            try:
+                ws_key = str(workspace.resolve()).lower()
+            except OSError:
+                ws_key = str(workspace).lower()
+            if ws_key in seen_workspaces:
+                continue
+            json_dir = workspace / "json"
+            if not json_dir.is_dir():
+                continue
+            try:
+                has_json = any(json_dir.rglob("*.json"))
+            except OSError:
+                has_json = False
+            if not has_json:
+                continue
+            seen_workspaces.add(ws_key)
+            dirs.append(json_dir)
+
+    for run_folder in discover_generated_run_folders(repo_root):
+        try:
+            resolved = run_folder.resolve()
+            ws_root = IMAGE_WORKSPACE_ROOT.resolve()
+            if ws_root in resolved.parents and len(resolved.relative_to(ws_root).parts) >= 1:
+                continue
+        except (OSError, ValueError):
+            pass
+        try:
+            key = str(run_folder.resolve()).lower()
+        except OSError:
+            key = str(run_folder).lower()
+        if key not in {str(d.resolve()).lower() for d in dirs}:
+            dirs.append(run_folder)
+
+    return dirs
 
 
 def discover_generated_run_folders(repo_root: str | Path) -> list[Path]:
@@ -625,13 +775,14 @@ def build_generator_command(
             f"GPU generator is disabled or missing: {GENERATOR_EXE}"
         )
     image_path = Path(image_path)
+    preprocess_mode = setting_preprocess_mode(setting)
     cmd = [
         str(GENERATOR_EXE),
         str(image_path),
         "-settings",
         str(setting["path"]),
         "-output",
-        str(generator_output_base(image_path)),
+        str(generator_output_base(image_path, preprocess_mode)),
         "-preview",
         str(generator_preview_path(image_path)),
     ]

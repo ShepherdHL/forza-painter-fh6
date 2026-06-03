@@ -40,6 +40,7 @@ datas = [
     (str(ROOT / "config"), "config"),
     (str(ROOT / "assets"), "assets"),
     (str(ROOT / "docs"), "docs"),
+    (str(ROOT / "shape library"), "shape library"),
     (str(SRC / "_build_profile.json"), "."),
 ]
 

@@ -43,6 +43,8 @@ from app_config import (
     GENERATE_COMPARE_RESULT_MIN,
     DETAILED_LOG_OUTPUT_LIMIT,
     DETAILED_LOG_MEMORY_LIMIT,
+    UI_LOG_CHAR_LIMIT,
+    UI_LOG_LINE_LIMIT,
     FH6_AUTO_LOCATE_MAX_SECONDS,
     FH6_AUTO_LOCATE_TIMEOUT_SECONDS,
     UPDATE_CHANGELOG_URL,
@@ -94,14 +96,18 @@ from generator_backend import (
     GENERATOR_POLL_SLEEP_SECONDS,
     GENERATOR_PREVIEW_SCAN_SECONDS,
     USER_SETTINGS_DIR,
+    all_geometry_jsons_in_folder,
     best_geometry_jsons,
     best_safe_final_json,
     build_generator_command,
+    canonicalize_generator_jsons_for_image,
     build_generator_env,
     generator_available,
     checkpoints_for_image,
+    discover_import_json_dirs,
     discover_generated_run_folders,
     generated_jsons,
+    invalidate_generated_jsons_cache,
     json_candidates_for_run_folder,
     is_luma_variant_path,
     json_from_preprocess_pipeline,
@@ -119,7 +125,11 @@ from generator_backend import (
     write_user_settings_preset,
 )
 from utils import load_cv2, load_pillow
-from asset_workspace import ensure_image_workspace_source, workspace_display_name
+from asset_workspace import (
+    ensure_image_workspace_source,
+    generated_run_folder_label,
+    workspace_display_name,
+)
 from file_management_settings import load_file_management_settings
 from preset_preview import (
     effective_max_dimension,
@@ -187,6 +197,10 @@ from ui.file_management_workspace import FileManagementWorkspace
 from ui.first_run import show_first_run_welcome
 from ui.help_dialogs import show_acknowledgements_dialog, show_tutorial_dialog
 from ui.safety_viewer import show_safety_guide
+from ui.workspace_signature_option import (
+    pack_workspace_signature_toggle,
+    workspace_signature_string_var,
+)
 from ui_preferences import load_ui_preferences, save_ui_preferences
 from ui_chrome import header_rule
 from ui.header_telemetry import HeaderTelemetryPanel
@@ -370,6 +384,33 @@ TEXT = {
         "text_shape_mode_hint": "Rectangles/squares use rectangle layers; ellipses/circles/triangles/mixed use sphere layers in FH6.",
         "text_template_hint": "FH6 template: {hint}",
         "text_cell_hint": "Pixel grid step when tracing the text mask. 1 = sharpest detail and most vinyl layers; higher values merge pixels into fewer, blockier shapes.",
+        "text_preset": "Quality preset",
+        "text_preset_custom": "Custom (manual settings)",
+        "text_preset_efficient_cjk": "Efficient CJK (fewer layers)",
+        "text_preset_sharp_cjk": "Sharp CJK (mixed shapes)",
+        "text_preset_soft_cjk": "Soft CJK (ellipses)",
+        "text_preset_forza_latin": "In-game Forza font (Latin)",
+        "text_use_forza_font": "Use in-game Forza fonts (Latin only)",
+        "text_forza_font": "Forza font",
+        "text_forza_font_hint": "Matches FH6 vinyl Text fonts (1 layer per character). PC font above is ignored while this is on.",
+        "text_forza_font_universal_only": "In-game Forza fonts are available on the Universal (Latin) tab only.",
+        "text_fit_layer_budget": "Fit to layer budget",
+        "text_max_drawable_layers": "Max layers",
+        "text_layer_estimate_idle": "Layer estimate appears here after you enter text.",
+        "text_layer_estimate_working": "Estimating layers…",
+        "text_layer_estimate_ok": "About {layers} vinyl layers (~{template} template layers).{cell_note}{mode_note}",
+        "text_layer_estimate_cell": " Trace cell size {cell}.",
+        "text_layer_estimate_forza_mode": " In-game Forza font mode.",
+        "text_layer_estimate_forza_latin_only": "Forza font mode: Latin letters, digits, and basic symbols only.",
+        "text_layer_estimate_forza_missing": "Forza font mode: {count} unsupported character(s) in this font.",
+        "text_layer_estimate_error": "Could not estimate layers: {error}",
+        "text_log_forza_latin_only": "In-game Forza fonts only support Latin (same as FH6 Enter Text). Turn off Forza font mode for other scripts.",
+        "text_log_forza_universal_only": "In-game Forza fonts are only available on the Universal (Latin) tab.",
+        "text_log_cell_size_adjusted": "Raised trace cell size to {cell} to fit the layer budget.",
+        "text_preset_smooth_cjk_extra": "Smooth CJK (extra shapes)",
+        "text_extra_shapes": "Enable extra shapes (smoother curves)",
+        "text_extra_shapes_hint": "Quarter circle, rounded square, and related FH6 primitives.",
+        "text_layer_estimate_extra_shapes": " Extra shapes mode.",
         "text_color": "Color",
         "text_color_hint": "Edit hex or RGB; alpha 0–255 (255 = opaque). Forza H/S/B matches Bang's converter.",
         "text_color_invalid": "Color values must be valid hex or 0–255 channels.",
@@ -381,6 +422,7 @@ TEXT = {
         "text_coverage_suggest_kr": "Korean detected — select a [KR] font such as {font}.",
         "text_coverage_suggest_font": "Try {font}.",
         "text_apply_recommended_font": "Use recommended font",
+        "text_char_library_show": "Show character library",
         "text_char_library": "Mandarin character library (GB2312 hanzi)",
         "text_char_library_latin": "Latin extended & symbols",
         "text_char_library_hiragana": "Hiragana",
@@ -407,6 +449,7 @@ TEXT = {
         "text_failed": "Text vinyl generation failed",
         "text_log_scanning_fonts": "Scanning installed fonts for all script tabs...",
         "text_log_font_scan_failed": "Font scan failed: {error}",
+        "text_log_char_library_failed": "Character library failed to load: {error}",
         "text_log_fonts_loaded": "Loaded fonts — Latin/Universal: {latin}, Japanese: {japanese}, Kaomoji: {kaomoji}, Korean: {korean}, Chinese: {chinese}.",
         "text_log_no_fonts": "No fonts found. Use Browse on each tab to pick a .ttf/.ttc/.otf file.",
         "text_log_enter_text": "Enter text to generate.",
@@ -489,25 +532,25 @@ TEXT = {
         "text_dialog_add_json": "Add text vinyl JSON",
         "text_template_hint_sphere": "Use an ungrouped sphere template in FH6 (ellipse / sphere layers).",
         "text_template_hint_rectangle": "Use an ungrouped rectangle template in FH6 when possible (fewer layers).",
-        "import_photo_tab": "Import photo",
-        "import_photo_tab_hint": "Import designs generated from photos. Pick a past generation or add a design file, then import into your ungrouped FH6 template.",
+        "import_photo_tab": "Import .JSON",
+        "import_photo_tab_hint": "Import geometry JSON generated from images. Pick a past generation or add a design file, then import into your ungrouped FH6 template.",
         "import_photo_runs": "Past generations",
         "import_photo_refresh_runs": "Refresh list",
         "import_photo_run_files": "Designs in selected generation",
         "import_photo_use_best": "Auto-select best version (most layers)",
         "import_photo_pick_best": "Select best version",
         "import_photo_import": "Import into FH6",
-        "import_text_tab": "Import text",
-        "import_text_tab_hint": "Import text vinyl designs from Create → Text. Add files or continue from the Text tab, then import into your ungrouped FH6 template.",
+        "import_text_tab": "Import Text Vinyl",
+        "import_text_tab_hint": "Import text vinyl designs from Create → Text Vinyl. Add files or continue from the Text Vinyl tab, then import into your ungrouped FH6 template.",
         "import_text_designs": "Text designs",
         "import_text_import": "Import into FH6",
         "import_text_open_folder": "Open text folder",
-        "import_pixel_tab": "Import pixel art",
+        "import_pixel_tab": "Import Pixel Art",
         "import_pixel_tab_hint": "Import pixel art with FH6 shape layers (squares, circles, etc.). After import, save and reload the vinyl group in FH6.",
         "import_pixel_choose_json": "Add design file",
         "import_pixel_import": "Import into FH6",
         "import_pixel_status_none": "Select a pixel art design to inspect supported shapes.",
-        "import_pixel_status_counts": "Shapes: total {total} · supported {supported} · unsupported {unsupported}",
+        "import_pixel_status_counts": "Shapes: total {total} · in catalog {known} · unknown {unknown} · will import {importable}",
         "export_game_tab": "Save from game",
         "export_game_tab_hint": "Save the open vinyl group from FH6 as a design file. Use the same game connection and template layer count as import.",
         "export_game_json": "Save open FH6 group",
@@ -516,7 +559,7 @@ TEXT = {
         "handmade_import": "Import into FH6",
         "handmade_export": "Export open FH6 group to JSON",
         "handmade_status_none": "Select a handmade JSON to inspect supported shapes.",
-        "handmade_status_counts": "Shapes: total {total} · supported {supported} · unsupported {unsupported}",
+        "handmade_status_counts": "Shapes: total {total} · in catalog {known} · unknown {unknown} · will import {importable}",
         "preview_tab": "Image Preview",
         "preview_tab_hint": "Compare filters and projected image complexity before generating. Choose an image on the left; pick a filter on the right. Higher complexity usually means more shapes.",
         "preview_choose_image": "Choose image",
@@ -721,11 +764,18 @@ TEXT = {
         "generate_run_summary_estimate_unknown": "Projected complexity (selected): open Image Preview to compare filters and see estimates.",
         "generate_step_run_hint": "Click once and wait. Progress appears in Logs; generated JSON is added to the Import page automatically.",
         "scroll_hint": "Steps 1–3 scroll above. Generate controls stay pinned below.",
+        "workspace_signature": "Write workspace SIGNATURE file",
+        "workspace_signature_tooltip": (
+            "When enabled, saves SIGNATURE.txt in each design workspace folder (next to manifest.json) "
+            "with author, repo link, and app version. Opens in Notepad or your default text editor. "
+            "Helps support identify files from this tool; does not change JSON content."
+        ),
         "start_generate": "Generate with current settings",
         "stop_generate": "Stop Current Generation",
         "open_output": "Open Output Folder",
         "preview": "Preview",
         "preview_hint": "Select an image or JSON to preview it here.",
+        "preview_accuracy_note": "JSON preview approximates the in-game vinyl editor; semi-transparent layers stack in order.",
         "preview_unavailable": "Preview is unavailable. Install optional preview dependencies, or continue without preview.",
         "logs": "Logs",
         "export_logs": "Export detailed log",
@@ -761,8 +811,8 @@ TEXT = {
         "handmade_section_hint": "For JSON with real FH6 shape type codes (not only generated rectangles/ellipses). Export reads the open vinyl group; import writes save-safe layer fields. Save and reload the vinyl group in FH6 after import.",
         "export_typecode_json": "Export open group to JSON",
         "typecode_trim_after_import": "Trim vinyl group to imported layer count after import",
-        "typecode_allow_unknown": "Allow Experimental Shape Codes",
-        "typecode_allow_unknown_hint": "Pixel art from this app is squares only — leave this off for that. This tab uses the FH6 type-code importer (including exported or external handmade JSON), not the geometry importer on Import Photo or Import Text. Enable only when your file contains experimental or unsupported shape codes.",
+        "typecode_allow_unknown": "Allow Unknown Shape Codes",
+        "typecode_allow_unknown_hint": "Standard import allows any shape in the FH6 shape catalog (vinyl tabs and Forza fonts). Pixel art from this app uses squares only — leave this off for pixel art. Enable when your JSON has type codes not listed in the catalog (experimental or research).",
         "typecode_export_done": "Exported {count} layer(s) to {path}",
         "typecode_export_failed": "Export failed: {error}",
         "typecode_import_mode": "Using handmade/universal importer for {name}",
@@ -821,7 +871,7 @@ TEXT = {
         "stopping_generation": "Stopping current generation...",
         "generation_stopped": "Generation stopped.",
         "generator_recycled_layers": "Generator recycled fully covered layers after {max_layer}/{total}; continuing. This is normal and is not a full restart.",
-        "existing_checkpoints_found": "Found saved progress for {image}: {count} file(s). Added the best one to Import → Photo.",
+        "existing_checkpoints_found": "Found saved progress for {image}: {count} file(s). Added the best one to Import → .JSON.",
         "checkpoint_available_after_failure": "Saved checkpoint is available despite the failed/stopped run: {path}",
         "imported_presets": "Imported {count} preset file(s).",
         "saved_preset": "Saved preset: {path}",
@@ -1064,6 +1114,33 @@ Notes
         "text_shape_mode_hint": "矩形/方块用矩形图层；椭圆/圆/三角/混合建议用球形模板。",
         "text_template_hint": "FH6 模板：{hint}",
         "text_cell_hint": "追踪文字遮罩时的像素栅格步长。1 = 最清晰、图层最多；数值越大越块状、图层越少。",
+        "text_preset": "质量预设",
+        "text_preset_custom": "自定义（手动）",
+        "text_preset_efficient_cjk": "高效 CJK（较少图层）",
+        "text_preset_sharp_cjk": "锐利 CJK（混合形状）",
+        "text_preset_soft_cjk": "柔和 CJK（椭圆）",
+        "text_preset_forza_latin": "游戏内 Forza 字体（拉丁）",
+        "text_use_forza_font": "使用游戏内 Forza 字体（仅拉丁）",
+        "text_forza_font": "Forza 字体",
+        "text_forza_font_hint": "与 FH6 贴膜文字字体一致（每字符 1 层）。开启时忽略上方电脑字体。",
+        "text_forza_font_universal_only": "游戏内 Forza 字体仅在「通用（拉丁）」标签页可用。",
+        "text_fit_layer_budget": "适应图层上限",
+        "text_max_drawable_layers": "最大图层",
+        "text_layer_estimate_idle": "输入文字后将显示图层估算。",
+        "text_layer_estimate_working": "正在估算图层…",
+        "text_layer_estimate_ok": "约 {layers} 个贴膜图层（模板约 {template} 层）。{cell_note}{mode_note}",
+        "text_layer_estimate_cell": " 栅格大小 {cell}。",
+        "text_layer_estimate_forza_mode": " 游戏内 Forza 字体模式。",
+        "text_layer_estimate_forza_latin_only": "Forza 字体模式：仅支持拉丁字母、数字和基本符号。",
+        "text_layer_estimate_forza_missing": "Forza 字体模式：当前字体不支持 {count} 个字符。",
+        "text_layer_estimate_error": "无法估算图层：{error}",
+        "text_log_forza_latin_only": "游戏内 Forza 字体仅支持拉丁文（与 FH6 输入文字相同）。其他文字请关闭 Forza 字体模式。",
+        "text_log_forza_universal_only": "游戏内 Forza 字体仅在「通用（拉丁）」标签页可用。",
+        "text_log_cell_size_adjusted": "已将栅格大小提高到 {cell} 以适应图层上限。",
+        "text_preset_smooth_cjk_extra": "平滑 CJK（额外形状）",
+        "text_extra_shapes": "启用额外形状（更平滑曲线）",
+        "text_extra_shapes_hint": "四分之一圆、圆角方形等 FH6 原语。",
+        "text_layer_estimate_extra_shapes": " 额外形状模式。",
         "text_color": "颜色",
         "text_color_hint": "可编辑 Hex 或 RGB；透明度 0–255（255 = 不透明）。Forza H/S/B 与 Bang 转换器一致。",
         "text_color_invalid": "颜色须为有效 Hex 或 0–255 数值。",
@@ -1075,6 +1152,7 @@ Notes
         "text_coverage_suggest_kr": "检测到韩文 — 请选择 [KR] 字体，例如 {font}。",
         "text_coverage_suggest_font": "可尝试 {font}。",
         "text_apply_recommended_font": "使用推荐字体",
+        "text_char_library_show": "显示字库",
         "text_char_library": "简体字库（GB2312）",
         "text_char_library_latin": "拉丁扩展与符号",
         "text_char_library_hiragana": "平假名",
@@ -1101,6 +1179,7 @@ Notes
         "text_failed": "文字贴膜生成失败",
         "text_log_scanning_fonts": "正在扫描各文字体系标签页的已安装字体…",
         "text_log_font_scan_failed": "字体扫描失败：{error}",
+        "text_log_char_library_failed": "字库加载失败：{error}",
         "text_log_fonts_loaded": "已加载字体 — 拉丁/通用：{latin}，日文：{japanese}，颜文字：{kaomoji}，韩文：{korean}，中文：{chinese}。",
         "text_log_no_fonts": "未找到字体。请在各标签页使用「浏览」选择 .ttf/.ttc/.otf 文件。",
         "text_log_enter_text": "请输入要生成的文字。",
@@ -1201,16 +1280,16 @@ Notes
         "safety_pick_other_language": "其他语言…",
         "first_run_title": "欢迎使用 Forza Painter FH6",
         "first_run_continue": "知道了",
-        "import_photo_tab": "导入照片",
-        "import_photo_tab_hint": "导入由照片生成的设计。选择历史生成记录或添加设计文件，然后导入到未分组的 FH6 模板。",
+        "import_photo_tab": "导入 .JSON",
+        "import_photo_tab_hint": "导入由图片生成的几何 JSON。选择历史生成记录或添加设计文件，然后导入到未分组的 FH6 模板。",
         "import_photo_runs": "历史生成",
         "import_photo_refresh_runs": "刷新列表",
         "import_photo_run_files": "所选生成中的设计",
         "import_photo_use_best": "自动选择最佳版本（图层最多）",
         "import_photo_pick_best": "选择最佳版本",
         "import_photo_import": "导入到 FH6",
-        "import_text_tab": "导入文字",
-        "import_text_tab_hint": "导入「创建 → 文字」标签页生成的文字贴膜设计。添加文件或从文字标签页继续，然后导入到未分组的 FH6 模板。",
+        "import_text_tab": "导入文字贴膜",
+        "import_text_tab_hint": "导入「创建 → 文字贴膜」标签页生成的设计。添加文件或从文字贴膜标签页继续，然后导入到未分组的 FH6 模板。",
         "import_text_designs": "文字设计",
         "import_text_import": "导入到 FH6",
         "import_text_open_folder": "打开文字文件夹",
@@ -1219,7 +1298,7 @@ Notes
         "import_pixel_choose_json": "添加设计文件",
         "import_pixel_import": "导入到 FH6",
         "import_pixel_status_none": "选择像素艺术设计以查看支持的形状。",
-        "import_pixel_status_counts": "形状：共 {total} · 支持 {supported} · 不支持 {unsupported}",
+        "import_pixel_status_counts": "形状：共 {total} · 目录内 {known} · 未知 {unknown} · 将导入 {importable}",
         "export_game_tab": "从游戏保存",
         "export_game_tab_hint": "将 FH6 中当前打开的贴膜组保存为设计文件。使用与导入相同的游戏连接和模板图层数。",
         "export_game_json": "保存当前 FH6 组",
@@ -1228,7 +1307,7 @@ Notes
         "handmade_import": "将手工 JSON 导入 FH6",
         "handmade_export": "导出当前 FH6 组为 JSON",
         "handmade_status_none": "选择手工 JSON 后可查看支持的形状数量。",
-        "handmade_status_counts": "形状：总计 {total} · 支持 {supported} · 不支持 {unsupported}",
+        "handmade_status_counts": "形状：总计 {total} · 目录内 {known} · 未知 {unknown} · 将导入 {importable}",
         "preview_tab": "图像预览",
         "preview_tab_hint": "生成前对比滤镜与预计图像复杂度。左侧选图，右侧选滤镜。复杂度越高通常意味着更多形状。",
         "preview_choose_image": "选择图片",
@@ -1431,11 +1510,18 @@ Notes
         "generate_run_summary_estimate_unknown": "预计复杂度（当前选中）：请打开图像预览对比滤镜并查看估计值。",
         "generate_step_run_hint": "点击一次后等待。进度会显示在日志里，生成的 JSON 会自动加入导入页面。",
         "scroll_hint": "第 1–3 步在上方滚动；生成按钮固定在下方。",
+        "workspace_signature": "写入工作区 SIGNATURE 文件",
+        "workspace_signature_tooltip": (
+            "启用后，会在每个设计工作区文件夹（manifest.json 旁）保存 SIGNATURE.txt，"
+            "包含作者、仓库链接和应用版本，可用记事本或默认文本编辑器打开；"
+            "便于支持人员识别本工具生成的文件；不会修改 JSON 内容。"
+        ),
         "start_generate": "按当前配置生成",
         "stop_generate": "中断当前生成",
         "open_output": "打开输出目录",
         "preview": "预览",
         "preview_hint": "选择图片或 JSON 后会在这里预览。",
+        "preview_accuracy_note": "JSON 预览近似游戏内贴膜效果；半透明图层按顺序叠加。",
         "preview_unavailable": "当前环境无法显示预览。可安装可选预览依赖，也可以直接继续生成或导入。",
         "logs": "日志",
         "export_logs": "导出详细日志",
@@ -1471,8 +1557,8 @@ Notes
         "handmade_section_hint": "用于包含真实 FH6 形状类型码的 JSON（不仅是生成的矩形/椭圆）。导出会读取当前打开的贴膜组；导入仅写入可安全保存的图层字段。导入后请在 FH6 中保存并重新加载贴膜组。",
         "export_typecode_json": "导出当前组为 JSON",
         "typecode_trim_after_import": "导入后将贴膜组层数裁剪为实际导入层数",
-        "typecode_allow_unknown": "允许实验性形状码（高级）",
-        "typecode_allow_unknown_hint": "本应用生成的像素艺术仅为方块，通常请保持关闭。此标签页使用 FH6 类型码导入器（含导出或外部手工 JSON），与「导入照片/导入文字」的几何导入器不同。仅当文件含实验性或不受支持的形状码时再启用。",
+        "typecode_allow_unknown": "允许未知形状码",
+        "typecode_allow_unknown_hint": "标准导入允许形状目录中的任意 FH6 形状（贴膜页与 Forza 字体）。本应用像素艺术仅使用方块——像素艺术请保持关闭。仅当 JSON 含目录外类型码（实验或研究用）时再启用。",
         "typecode_export_done": "已导出 {count} 层到 {path}",
         "typecode_export_failed": "导出失败：{error}",
         "typecode_import_mode": "对手工/通用 JSON 使用导入器：{name}",
@@ -1529,7 +1615,7 @@ Notes
         "stopping_generation": "正在中断当前生成...",
         "generation_stopped": "生成已中断。",
         "generator_recycled_layers": "生成器在 {max_layer}/{total} 后回收了被完全遮挡的旧图层，正在继续。这是正常回收，不是重新开始。",
-        "existing_checkpoints_found": "发现 {image} 已有 checkpoint JSON：{count} 个，已把最合适的一个加入导入列表。",
+        "existing_checkpoints_found": "发现 {image} 已有 checkpoint JSON：{count} 个，已把最合适的一个加入「导入 .JSON」。",
         "checkpoint_available_after_failure": "虽然本次生成失败/中断，但已有 checkpoint 可用：{path}",
         "imported_presets": "已导入 {count} 个预设文件。",
         "saved_preset": "已保存预设：{path}",
@@ -1731,16 +1817,16 @@ Notes
         "first_run_title": "Forza Painter FH6에 오신 것을 환영합니다",
         "first_run_continue": "확인",
         "generate_tab": "JSON 생성",
-        "import_photo_tab": "사진 가져오기",
-        "import_photo_tab_hint": "사진에서 만든 디자인을 가져옵니다. 이전 생성 기록을 고르거나 디자인 파일을 추가한 뒤, 그룹 해제된 FH6 템플릿에 가져옵니다.",
+        "import_photo_tab": ".JSON 가져오기",
+        "import_photo_tab_hint": "이미지에서 생성한 geometry JSON을 가져옵니다. 이전 생성 기록을 고르거나 디자인 파일을 추가한 뒤, 그룹 해제된 FH6 템플릿에 가져옵니다.",
         "import_photo_runs": "이전 생성",
         "import_photo_refresh_runs": "목록 새로고침",
         "import_photo_run_files": "선택한 생성의 디자인",
         "import_photo_use_best": "최적 버전 자동 선택(레이어 최대)",
         "import_photo_pick_best": "최적 버전 선택",
         "import_photo_import": "FH6에 가져오기",
-        "import_text_tab": "텍스트 가져오기",
-        "import_text_tab_hint": "만들기 → 텍스트 탭에서 만든 텍스트 비닐 디자인을 가져옵니다. 파일을 추가하거나 텍스트 탭에서 계속한 뒤 FH6에 가져옵니다.",
+        "import_text_tab": "텍스트 비닐 가져오기",
+        "import_text_tab_hint": "만들기 → 텍스트 비닐 탭에서 만든 디자인을 가져옵니다. 파일을 추가하거나 텍스트 비닐 탭에서 계속한 뒤 FH6에 가져옵니다.",
         "import_text_designs": "텍스트 디자인",
         "import_text_import": "FH6에 가져오기",
         "import_text_open_folder": "텍스트 폴더 열기",
@@ -1749,7 +1835,7 @@ Notes
         "import_pixel_choose_json": "디자인 파일 추가",
         "import_pixel_import": "FH6에 가져오기",
         "import_pixel_status_none": "픽셀 아트 디자인을 선택하면 지원되는 도형을 확인할 수 있습니다.",
-        "import_pixel_status_counts": "도형: 전체 {total} · 지원 {supported} · 미지원 {unsupported}",
+        "import_pixel_status_counts": "도형: 전체 {total} · 목록 내 {known} · 미등록 {unknown} · 가져오기 {importable}",
         "export_game_tab": "게임에서 저장",
         "export_game_tab_hint": "FH6에서 열린 비닐 그룹을 디자인 파일로 저장합니다. 가져오기와 동일한 게임 연결 및 템플릿 레이어 수를 사용하세요.",
         "export_game_json": "열린 FH6 그룹 저장",
@@ -1758,7 +1844,7 @@ Notes
         "handmade_import": "수작업 JSON을 FH6로 가져오기",
         "handmade_export": "열린 FH6 그룹을 JSON으로 보내기",
         "handmade_status_none": "수작업 JSON을 선택하면 지원되는 도형 수를 확인할 수 있습니다.",
-        "handmade_status_counts": "도형: 전체 {total} · 지원 {supported} · 미지원 {unsupported}",
+        "handmade_status_counts": "도형: 전체 {total} · 목록 내 {known} · 미등록 {unknown} · 가져오기 {importable}",
         "preview_tab": "이미지 미리보기",
         "preview_tab_hint": "생성 전 필터와 예상 이미지 복잡도를 비교하세요. 왼쪽에서 이미지, 오른쪽에서 필터를 선택합니다. 복잡도가 높을수록 보통 도형이 더 많습니다.",
         "preview_choose_image": "이미지 선택",
@@ -1961,11 +2047,17 @@ Notes
         "generate_run_summary_estimate_unknown": "예상 복잡도(선택): 이미지 미리보기에서 필터를 비교해 추정값을 확인하세요.",
         "generate_step_run_hint": "한 번 클릭한 뒤 기다리세요. 진행 상황은 로그에 표시되고, 생성된 JSON은 가져오기 페이지에 자동으로 추가됩니다.",
         "scroll_hint": "1–3단계는 위에서 스크롤하고, 생성 버튼은 아래에 고정됩니다.",
+        "workspace_signature": "워크스페이스 SIGNATURE 파일 쓰기",
+        "workspace_signature_tooltip": (
+            "켜면 각 디자인 워크스페이스 폴더(manifest.json 옆)에 SIGNATURE.txt를 저장합니다. "
+            "메모장 등 기본 텍스트 편집기로 열 수 있으며, 작성자·저장소·버전이 포함됩니다. JSON 내용은 바뀌지 않습니다."
+        ),
         "start_generate": "현재 설정으로 생성",
         "stop_generate": "현재 생성 중지",
         "open_output": "출력 폴더 열기",
         "preview": "미리보기",
         "preview_hint": "이미지나 JSON을 선택하면 여기에 미리보기가 표시됩니다.",
+        "preview_accuracy_note": "JSON 미리보기는 게임 내 비닐 편집기에 근사합니다. 반투명 레이어는 순서대로 합성됩니다.",
         "preview_unavailable": "미리보기를 사용할 수 없습니다. 선택 미리보기 의존성을 설치하거나, 미리보기 없이 계속 진행하세요.",
         "logs": "로그",
         "export_logs": "자세한 로그 내보내기",
@@ -2000,8 +2092,8 @@ Notes
         "handmade_section_hint": "실제 FH6 도형 타입 코드가 있는 JSON용(생성된 사각형/타원만이 아님).보내기는 열린 비닐 그룹을 읽고, 가져오기는 저장 안전 필드만 씁니다. 가져온 뒤 FH6에서 저장 후 다시 불러오세요.",
         "export_typecode_json": "열린 그룹을 JSON으로 보내기",
         "typecode_trim_after_import": "가져온 뒤 비닐 그룹 레이어 수를 실제 가져온 수로 자르기",
-        "typecode_allow_unknown": "실험적 도형 코드 허용(고급)",
-        "typecode_allow_unknown_hint": "앱에서 만든 픽셀 아트는 사각형만 사용하므로 보통 끄두면 됩니다. 이 탭은 FH6 타입 코드 가져오기(내보낸/외부 수작업 JSON 포함)를 사용하며, 사진/텍스트 가져오기의 기하 가져오기와 다릅니다. 실험적이거나 지원되지 않는 도형 코드가 있는 JSON일 때만 켜세요.",
+        "typecode_allow_unknown": "미등록 도형 코드 허용",
+        "typecode_allow_unknown_hint": "표준 가져오기는 FH6 도형 목록(비닐 탭· Forza 폰트)의 모든 코드를 허용합니다. 앱 픽셀 아트는 사각형만 사용—픽셀 아트는 끄두세요. 목록에 없는 타입 코드(실험·연구용)가 있는 JSON일 때만 켜세요.",
         "typecode_export_done": "{count}개 레이어를 {path}에보냈습니다",
         "typecode_export_failed": "보내기 실패: {error}",
         "typecode_import_mode": "수작업/범용 가져오기 사용: {name}",
@@ -2058,7 +2150,7 @@ Notes
         "stopping_generation": "현재 생성을 중지하는 중...",
         "generation_stopped": "생성이 중지되었습니다.",
         "generator_recycled_layers": "생성기가 {max_layer}/{total} 이후 완전히 가려진 이전 레이어를 재활용했습니다. 정상 동작이며 처음부터 다시 시작한 것이 아닙니다.",
-        "existing_checkpoints_found": "{image}의 기존 checkpoint JSON {count}개를 찾았습니다. 가장 적합한 파일을 가져오기 목록에 추가했습니다.",
+        "existing_checkpoints_found": "{image}의 기존 checkpoint JSON {count}개를 찾았습니다. 가장 적합한 파일을 「.JSON 가져오기」 목록에 추가했습니다.",
         "checkpoint_available_after_failure": "이번 생성이 실패/중지되었지만 저장된 checkpoint를 사용할 수 있습니다: {path}",
         "imported_presets": "{count}개 프리셋 파일을 가져왔습니다.",
         "saved_preset": "프리셋을 저장했습니다: {path}",
@@ -2537,285 +2629,41 @@ def render_source_image(path, max_size=None):
 
 
 def render_geometry_json(path, max_size=None):
-    if is_typecode_geometry_json(path):
-        typecode_preview = _render_typecode_geometry_json_pillow(path, max_size)
-        if typecode_preview:
-            return typecode_preview
-    pillow_preview = render_geometry_json_pillow(path, max_size)
-    if pillow_preview:
-        return pillow_preview
-    loaded = load_cv2()
-    if not loaded:
-        return None
-    cv2, np = loaded
-    try:
-        data = load_normalized_geometry(path)
-        shapes = data["shapes"]
-        image_w, image_h = [int(v) for v in shapes[0]["data"][2:]]
-        bg_r, bg_g, bg_b, bg_a = [int(v) for v in shapes[0]["color"]]
-        scale = preview_scale(image_w, image_h, max_size)
-        preview_w = max(1, int(round(image_w * scale)))
-        preview_h = max(1, int(round(image_h * scale)))
-        preview = np.zeros((preview_h, preview_w, 3), np.uint8)
-        if bg_a > 0:
-            preview[:, :] = (bg_b, bg_g, bg_r)
-        else:
-            preview[:, :] = (38, 38, 38)
-            tile = max(8, int(round(32 * scale)))
-            for y in range(0, preview_h, tile):
-                for x in range(0, preview_w, tile):
-                    if ((x // tile) + (y // tile)) % 2 == 0:
-                        preview[y:y + tile, x:x + tile] = (58, 58, 58)
-        for shape in shapes[1:]:
-            color = [int(v) for v in shape.get("color", [])]
-            if len(color) == 4 and color[3] <= 0:
-                continue
-            r, g, b, _a = color
-            shape_type = int(shape.get("type", 0))
-            if shape_type == ROTATED_ELLIPSE:
-                x, y, w, h, rot_deg = shape["data"]
-                center = (int(round(float(x) * scale)), int(round(float(y) * scale)))
-                axes = (max(1, int(round(float(h) * scale))), max(1, int(round(float(w) * scale))))
-                preview = cv2.ellipse(preview, center, axes, -90 + float(rot_deg), 0.0, 360.0, (b, g, r), thickness=-1)
-            elif shape_type == RECTANGLE:
-                x, y, w, h = shape["data"]
-                x = float(x)
-                y = float(y)
-                w = float(w)
-                h = float(h)
-                x0 = int(round((x - w / 2) * scale))
-                y0 = int(round((y - h / 2) * scale))
-                x1 = int(round((x + w / 2) * scale))
-                y1 = int(round((y + h / 2) * scale))
-                preview = cv2.rectangle(preview, (x0, y0), (x1, y1), (b, g, r), thickness=-1)
-        return image_to_photo(preview, max_size)
-    except Exception:
-        return None
+    from preview.geometry_preview_cache import render_geometry_preview_png
+
+    return render_geometry_preview_png(path, max_size)
 
 
 def render_geometry_json_pillow(path, max_size=None):
-    if is_typecode_geometry_json(path):
-        return _render_typecode_geometry_json_pillow(path, max_size)
-    loaded = load_pillow()
-    if not loaded:
-        return None
-    Image, ImageDraw = loaded
+    from preview.geometry_render import build_geometry_preview_png
+
+    return build_geometry_preview_png(path, max_size)
+
+
+def _typecode_uses_scaled_trace_coordinates(path) -> bool:
     try:
-        data = load_normalized_geometry(path)
-        shapes = data["shapes"]
-        image_w, image_h = [int(v) for v in shapes[0]["data"][2:]]
-        bg_r, bg_g, bg_b, bg_a = [int(v) for v in shapes[0]["color"]]
-        scale = preview_scale(image_w, image_h, max_size)
-        preview_w = max(1, int(round(image_w * scale)))
-        preview_h = max(1, int(round(image_h * scale)))
-        if bg_a > 0:
-            preview = Image.new("RGB", (preview_w, preview_h), (bg_r, bg_g, bg_b))
-        else:
-            preview = Image.new("RGB", (preview_w, preview_h), (38, 38, 38))
-            draw_bg = ImageDraw.Draw(preview)
-            tile = max(8, int(round(32 * scale)))
-            for y in range(0, preview_h, tile):
-                for x in range(0, preview_w, tile):
-                    if ((x // tile) + (y // tile)) % 2 == 0:
-                        draw_bg.rectangle((x, y, min(preview_w, x + tile), min(preview_h, y + tile)), fill=(58, 58, 58))
-        draw = ImageDraw.Draw(preview)
-        for shape in shapes[1:]:
-            color = [int(v) for v in shape.get("color", [])]
-            if len(color) == 4 and color[3] <= 0:
-                continue
-            r, g, b, _a = color
-            shape_type = int(shape.get("type", 0))
-            if shape_type == RECTANGLE:
-                x, y, w, h = [float(v) for v in shape["data"]]
-                x0 = int(round((x - w / 2) * scale))
-                y0 = int(round((y - h / 2) * scale))
-                x1 = int(round((x + w / 2) * scale))
-                y1 = int(round((y + h / 2) * scale))
-                draw.rectangle((x0, y0, x1, y1), fill=(r, g, b))
-            elif shape_type == ROTATED_ELLIPSE:
-                x, y, w, h, rot_deg = [float(v) for v in shape["data"]]
-                draw_preview_ellipse_pillow(preview, x, y, w, h, rot_deg, (r, g, b), scale)
-        return pil_to_photo(preview)
-    except Exception:
-        return None
+        from preview.geometry_preview_cache import read_json_cached
 
-
-def draw_preview_ellipse_pillow(image, x, y, w, h, rot_deg, color, scale):
-    # Match the historical OpenCV preview path used before the one-file EXE:
-    # cv2.ellipse(..., axes=(h, w), angle=-90+rot).
-    width, height = image.size
-    cx = float(x) * scale
-    cy = float(y) * scale
-    rx = max(float(h) * scale, 1.0)
-    ry = max(float(w) * scale, 1.0)
-    theta = (-90.0 + float(rot_deg)) * (math.pi / 180.0)
-    cos_t = math.cos(theta)
-    sin_t = math.sin(theta)
-    inv_rx2 = 1.0 / (rx * rx)
-    inv_ry2 = 1.0 / (ry * ry)
-    extent_x = math.sqrt(rx * rx * cos_t * cos_t + ry * ry * sin_t * sin_t)
-    extent_y = math.sqrt(rx * rx * sin_t * sin_t + ry * ry * cos_t * cos_t)
-    x_min = max(0, int(math.floor(cx - extent_x - 1)))
-    x_max = min(width - 1, int(math.ceil(cx + extent_x + 1)))
-    y_min = max(0, int(math.floor(cy - extent_y - 1)))
-    y_max = min(height - 1, int(math.ceil(cy + extent_y + 1)))
-    if x_min > x_max or y_min > y_max:
-        return
-    pixels = image.load()
-    r, g, b = color
-    for yy in range(y_min, y_max + 1):
-        dy = (float(yy) + 0.5) - cy
-        for xx in range(x_min, x_max + 1):
-            dx = (float(xx) + 0.5) - cx
-            xr = dx * cos_t + dy * sin_t
-            yr = -dx * sin_t + dy * cos_t
-            if xr * xr * inv_rx2 + yr * yr * inv_ry2 <= 1.0:
-                pixels[xx, yy] = (r, g, b)
-
-
-def _rotated_rect_points(x, y, w, h, rot_deg, scale):
-    cx = float(x) * scale
-    cy = float(y) * scale
-    hw = max(1.0, float(w) * scale / 2.0)
-    hh = max(1.0, float(h) * scale / 2.0)
-    theta = float(rot_deg) * (math.pi / 180.0)
-    cos_t = math.cos(theta)
-    sin_t = math.sin(theta)
-    corners = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]
-    points = []
-    for dx, dy in corners:
-        px = cx + dx * cos_t - dy * sin_t
-        py = cy + dx * sin_t + dy * cos_t
-        points.append((int(round(px)), int(round(py))))
-    return points
-
-
-def _pixel_art_typecode_json(path) -> bool:
-    try:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        payload = read_json_cached(path)
+    except (OSError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
         return False
     if not isinstance(payload, dict):
         return False
-    fmt = str(payload.get("format", "")).lower()
-    if "pixel_art" in fmt and "typecode" in fmt:
-        return True
-    return str(payload.get("coordinate_model", "")).lower() == "endarz_pixel_grid_v1"
+    model = str(payload.get("coordinate_model", "")).lower()
+    return model in ("endarz_pixel_grid_v1", "forza_painter_text_trace_v1")
+
+
+def _pixel_art_typecode_json(path) -> bool:
+    return _typecode_uses_scaled_trace_coordinates(path)
 
 
 def _render_typecode_geometry_json_pillow(path, max_size=None):
-    loaded = load_pillow()
-    if not loaded:
+    from preview.fh6_raster_preview import render_typecode_geometry_preview
+
+    image = render_typecode_geometry_preview(path, max_size)
+    if image is None:
         return None
-    Image, ImageDraw = loaded
-    try:
-        shapes, skipped = load_typecode_shapes(path, allow_unknown_low_byte=True)
-        if not shapes:
-            return None
-        pixel_grid = _pixel_art_typecode_json(path)
-        xs = [float(item["x"]) for item in shapes]
-        ys = [float(item["y"]) for item in shapes]
-        if pixel_grid:
-            sxs = [float(item["sx"]) for item in shapes]
-            sys_ = [float(item["sy"]) for item in shapes]
-        else:
-            sxs = [max(1.0, float(item["sx"])) for item in shapes]
-            sys_ = [max(1.0, float(item["sy"])) for item in shapes]
-        min_x = min(x - sx / 2.0 for x, sx in zip(xs, sxs))
-        max_x = max(x + sx / 2.0 for x, sx in zip(xs, sxs))
-        min_y = min(y - sy / 2.0 for y, sy in zip(ys, sys_))
-        max_y = max(y + sy / 2.0 for y, sy in zip(ys, sys_))
-        pad = 18.0
-        width = max(1, int(round((max_x - min_x) + pad * 2.0)))
-        height = max(1, int(round((max_y - min_y) + pad * 2.0)))
-        max_w, max_h = preview_size_tuple(max_size)
-        scale = min(max_w / max(1.0, width), max_h / max(1.0, height), 1.0)
-        preview_w = max(1, int(round(width * scale)))
-        preview_h = max(1, int(round(height * scale)))
-        preview = Image.new("RGB", (preview_w, preview_h), (38, 38, 38))
-        draw_bg = ImageDraw.Draw(preview)
-        tile = max(8, int(round(24 * scale)))
-        for y in range(0, preview_h, tile):
-            for x in range(0, preview_w, tile):
-                if ((x // tile) + (y // tile)) % 2 == 0:
-                    draw_bg.rectangle((x, y, min(preview_w, x + tile), min(preview_h, y + tile)), fill=(58, 58, 58))
-        draw = ImageDraw.Draw(preview)
-        for item in shapes:
-            code = int(item.get("type_code", 0))
-            x = (float(item["x"]) - min_x + pad) * scale
-            y = (float(item["y"]) - min_y + pad) * scale
-            raw_sx = float(item["sx"])
-            raw_sy = float(item["sy"])
-            if pixel_grid:
-                sx = raw_sx * scale
-                sy = raw_sy * scale
-            else:
-                sx = max(1.0, raw_sx) * scale
-                sy = max(1.0, raw_sy) * scale
-            rot = float(item.get("rotation", 0.0))
-            color = tuple(int(v) for v in item.get("color", (255, 255, 255, 255))[:3])
-            if code in (1048678, 1048712):
-                draw_preview_ellipse_pillow(
-                    preview,
-                    x / max(scale, 1e-6),
-                    y / max(scale, 1e-6),
-                    raw_sx if pixel_grid else sx / max(scale, 1e-6),
-                    raw_sy if pixel_grid else sy / max(scale, 1e-6),
-                    rot,
-                    color,
-                    scale,
-                )
-            elif code == 1048677:
-                if pixel_grid and abs(rot) < 1e-6:
-                    draw.rectangle(
-                        (int(round(x - sx / 2.0)), int(round(y - sy / 2.0)), int(round(x + sx / 2.0)), int(round(y + sy / 2.0))),
-                        fill=color,
-                    )
-                else:
-                    side = min(sx, sy)
-                    points = _rotated_rect_points(
-                        x / max(scale, 1e-6),
-                        y / max(scale, 1e-6),
-                        side / max(scale, 1e-6),
-                        side / max(scale, 1e-6),
-                        rot,
-                        scale,
-                    )
-                    draw.polygon(points, fill=color)
-            elif code == 1048679:
-                pts = [(0.0, -sy / 2.0), (sx / 2.0, sy / 2.0), (-sx / 2.0, sy / 2.0)]
-                theta = rot * (math.pi / 180.0)
-                cos_t = math.cos(theta)
-                sin_t = math.sin(theta)
-                tri = []
-                for dx, dy in pts:
-                    px = x + dx * cos_t - dy * sin_t
-                    py = y + dx * sin_t + dy * cos_t
-                    tri.append((int(round(px)), int(round(py))))
-                draw.polygon(tri, fill=color)
-            elif code == 1048688:
-                # Circle border: draw filled then cut center with background.
-                bbox = (int(round(x - sx / 2.0)), int(round(y - sy / 2.0)), int(round(x + sx / 2.0)), int(round(y + sy / 2.0)))
-                draw.ellipse(bbox, fill=color)
-                inner_scale = 0.72
-                inner = (
-                    int(round(x - (sx * inner_scale) / 2.0)),
-                    int(round(y - (sy * inner_scale) / 2.0)),
-                    int(round(x + (sx * inner_scale) / 2.0)),
-                    int(round(y + (sy * inner_scale) / 2.0)),
-                )
-                draw.ellipse(inner, fill=(38, 38, 38))
-            else:
-                points = _rotated_rect_points(x / max(scale, 1e-6), y / max(scale, 1e-6), sx / max(scale, 1e-6), sy / max(scale, 1e-6), rot, scale)
-                draw.polygon(points, fill=color)
-        if skipped:
-            # Light badge in corner when some shapes are unsupported by importer.
-            badge = f"unsupported: {len(skipped)}"
-            draw.rectangle((6, 6, 6 + 8 * len(badge), 24), fill=(20, 20, 20))
-            draw.text((10, 9), badge, fill=(220, 120, 120))
-        return pil_to_photo(preview)
-    except Exception:
-        return None
+    return pil_to_photo(image, max_size)
 
 
 class App:
@@ -2895,11 +2743,12 @@ class App:
         self.table_address = StringVar()
         self.typecode_trim_after_import = StringVar(value="1")
         self.typecode_allow_unknown = StringVar(value="0")
-        self.use_best_safe_final = StringVar(value="1")
+        self.use_best_safe_final = StringVar(value="0")
         self.inspect_table_value = StringVar()
         self.text_vinyl = TextVinylWorkspace(self)
         self.pixel_art = PixelArtWorkspace(self)
         self._ui_prefs = load_ui_preferences()
+        self.workspace_signature_enabled = workspace_signature_string_var(self._ui_prefs)
         self.tools_workspace = ToolsWorkspace(self)
         self.file_management = FileManagementWorkspace(self)
         self.dev_tools_workspace = DevToolsWorkspace(self)
@@ -2916,6 +2765,8 @@ class App:
         self._layout_restore_jobs: list[str] = []
         self._generate_compare_jobs: dict[str, str] = {}
         self._generate_compare_revision = 0
+        self._geometry_preview_seq = 0
+        self._geometry_preview_tokens: dict[str, int] = {}
         self._eco_generation_settings = load_eco_generation_settings(ROOT)
         self.eco_gpu_cooldown = StringVar(
             value="1" if self._eco_generation_settings.cooldown_enabled else "0"
@@ -3450,7 +3301,6 @@ class App:
 
         self._init_workspace_tabs()
         self._build_log()
-        self.text_vinyl.refresh_char_pickers()
         self.text_vinyl.refresh_fonts()
         self._register_theme_hooks()
         self.themes.apply(self.theme_id.get())
@@ -4040,8 +3890,9 @@ class App:
         step3_actions = ttk.LabelFrame(action_footer, text=tr(self.lang, "generate_step_run"))
         self.translated.append((step3_actions, "generate_step_run", "text"))
         step3_actions.pack(fill=X)
+        pack_workspace_signature_toggle(self, step3_actions, tr=tr, lang=self.lang, pady=(8, 4))
         actions = Frame(step3_actions)
-        actions.pack(fill=X, padx=10, pady=(8, 10))
+        actions.pack(fill=X, padx=10, pady=(0, 10))
         self.generate_button = self._button(actions, "start_generate", self.start_generate, font=("Segoe UI", 12, "bold"), height=2)
         self.generate_button.pack(side=LEFT, fill=X, expand=True)
         self.stop_generate_button = self._button(actions, "stop_generate", self.stop_generate, height=2, state="disabled")
@@ -4456,19 +4307,77 @@ class App:
         label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
         label.image = image
 
+    def _geometry_preview_slot_for_label(self, label) -> str:
+        return f"label:{id(label)}"
+
+    def schedule_geometry_json_preview(self, slot: str, path, bounds, callback) -> None:
+        """Rasterize geometry JSON off the UI thread; invoke ``callback(png_bytes)`` on the main thread."""
+        if self.closed:
+            return
+        path = Path(path)
+        if not path.is_file():
+            self.root.after(0, lambda: callback(None))
+            return
+        from preview.geometry_preview_cache import (
+            get_cached_geometry_preview_png,
+            render_geometry_preview_png,
+        )
+
+        cached = get_cached_geometry_preview_png(path, bounds)
+        if cached is not None:
+            self.root.after(0, lambda data=cached: callback(data))
+            return
+
+        self._geometry_preview_seq += 1
+        token = self._geometry_preview_seq
+        self._geometry_preview_tokens[slot] = token
+
+        def worker() -> None:
+            try:
+                png = render_geometry_preview_png(path, bounds)
+            except Exception:
+                png = None
+            if self.shutdown_event.is_set():
+                return
+            self.queue.put(("geometry_preview", (slot, token, png, callback)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _deliver_geometry_preview(self, slot: str, token: int, png_bytes, callback) -> None:
+        if self.closed or self._geometry_preview_tokens.get(slot) != token:
+            return
+        self._geometry_preview_tokens.pop(slot, None)
+        callback(png_bytes)
+
+    def _apply_png_bytes_to_label(self, label, png_bytes, *, hint_key: str = "preview_unavailable") -> None:
+        if label is None:
+            return
+        if not png_bytes:
+            label.config(image="", text=tr(self.lang, hint_key), bg=COLOR_PREVIEW_BG, fg=COLOR_PREVIEW_FG)
+            label.image = None
+            return
+        image = PhotoImage(data=png_bytes)
+        label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+        label.image = image
+
     def _render_label_json_preview(self, label, path, hint_key, *, min_height: int = 0):
         if path is None or not Path(path).exists():
             label.config(image="", text=tr(self.lang, hint_key))
             label.image = None
             return
-        data = render_geometry_json(path, self._label_preview_bounds(label, min_height=min_height))
-        if not data:
-            label.config(image="", text=tr(self.lang, "preview_unavailable"))
-            label.image = None
-            return
-        image = PhotoImage(data=data)
-        label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
-        label.image = image
+        bounds = self._label_preview_bounds(label, min_height=min_height)
+        slot = self._geometry_preview_slot_for_label(label)
+
+        def on_ready(png_bytes) -> None:
+            if not self._widget_alive(label):
+                return
+            self._apply_png_bytes_to_label(
+                label,
+                png_bytes,
+                hint_key=hint_key if png_bytes else "preview_unavailable",
+            )
+
+        self.schedule_geometry_json_preview(slot, path, bounds, on_ready)
 
     def _schedule_generate_compare_refresh(self, which=None):
         if not hasattr(self, "generate_source_before_preview"):
@@ -4723,14 +4632,42 @@ class App:
             self.advanced_button = self._button(actions, "show_advanced", self.toggle_advanced)
             self.advanced_button.pack(side=LEFT, padx=(8, 0))
 
-    def _build_import_photo_tab(self):
-        paned = self._create_paned(
-            self.import_photo_tab, orient=HORIZONTAL, layout_key="import_horizontal", padx=10, pady=10
+    def _build_import_design_preview_column(self, parent) -> Label:
+        """Large centered design preview that expands with the middle pane."""
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(2, weight=1)
+        self._label(parent, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).grid(
+            row=0, column=0, sticky="ew", pady=(8, 0)
         )
-        left_outer = Frame(paned)
-        right = Frame(paned)
-        paned.add(left_outer, weight=3)
-        paned.add(right, weight=2)
+        preview_note = self._label(
+            parent, "preview_accuracy_note", anchor="w", justify=LEFT, theme_role="hint"
+        )
+        preview_note.grid(row=1, column=0, sticky="ew", pady=(0, 4))
+        self._bind_wraplength(preview_note, parent)
+        self.translated.append((preview_note, "preview_accuracy_note", "text"))
+        preview_label = Label(
+            parent,
+            text=tr(self.lang, "preview_hint"),
+            bg=COLOR_PREVIEW_BG,
+            fg=COLOR_PREVIEW_FG,
+        )
+        preview_label.grid(row=2, column=0, sticky="nsew", pady=6)
+        return preview_label
+
+    def _build_import_photo_tab(self):
+        outer = self._create_paned(
+            self.import_photo_tab, orient=HORIZONTAL, layout_key="import_photo_outer", padx=10, pady=10
+        )
+        left_outer = Frame(outer)
+        inner_host = Frame(outer)
+        outer.add(left_outer, weight=2)
+        outer.add(inner_host, weight=5)
+
+        inner = self._create_paned(inner_host, orient=HORIZONTAL, layout_key="import_photo_center")
+        center = Frame(inner)
+        right = Frame(inner)
+        inner.add(center, weight=4)
+        inner.add(right, weight=2)
 
         scroll_area, left = self._make_vertical_scroll(left_outer)
         scroll_area.pack(fill=BOTH, expand=True, padx=0, pady=10)
@@ -4783,6 +4720,11 @@ class App:
         self.translated.append((best_toggle, "import_photo_use_best", "text"))
         self._final_run_json_paths: list[Path] = []
 
+        center_body = Frame(center)
+        center_body.pack(fill=BOTH, expand=True, padx=6, pady=10)
+        self.photo_import_preview_label = self._build_import_design_preview_column(center_body)
+        self.photo_import_preview_label.bind("<Configure>", self._schedule_preview_refresh)
+
         right_body, right_footer = self._prepare_sticky_column(right, scrollable=False)
 
         self.advanced_frame = ttk.LabelFrame(right_body, text=tr(self.lang, "advanced_options"))
@@ -4793,31 +4735,25 @@ class App:
             row=2, column=0, columnspan=2, sticky="ew", pady=(8, 4)
         )
 
-        self._label(right_body, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X, pady=(8, 0))
-        self.photo_import_preview_label = Label(
-            right_body,
-            text=tr(self.lang, "preview_hint"),
-            bg=COLOR_PREVIEW_BG,
-            fg=COLOR_PREVIEW_FG,
-            width=56,
-            height=20,
-        )
-        self.photo_import_preview_label.pack(fill=BOTH, expand=True, pady=6)
-        self.photo_import_preview_label.bind("<Configure>", self._schedule_preview_refresh)
-
         self._build_geometry_import_actions(
             right_footer, import_key="import_photo_import", import_command=self.start_import_photo, show_advanced=True
         )
         self.refresh_generated_runs()
 
     def _build_import_text_tab(self):
-        paned = self._create_paned(
-            self.import_text_tab, orient=HORIZONTAL, layout_key="import_horizontal", padx=10, pady=10
+        outer = self._create_paned(
+            self.import_text_tab, orient=HORIZONTAL, layout_key="import_text_outer", padx=10, pady=10
         )
-        left_outer = Frame(paned)
-        right = Frame(paned)
-        paned.add(left_outer, weight=3)
-        paned.add(right, weight=2)
+        left_outer = Frame(outer)
+        inner_host = Frame(outer)
+        outer.add(left_outer, weight=2)
+        outer.add(inner_host, weight=5)
+
+        inner = self._create_paned(inner_host, orient=HORIZONTAL, layout_key="import_text_center")
+        center = Frame(inner)
+        right = Frame(inner)
+        inner.add(center, weight=4)
+        inner.add(right, weight=2)
 
         scroll_area, left = self._make_vertical_scroll(left_outer)
         scroll_area.pack(fill=BOTH, expand=True, padx=0, pady=10)
@@ -4849,22 +4785,15 @@ class App:
         files_hint.pack(fill=X, padx=10, pady=(0, 10))
         self._bind_wraplength(files_hint, files_box)
 
-        right_body, right_footer = self._prepare_sticky_column(right, scrollable=False)
-
-        self._label(right_body, "import_preview", anchor="w", font=("Segoe UI", 12, "bold")).pack(fill=X, pady=(8, 0))
-        self.text_import_preview_label = Label(
-            right_body,
-            text=tr(self.lang, "preview_hint"),
-            bg=COLOR_PREVIEW_BG,
-            fg=COLOR_PREVIEW_FG,
-            width=56,
-            height=20,
-        )
-        self.text_import_preview_label.pack(fill=BOTH, expand=True, pady=6)
+        center_body = Frame(center)
+        center_body.pack(fill=BOTH, expand=True, padx=6, pady=10)
+        self.text_import_preview_label = self._build_import_design_preview_column(center_body)
         self.text_import_preview_label.bind(
             "<Configure>", lambda _e: self._schedule_text_import_preview_refresh()
         )
         self._text_import_preview_job = None
+
+        right_body, right_footer = self._prepare_sticky_column(right, scrollable=False)
 
         self._build_geometry_import_actions(
             right_footer, import_key="import_text_import", import_command=self.start_import_text
@@ -5003,14 +4932,14 @@ class App:
     def refresh_generated_runs(self):
         if not hasattr(self, "generated_runs_list"):
             return
-        self._generated_run_paths = discover_generated_run_folders(ROOT)
+        self._generated_run_paths = discover_import_json_dirs(ROOT)
         self.generated_runs_list.delete(0, END)
         for path in self._generated_run_paths:
             try:
                 mtime = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
             except OSError:
                 mtime = "?"
-            self.generated_runs_list.insert(END, f"{path.name}  ({mtime})")
+            self.generated_runs_list.insert(END, f"{generated_run_folder_label(path)}  ({mtime})")
         if self._generated_run_paths:
             self.generated_runs_list.selection_set(0)
             self._on_generated_run_select()
@@ -5025,7 +4954,7 @@ class App:
             run_folder = self._generated_run_paths[selection[0]]
         except IndexError:
             return
-        self._final_run_json_paths = json_candidates_for_run_folder(run_folder)
+        self._final_run_json_paths = all_geometry_jsons_in_folder(run_folder)
         if not hasattr(self, "photo_json_list"):
             return
         self.photo_json_list.delete(0, END)
@@ -5035,15 +4964,19 @@ class App:
                 layers = geometry_shape_count(path)
             except OSError:
                 layers = "?"
-            label = f"{path.name}  ({layers} layers)"
+            label = f"{self._json_list_display(path)}  ({layers} layers)"
             self.photo_json_list.insert(END, label)
             self.photo_json_files.append(path)
         if self.use_best_safe_final.get() == "1":
             self.pick_best_safe_final_json(select_only=True)
-        elif self.photo_json_files:
-            self.photo_json_list.selection_set(len(self.photo_json_files) - 1)
-            self.show_geometry_import_preview(self.photo_json_files[-1], self.photo_import_preview_label)
-            self._update_import_layer_info(self.photo_json_files[-1])
+        else:
+            self.photo_json_list.selection_clear(0, END)
+            if hasattr(self, "photo_import_preview_label"):
+                self.photo_import_preview_label.config(
+                    image="", text=tr(self.lang, "preview_hint")
+                )
+                self.photo_import_preview_label.image = None
+            self._update_import_layer_info()
 
     def pick_best_safe_final_json(self, select_only: bool = False):
         selection = list(self.generated_runs_list.curselection()) if hasattr(self, "generated_runs_list") else []
@@ -5122,10 +5055,61 @@ class App:
             return
         pid = self.ensure_live_game_pid()
         threading.Thread(
-            target=self._import_geometry_worker,
+            target=self._import_text_worker,
             args=(pid, list(self.text_import_json_files)),
             daemon=True,
         ).start()
+
+    def _import_text_worker(self, pid, paths: list[Path]):
+        game = self.selected_game.get() or "fh6"
+        layer_count = self.layer_count.get().strip()
+        try:
+            locations = self._resolve_import_locations(pid, game, layer_count)
+        except ValueError as exc:
+            self.queue.put(("log", str(exc)))
+            self.queue.put(("status", tr(self.lang, "failed")))
+            return
+        except RuntimeError:
+            self.queue.put(("status", tr(self.lang, "failed")))
+            return
+        for path in paths:
+            path = Path(path)
+            if is_typecode_geometry_json(path):
+                if game == "fh6" and layer_count:
+                    self._check_json_layer_fit(path, layer_count)
+                self.queue.put(
+                    ("log", tr(self.lang, "typecode_import_mode").format(name=path.name))
+                )
+                code = self._import_typecode_json_file(path, locations, layer_count)
+                if code != 0:
+                    self.queue.put(("status", tr(self.lang, "failed")))
+                    return
+                continue
+            if game == "fh6" and layer_count:
+                self._check_json_layer_fit(path, layer_count)
+            cmd = [
+                *helper_command("main"),
+                "--game",
+                game,
+                "--no-preview",
+                "--pid",
+                str(locations["pid"]),
+            ]
+            count_address = locations.get("count_address")
+            table_address = locations.get("table_address")
+            import_env = locations.get("import_env", {})
+            if count_address:
+                cmd.extend(["--layer-count-address", f"0x{int(count_address):x}"])
+            if table_address:
+                cmd.extend(["--layer-table-address", f"0x{int(table_address):x}"])
+            if game == "fh6" and layer_count:
+                cmd.extend(["--layer-count-value", str(layer_count)])
+            cmd.append(str(path.resolve()))
+            code = self.run_subprocess(cmd, extra_env=import_env)
+            if code != 0:
+                self.queue.put(("status", tr(self.lang, "failed")))
+                return
+        self.queue.put(("status", tr(self.lang, "done")))
 
     def _import_geometry_worker(self, pid, paths: list[Path]):
         game = self.selected_game.get() or "fh6"
@@ -5321,19 +5305,28 @@ class App:
 
     def _set_pixel_import_preview(self, path: Path):
         self._pixel_import_preview_path = Path(path)
+        label = self.pixel_import_preview_label
         if not path or not Path(path).exists():
-            self.pixel_import_preview_label.config(image="", text=tr(self.lang, "preview_hint"))
-            self.pixel_import_preview_label.image = None
+            label.config(image="", text=tr(self.lang, "preview_hint"))
+            label.image = None
             return
-        data = render_geometry_json(path, self._preview_bounds(self.pixel_import_preview_label))
-        if not data:
-            self.pixel_import_preview_label.config(image="", text=tr(self.lang, "preview_unavailable"))
-            self.pixel_import_preview_label.image = None
-            return
-        image = PhotoImage(data=data)
-        self.pixel_import_preview_label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
-        self.pixel_import_preview_label.image = image
-        self._update_pixel_import_status(path)
+        slot = self._geometry_preview_slot_for_label(label)
+
+        def on_ready(png_bytes) -> None:
+            if not self._widget_alive(label):
+                return
+            if not png_bytes:
+                label.config(image="", text=tr(self.lang, "preview_unavailable"))
+                label.image = None
+            else:
+                image = PhotoImage(data=png_bytes)
+                label.config(image=image, text="", bg=COLOR_PREVIEW_BG)
+                label.image = image
+            self._update_pixel_import_status(path)
+
+        self.schedule_geometry_json_preview(
+            slot, path, self._preview_bounds(label), on_ready
+        )
 
     def _update_pixel_import_status(self, path: Path | None = None):
         if not hasattr(self, "pixel_status_label"):
@@ -5351,8 +5344,9 @@ class App:
         self.pixel_status_label.config(
             text=tr(self.lang, "import_pixel_status_counts").format(
                 total=summary.get("total", 0),
-                supported=summary.get("supported", 0),
-                unsupported=summary.get("unsupported", 0),
+                known=summary.get("known", 0),
+                unknown=summary.get("unknown", 0),
+                importable=summary.get("importable", summary.get("supported", 0)),
             )
         )
 
@@ -6179,6 +6173,8 @@ class App:
                 self._render_preview_filter_card(mode_id)
             self._schedule_preview_main_render()
         self._refresh_preview_preset_panel()
+        for tip in getattr(self, "_workspace_signature_tooltips", []):
+            tip.set_text(tr(self.lang, "workspace_signature_tooltip"))
         self.text_vinyl.on_language_changed()
         self.pixel_art.on_language_changed()
         if self.photo is None and hasattr(self, "photo_import_preview_label"):
@@ -6832,6 +6828,8 @@ class App:
 
     def _queue_generated_outputs(self, source_image, before, *, generator_input=None, preprocess_mode=None):
         generator_input = Path(generator_input or source_image)
+        invalidate_generated_jsons_cache(generator_input)
+        invalidate_generated_jsons_cache(source_image)
         after = generated_jsons(generator_input)
         new_outputs = best_geometry_jsons([path for path in after if path.resolve() not in before])
         if not new_outputs and after:
@@ -6866,6 +6864,32 @@ class App:
             return
         self.log.insert(END, f"[{timestamp}] {message}\n")
         self.log.see(END)
+        self._trim_visible_log()
+
+    def _trim_visible_log(self) -> None:
+        if not hasattr(self, "log"):
+            return
+        try:
+            line_count = int(float(self.log.index("end-1c")))
+        except (TclError, ValueError, TypeError):
+            return
+        if line_count > UI_LOG_LINE_LIMIT:
+            remove_lines = line_count - UI_LOG_LINE_LIMIT
+            self.log.delete("1.0", f"{remove_lines + 1}.0")
+        try:
+            content = self.log.get("1.0", "end-1c")
+        except TclError:
+            return
+        if len(content) <= UI_LOG_CHAR_LIMIT:
+            return
+        trimmed = content[-UI_LOG_CHAR_LIMIT:]
+        if "\n" in trimmed:
+            trimmed = trimmed.split("\n", 1)[1]
+        try:
+            self.log.delete("1.0", "end")
+            self.log.insert("1.0", f"... log trimmed ...\n{trimmed}")
+        except TclError:
+            pass
 
     def _record_detail(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -7396,8 +7420,6 @@ class App:
             selection = listbox.curselection()
             if selection:
                 json_path = files[selection[0]]
-            elif files:
-                json_path = files[-1]
         if not json_path:
             if files is self.photo_json_files or files is None:
                 self.layer_count_info.set(tr(self.lang, "layer_import_info"))
@@ -7449,8 +7471,14 @@ class App:
             self.current_preview_request = ("json", path)
         elif label is self.text_import_preview_label:
             self._text_import_preview_path = path
-        data = render_geometry_json(path, self._preview_bounds(label))
-        self._set_geometry_import_preview(label, data)
+        slot = self._geometry_preview_slot_for_label(label)
+
+        def on_ready(png_bytes) -> None:
+            if not self._widget_alive(label):
+                return
+            self._set_geometry_import_preview(label, png_bytes)
+
+        self.schedule_geometry_json_preview(slot, path, self._preview_bounds(label), on_ready)
 
     def show_json_preview(self, path):
         if hasattr(self, "photo_import_preview_label"):
@@ -7493,9 +7521,14 @@ class App:
         if not path.exists():
             return
         if kind == "json":
-            data = render_geometry_json(path, self._preview_bounds())
-        else:
-            data = render_source_image(path, self._preview_bounds())
+            def on_ready(png_bytes) -> None:
+                self.show_preview(png_bytes)
+
+            self.schedule_geometry_json_preview(
+                "current_preview", path, self._preview_bounds(), on_ready
+            )
+            return
+        data = render_source_image(path, self._preview_bounds())
         self.show_preview(data)
 
     def show_preview(self, data):
@@ -7526,21 +7559,41 @@ class App:
         self.current_preview_request = ("source", path)
         self._schedule_generate_compare_refresh()
 
-    def show_preview_file(self, path, remember=True):
+    def _show_generator_png_instead_of_json(self, remember: bool) -> bool:
+        """While GPU generation is running, prefer the live generator PNG over JSON rasterization."""
+        image_path = self._selected_generate_image()
+        if image_path is None:
+            return False
+        previews = generated_preview_files(image_path)
+        if not previews:
+            return False
+        uses_filter = self._selected_preprocess_mode() != PREPROCESS_NONE
+        label = self.generate_result_with_preview if uses_filter else self.generate_result_without_preview
+        self._render_label_image_preview(label, previews[0], "generate_no_checkpoint")
+        if remember:
+            self.current_preview_request = ("file", previews[0])
+        return True
+
+    def show_preview_file(self, path, remember=True, *, prefer_generator_png=False):
         path = Path(path)
         if remember:
             self.current_preview_request = ("file", path)
         if path.suffix.lower() == ".json":
-            data = render_geometry_json(path, self._preview_bounds())
-            if data:
-                if hasattr(self, "generate_result_without_preview"):
-                    uses_filter = self._selected_preprocess_mode() != PREPROCESS_NONE
-                    label = self.generate_result_with_preview if uses_filter else self.generate_result_without_preview
-                    self._render_label_json_preview(label, path, "generate_no_checkpoint")
-                    self._schedule_generate_compare_refresh("result_with" if uses_filter else "result_without")
-                else:
-                    self.show_preview(data)
+            if prefer_generator_png and hasattr(self, "generate_result_without_preview"):
+                if self._show_generator_png_instead_of_json(remember):
+                    return
+            if hasattr(self, "generate_result_without_preview"):
+                uses_filter = self._selected_preprocess_mode() != PREPROCESS_NONE
+                label = self.generate_result_with_preview if uses_filter else self.generate_result_without_preview
+                self._render_label_json_preview(label, path, "generate_no_checkpoint")
+                self._schedule_generate_compare_refresh("result_with" if uses_filter else "result_without")
                 return
+
+            def on_ready(png_bytes) -> None:
+                self.show_preview(png_bytes)
+
+            self.schedule_geometry_json_preview("main_preview", path, self._preview_bounds(), on_ready)
+            return
         if hasattr(self, "generate_result_without_preview"):
             label = self._active_generation_result_label()
             self._render_label_image_preview(label, path, "generate_no_checkpoint")
@@ -7812,6 +7865,7 @@ class App:
                     while proc.poll() is None:
                         if self.shutdown_event.is_set():
                             self._terminate_process(proc)
+                            canonicalize_generator_jsons_for_image(image_path, preprocess_mode)
                             outputs = self._queue_generated_outputs(
                                 image_path, before, generator_input=input_image, preprocess_mode=preprocess_mode
                             )
@@ -7837,6 +7891,7 @@ class App:
                                     self.queue.put(("preview_file", newest_preview))
                         if now >= next_json_scan:
                             next_json_scan = now + GENERATOR_JSON_SCAN_SECONDS
+                            canonicalize_generator_jsons_for_image(image_path, preprocess_mode)
                             newest = generated_jsons(input_image)
                             if newest and newest[0] != last_json:
                                 last_json = newest[0]
@@ -7852,6 +7907,7 @@ class App:
                             self.current_generator_proc = None
                 if proc.returncode != 0:
                     self._record_detail(f"GENERATOR EXIT: {proc.returncode}")
+                    canonicalize_generator_jsons_for_image(image_path, preprocess_mode)
                     outputs = self._queue_generated_outputs(
                         image_path, before, generator_input=input_image, preprocess_mode=preprocess_mode
                     )
@@ -7866,6 +7922,7 @@ class App:
                     self.queue.put(("status", tr(self.lang, "failed")))
                     return
                 self._record_detail("GENERATOR EXIT: 0")
+                canonicalize_generator_jsons_for_image(image_path, preprocess_mode)
                 new_outputs = self._queue_generated_outputs(
                     image_path, before, generator_input=input_image, preprocess_mode=preprocess_mode
                 )
@@ -8415,7 +8472,7 @@ class App:
             elif kind == "preview":
                 self.show_preview(payload)
             elif kind == "preview_json":
-                self.show_preview_file(payload)
+                self.show_preview_file(payload, prefer_generator_png=self.generation_running)
                 self._schedule_generate_compare_refresh()
             elif kind == "preview_file":
                 self.show_preview_file(payload)
@@ -8440,11 +8497,31 @@ class App:
                 self._update_compare_column_headers()
             elif kind == "text_json_done":
                 shape_mode = None
-                if len(payload) >= 3:
+                extra_shapes = False
+                if len(payload) >= 4:
+                    payload, output, shape_mode, extra_shapes = (
+                        payload[0],
+                        payload[1],
+                        payload[2],
+                        payload[3],
+                    )
+                elif len(payload) >= 3:
                     payload, output, shape_mode = payload[0], payload[1], payload[2]
                 else:
                     payload, output = payload[0], payload[1]
-                self.text_vinyl.finish_json(payload, output, shape_mode=shape_mode)
+                self.text_vinyl.finish_json(
+                    payload,
+                    output,
+                    shape_mode=shape_mode,
+                    extra_shapes=bool(extra_shapes),
+                )
+            elif kind == "text_layer_estimate":
+                self.text_vinyl.handle_layer_estimate(payload)
+            elif kind == "text_cell_size_applied":
+                self.text_vinyl.text_cell_size.set(str(payload))
+                self.text_vinyl.app.log_line(
+                    self.text_vinyl._tr("text_log_cell_size_adjusted").format(cell=payload)
+                )
             elif kind == "pixel_json_done":
                 if len(payload) >= 3:
                     output, layers_or_error, grid = payload[0], payload[1], payload[2]
@@ -8452,8 +8529,16 @@ class App:
                     output, layers_or_error = payload[0], payload[1]
                     grid = None
                 self.pixel_art.finish_json(output, layers_or_error, grid=grid)
+            elif kind == "text_coverage_ready":
+                self.text_vinyl.handle_coverage_ready(payload)
             elif kind == "text_fonts_ready":
-                self.text_vinyl.apply_fonts_by_script(payload)
+                if len(payload) >= 3:
+                    fonts_by_script, merge, log = payload[0], bool(payload[1]), bool(payload[2])
+                elif len(payload) >= 2:
+                    fonts_by_script, merge, log = payload[0], bool(payload[1]), True
+                else:
+                    fonts_by_script, merge, log = payload, True, True
+                self.text_vinyl.apply_fonts_by_script(fonts_by_script, merge=merge, log=log)
             elif kind == "update_failed":
                 self._handle_update_failed(payload)
             elif kind == "update_current":
@@ -8467,6 +8552,9 @@ class App:
                 self._apply_gpu_context(adapters, capabilities, devices)
             elif kind == "gpu_adapters":
                 self._apply_gpu_adapters(payload)
+            elif kind == "geometry_preview":
+                slot, token, png_bytes, callback = payload
+                self._deliver_geometry_preview(slot, token, png_bytes, callback)
         if not self.closed:
             self.root.after(100, self._poll_queue)
 

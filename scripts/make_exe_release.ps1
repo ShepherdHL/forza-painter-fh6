@@ -67,6 +67,10 @@ New-Item -ItemType Directory -Path $PackageDir | Out-Null
 Copy-Item -LiteralPath $builtExe -Destination $PackageDir
 Copy-Item -LiteralPath $builtExe -Destination $VersionedExePath
 Copy-Item -LiteralPath $srcProfile -Destination (Join-Path $PackageDir "_build_profile.json") -Force
+$shapeLibrary = Join-Path $Root "shape library"
+if (Test-Path $shapeLibrary) {
+    Copy-Item -LiteralPath $shapeLibrary -Destination (Join-Path $PackageDir "shape library") -Recurse -Force
+}
 
 if (Test-Path $ZipPath) {
     Remove-Item -LiteralPath $ZipPath -Force

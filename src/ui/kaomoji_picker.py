@@ -26,14 +26,18 @@ class KaomojiPicker:
         self.label_key = label_key
         self._framed = bool(framed)
         self._page = 0
+        self._loaded = False
         self._filtered: list[str] = []
         self.search_var = StringVar()
         if self._framed:
             self.frame = ttk.LabelFrame(parent, text=self._tr(label_key))
         else:
             self.frame = Frame(parent)
+        self._top_frame: Frame | None = None
+        self._search_entry: Entry | None = None
         self._status_label: Label | None = None
         self._grid_frame: Frame | None = None
+        self._nav_frame: Frame | None = None
         self._grid_buttons: list[Button] = []
         self._build()
 
@@ -42,52 +46,76 @@ class KaomojiPicker:
 
         return tr(self.app.lang, key)
 
-    def _color(self, name: str) -> str:
-        import app as app_module
+    def _themed_frame(self, parent, *, surface: str = "panel") -> Frame:
+        frame = Frame(parent)
+        frame._theme_surface = surface  # type: ignore[attr-defined]
+        return frame
 
-        return getattr(app_module, name)
+    def _apply_theme(self) -> None:
+        try:
+            self.app.themes.apply_widget(self.frame)
+            from ui.theme_states import refresh_ttk_widgets
+
+            refresh_ttk_widgets(self.frame, self.app.themes)
+        except Exception:
+            pass
 
     def _build(self) -> None:
         app = self.app
         if self._framed:
             app.translated.append((self.frame, self.label_key, "text"))
 
-        top = Frame(self.frame)
-        top.pack(fill=X, padx=10, pady=(8, 4))
-        app._label(top, "text_kaomoji_search").pack(side=LEFT)
-        search = Entry(top, textvariable=self.search_var, width=18)
-        search.pack(side=LEFT, padx=8)
-        search.bind("<KeyRelease>", lambda _e: self._on_search_changed())
+        self._top_frame = self._themed_frame(self.frame, surface="panel")
+        self._top_frame.pack(fill=X, padx=10, pady=(8, 4))
+        app._label(self._top_frame, "text_kaomoji_search").pack(side=LEFT)
+        self._search_entry = Entry(self._top_frame, textvariable=self.search_var, width=18)
+        self._search_entry.pack(side=LEFT, padx=8)
+        self._search_entry.bind("<KeyRelease>", lambda _e: self._on_search_changed())
 
-        self._status_label = app._label(top, "text_char_page_status", theme_role="muted")
+        self._status_label = app._label(self._top_frame, "text_char_page_status", theme_role="muted")
         self._status_label.pack(side=RIGHT)
 
-        self._grid_frame = Frame(self.frame)
+        self._grid_frame = self._themed_frame(self.frame, surface="panel_alt")
         self._grid_frame.pack(fill=BOTH, expand=True, padx=10, pady=(0, 4))
 
-        nav = Frame(self.frame)
-        nav.pack(fill=X, padx=10, pady=(0, 8))
-        app._button(nav, "text_char_page_prev", self._prev_page).pack(side=LEFT)
-        app._button(nav, "text_char_page_next", self._next_page).pack(side=LEFT, padx=8)
-        app._button(nav, "text_kaomoji_insert", self._insert_focused).pack(side=RIGHT)
+        self._nav_frame = self._themed_frame(self.frame, surface="panel")
+        self._nav_frame.pack(fill=X, padx=10, pady=(0, 8))
+        app._button(self._nav_frame, "text_char_page_prev", self._prev_page).pack(side=LEFT)
+        app._button(self._nav_frame, "text_char_page_next", self._next_page).pack(side=LEFT, padx=8)
+        app._button(self._nav_frame, "text_kaomoji_insert", self._insert_focused).pack(side=RIGHT)
 
         self.search_var.trace_add("write", lambda *_args: self._on_search_changed())
+        self._apply_theme()
+
+    def ensure_loaded(self) -> None:
+        if self._loaded:
+            return
+        self._loaded = True
+        self._apply_theme()
         self.refresh()
 
     def _on_search_changed(self) -> None:
+        if not self._loaded:
+            return
         self._page = 0
         self.refresh()
 
     def _prev_page(self) -> None:
+        if not self._loaded:
+            return
         if self._page > 0:
             self._page -= 1
             self.refresh()
 
     def _next_page(self) -> None:
+        if not self._loaded:
+            return
         self._page += 1
         self.refresh()
 
     def _insert_focused(self) -> None:
+        if not self._loaded:
+            return
         for button in self._grid_buttons:
             try:
                 if button.focus_get() == button:
@@ -101,6 +129,8 @@ class KaomojiPicker:
                 self.on_insert(page_items[0])
 
     def refresh(self) -> None:
+        if not self._loaded:
+            return
         query = self.search_var.get().strip()
         self._filtered = filter_kaomoji(query)
         page_items, self._page, total_pages = paginate_kaomoji(self._filtered, self._page)
@@ -124,6 +154,7 @@ class KaomojiPicker:
             button.destroy()
         self._grid_buttons.clear()
 
+        tokens = self.app.themes.tokens
         columns = GRID_COLUMNS
         for index, kaomoji in enumerate(items):
             row = index // columns
@@ -135,11 +166,11 @@ class KaomojiPicker:
                 relief="flat",
                 bd=1,
                 highlightthickness=1,
-                highlightbackground=self._color("COLOR_BORDER"),
-                bg=self._color("COLOR_PANEL_ALT"),
-                fg=self._color("COLOR_TEXT"),
-                activebackground=self._color("COLOR_BUTTON_ACTIVE"),
-                activeforeground=self._color("COLOR_BUTTON_ACTIVE_FG"),
+                highlightbackground=tokens.border,
+                bg=tokens.panel_alt,
+                fg=tokens.text,
+                activebackground=tokens.button_active,
+                activeforeground=tokens.button_active_fg,
                 command=lambda value=kaomoji: self.on_insert(value),
             )
             btn.grid(row=row, column=col, padx=1, pady=1, sticky="nsew")
@@ -158,4 +189,5 @@ class KaomojiPicker:
         self.refresh()
 
     def on_theme_changed(self) -> None:
+        self._apply_theme()
         self.refresh()

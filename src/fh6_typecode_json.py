@@ -14,8 +14,10 @@ GENERATED_SHAPE_TYPES = {int(RECTANGLE), int(ROTATED_ELLIPSE)}
 def is_typecode_geometry_json(path) -> bool:
     path = Path(path)
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        from preview.geometry_preview_cache import read_json_cached
+
+        payload = read_json_cached(path)
+    except (OSError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
         return False
     if not isinstance(payload, dict):
         return False
@@ -39,6 +41,26 @@ def is_typecode_geometry_json(path) -> bool:
     return False
 
 
+def _count_shape_types(raw_shapes: list) -> tuple[int, int, int]:
+    from fh6_shape_catalog import is_known_type_code
+
+    known = 0
+    unknown = 0
+    for shape in raw_shapes:
+        if not isinstance(shape, dict):
+            continue
+        try:
+            shape_type = int(shape.get("type", 0))
+        except (TypeError, ValueError):
+            unknown += 1
+            continue
+        if is_known_type_code(shape_type):
+            known += 1
+        else:
+            unknown += 1
+    return known, unknown, len(raw_shapes)
+
+
 def typecode_shape_count(path, *, allow_unknown_low_byte: bool = True) -> int:
     from fh6_import_typecode_json import load_shapes
 
@@ -49,16 +71,25 @@ def typecode_shape_count(path, *, allow_unknown_low_byte: bool = True) -> int:
 def typecode_shape_summary(path, *, allow_unknown_low_byte: bool = False) -> dict[str, int]:
     from fh6_import_typecode_json import load_shapes
 
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    from preview.geometry_preview_cache import read_json_cached
+
+    payload = read_json_cached(path)
     raw_shapes = payload.get("shapes")
-    total = len(raw_shapes) if isinstance(raw_shapes, list) else 0
+    if not isinstance(raw_shapes, list):
+        raw_shapes = []
+    known_in_file, unknown_in_file, total = _count_shape_types(raw_shapes)
     shapes, skipped = load_shapes(path, allow_unknown_low_byte=allow_unknown_low_byte)
-    supported = len(shapes)
-    unsupported = len(skipped)
+    importable = len(shapes)
+    skipped_count = len(skipped)
     return {
         "total": int(total),
-        "supported": int(supported),
-        "unsupported": int(unsupported),
+        "known": int(known_in_file),
+        "unknown": int(unknown_in_file),
+        "importable": int(importable),
+        "skipped": int(skipped_count),
+        # Back-compat for older UI format strings.
+        "supported": int(importable),
+        "unsupported": int(skipped_count),
     }
 
 

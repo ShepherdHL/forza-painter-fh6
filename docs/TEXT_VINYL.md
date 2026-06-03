@@ -1,8 +1,10 @@
 # Text vinyl (Mandarin / CJK)
 
+**Walkthrough with screenshots:** [TEXT_VINYL_GUIDE.md](TEXT_VINYL_GUIDE.md)
+
 Forza's in-game text tool cannot render most non-Latin scripts. This mode builds vinyl
-layers from traced glyph masks using **selectable primitives** (rectangles, squares,
-ellipses, circles, triangle-style diamonds, or mixed) so readable Mandarin, katakana,
+layers from traced glyph masks using **real FH6 vinyl shapes** (squares, circles,
+ellipses, triangles, or mixed) so readable Mandarin, katakana,
 hiragana, **Korean (Hangul)**, and other CJK scripts can be imported.
 
 **Korean:** Use the Hangul syllable picker or type/paste directly. Choose a font tagged
@@ -24,7 +26,22 @@ Use the script sub-tabs:
 | **Korean** | Hangul | [KR] fonts; **Hangul syllables** grid (paginated) |
 | **Chinese** | Simplified/traditional hanzi | [SC] / [TC] / [CJK] fonts; **GB2312 hanzi** grid |
 
-Each tab keeps its own text, font choice, and **Search fonts** filter. Below the text field, use the **character grid** (click a cell to insert; search and page through large sets). Scroll down for **Generation options** (size, shape mode, color). Any font on your PC can be used—**Browse font file** if it does not appear in the list.
+Each tab keeps its own text, font choice, and **Search fonts** filter. Below the text field, use the **character grid** (click a cell to insert; search and page through large sets). Scroll down for **Generation options** (preset, size, shape mode, color).
+
+**Quality presets** (Generation options):
+
+| Preset | Use for |
+|--------|---------|
+| **Custom** | Your manual trace cell size and shape mode |
+| **Efficient CJK** | Fewer layers (larger cell grid); optional **Fit to layer budget** |
+| **Sharp CJK** | Mixed squares/triangles, cell size 2 |
+| **Soft CJK** | Ellipse trace, cell size 3 |
+| **In-game Forza font (Latin)** | One FH6 glyph layer per character (Universal tab only); enable **Use in-game Forza fonts** |
+| **Smooth CJK (extra shapes)** | Quarter circle corners + rounded squares (`cell` 2); enable **Enable extra shapes** |
+
+**Enable extra shapes (smoother curves)** uses FH6 **Quarter Circle**, **Rounded Square**, **Circle**, **Ellipse**, and **Square** primitives at convex corners and along strokes. Best for Japanese/katakana; uses more shape types than basic trace modes. Incompatible with **Use in-game Forza fonts** (those are Latin-only).
+
+A **layer estimate** updates as you type (drawable layers + ~4 template boundary layers). Any PC font can be used for trace mode—**Browse font file** if it does not appear in the list.
 
 ### Typed text (cleanest workflow)
 
@@ -42,16 +59,16 @@ Default font priority favors Simplified Chinese faces (Microsoft YaHei, SimHei, 
 
 ### Trace shape modes
 
-| Mode | JSON primitive | Best for | FH6 template |
-|------|----------------|----------|--------------|
-| **rectangles** | Axis-aligned rectangles | Fewest layers, blocky but clear CJK | Ungrouped **rectangle** layers (or spheres) |
-| **squares** | Equal-width/height rectangles | Chunky pixel / retro look | Rectangle template |
-| **ellipses** | Rotated ellipses (type 16) | Softer strokes, more layers | Ungrouped **sphere** template |
-| **circles** | Round ellipses per region | Rounded katakana dots and curves | Sphere template |
-| **triangles** | Thin or diamond ellipses | Sharper angular strokes (approximation) | Sphere template |
-| **mixed** | Rectangles on long bars, diamonds elsewhere | Katakana with horizontal + corner strokes | Sphere template |
+| Mode | FH6 vinyl shape | Best for | Import |
+|------|-----------------|----------|--------|
+| **rectangles** | Square | Fewest layers, blocky but clear CJK | **Import → Import text** (type-code JSON) |
+| **squares** | Square | Chunky pixel / retro look | Import text |
+| **ellipses** | Ellipse | Softer strokes, more layers | Import text |
+| **circles** | Circle | Rounded katakana dots and curves | Import text |
+| **triangles** | Triangle | Sharper angular strokes | Import text |
+| **mixed** | Square on long bars, triangle elsewhere | Katakana with horizontal + corner strokes | Import text |
 
-FH6 import only supports **rectangles** and **rotated ellipses** in geometry JSON. True in-game triangle vinyl shapes are not wired up yet; **triangles** mode uses angled ellipses to suggest corners.
+Generated designs use **FH6 type-code JSON** (`fh6_text_typecode_v1`). Import them on **Import → Import Text Vinyl**, not Import .JSON. After import, **save and reload the vinyl group in FH6** so shapes display correctly. Legacy geometry JSON (types 1 / 16) from older builds is still imported via the geometry path if you open those files.
 
 ### Stylized text from an image (preserves custom lettering)
 

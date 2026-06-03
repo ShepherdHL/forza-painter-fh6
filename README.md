@@ -24,12 +24,12 @@
 </p>
 
 <p align="center">
-  <code>v1.6.X (Pre-Release)</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>One-file EXE</code>
+  <code>v1.6.X (Beta)</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>One-file EXE</code>
 </p>
 
 Convert PNG/JPG/BMP images into Forza Horizon 6 Vinyl Group layers. The app handles generation, preview, and import in one desktop window; normal users do not need Python, `.venv`, batch files, or manual memory addresses.
 
-> **Download the EXE:** get `forza-painter-fh6-v1.6.X.exe` from [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) and run it directly. This is a **pre-release experimental** build on the 1.6.X line from the ShepherdHL fork.
+> **Download the EXE:** get `forza-painter-fh6-v1.6.X.exe` from [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) and run it directly. This is a **beta** build on the 1.6.X line from the ShepherdHL fork.
 
 > **If the result looks blurry:** raise **Random samples** first. Values above **200000** usually make a major quality difference; higher values are clearer but take much longer to generate.
 

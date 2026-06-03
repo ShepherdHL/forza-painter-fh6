@@ -12,6 +12,7 @@ from tkinter import BOTH, END, HORIZONTAL, LEFT, RIGHT, X, Button, Checkbutton, 
 
 from app_paths import ROOT
 from asset_workspace import TEXT_VINYL_WORKSPACE_ROOT, text_vinyl_workspace, write_manifest, workspace_source_file
+from ui.workspace_signature_option import pack_workspace_signature_toggle
 from mandarin_chars import text_contains_hangul
 from text_char_libraries import (
     LIBRARY_HANGUL,
@@ -28,23 +29,36 @@ from text_fonts import (
     SCRIPT_KOREAN,
     SCRIPT_UNIVERSAL,
     TEXT_SCRIPT_IDS,
+    DiscoveredFont,
     FontRecommendation,
+    clear_font_discovery_cache,
     coverage_message_key,
-    discover_fonts_for_script,
+    default_fonts_for_script,
+    discover_fonts_for_script_cached,
     filter_font_labels,
     format_missing_chars,
     recommend_font_for_text,
     validate_text_coverage,
 )
+from pixel_art_geometry import FH6_BOUNDARY_LAYERS
+from text_forza_fonts import (
+    forza_font_label,
+    is_forza_latin_text,
+    list_forza_font_labels,
+    parse_forza_font_label,
+)
 from text_geometry import (
-    build_geometry_from_text,
-    build_geometry_from_text_image,
+    build_typecode_from_text_image,
+    build_typecode_from_text_with_options,
     estimate_layer_count,
+    estimate_typed_text_layers,
     normalize_text_shape_mode,
     normalize_trace_cell_size,
+    template_hint_for_shape_mode,
     TEXT_SHAPE_MODES,
-    write_geometry_json,
+    write_text_design_json,
 )
+from text_vinyl_presets import PRESET_ORDER, get_preset
 from ui.char_grid_picker import CharGridPicker
 from ui.color_values_editor import ColorValuesEditor
 from ui.kaomoji_picker import KaomojiPicker
@@ -67,7 +81,10 @@ class TextVinylWorkspace:
         self._reference_preview_job = None
         self._json_preview_job = None
         self._coverage_job = None
+        self._coverage_generation = 0
         self._last_font_recommendation: FontRecommendation | None = None
+        self._layer_estimate_signature: tuple | None = None
+        self._fonts_deep_scanned: set[str] = set()
         self.text_panels = {
             script: {
                 "input": StringVar(),
@@ -83,6 +100,15 @@ class TextVinylWorkspace:
         self.text_font_size = StringVar(value="120")
         self.text_cell_size = StringVar(value="1")
         self.text_shape_mode = StringVar(value="rectangles")
+        self.text_preset_id = StringVar(value="custom")
+        self.text_use_forza_font = StringVar(value="0")
+        self.text_forza_font_choice = StringVar(value="Forza Font 1")
+        self.text_fit_layer_budget = StringVar(value="0")
+        self.text_extra_shapes = StringVar(value="0")
+        self.text_max_drawable_layers = StringVar(value="1800")
+        self.text_layer_estimate = StringVar(value="")
+        self._layer_estimate_job = None
+        self._applying_preset = False
         self.text_image_path = StringVar()
         self._color_editor: ColorValuesEditor | None = None
         self.text_invert = StringVar(value="0")
@@ -176,8 +202,15 @@ class TextVinylWorkspace:
         action_box = ttk.LabelFrame(action_host, text=self._tr("text_generate_action"))
         app.translated.append((action_box, "text_generate_action", "text"))
         action_box.pack(fill="x")
+        pack_workspace_signature_toggle(
+            app,
+            action_box,
+            tr=lambda _lang, key: self._tr(key),
+            lang=app.lang,
+            pady=(8, 4),
+        )
         action_row = Frame(action_box)
-        action_row.pack(fill="x", padx=10, pady=(8, 12))
+        action_row.pack(fill="x", padx=10, pady=(0, 12))
         app._button(action_row, "text_font_refresh", self.refresh_fonts).pack(side=LEFT)
         app._button(
             action_row,
@@ -242,8 +275,16 @@ class TextVinylWorkspace:
         app._label(opts, "text_font_size").grid(row=0, column=0, sticky="w", padx=(0, 8))
         Entry(opts, textvariable=self.text_font_size, width=8).grid(row=0, column=1, sticky="w")
         app._label(opts, "text_cell_size").grid(row=0, column=2, sticky="w", padx=(16, 8))
-        Entry(opts, textvariable=self.text_cell_size, width=8).grid(row=0, column=3, sticky="w")
-        app._label(opts, "text_shape_mode").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
+        self._trace_cell_entry = Entry(opts, textvariable=self.text_cell_size, width=8)
+        self._trace_cell_entry.grid(row=0, column=3, sticky="w")
+        app._label(opts, "text_preset").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
+        self._preset_label_to_id: dict[str, str] = {}
+        self._preset_id_to_label: dict[str, str] = {}
+        self.text_preset_combo = ttk.Combobox(opts, state="readonly", width=22)
+        self._refresh_preset_combo()
+        self.text_preset_combo.grid(row=1, column=1, columnspan=3, sticky="w", pady=(6, 0))
+        self.text_preset_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_preset_selected())
+        app._label(opts, "text_shape_mode").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
         self.text_shape_combo = ttk.Combobox(
             opts,
             textvariable=self.text_shape_mode,
@@ -253,16 +294,79 @@ class TextVinylWorkspace:
         self._shape_mode_label_to_mode: dict[str, str] = {}
         self._shape_mode_mode_to_label: dict[str, str] = {}
         self._refresh_shape_mode_combo()
-        self.text_shape_combo.grid(row=1, column=1, columnspan=3, sticky="w", pady=(6, 0))
-        self.text_shape_combo.bind("<<ComboboxSelected>>", lambda _event: self.update_shape_hint())
+        self.text_shape_combo.grid(row=2, column=1, columnspan=3, sticky="w", pady=(6, 0))
+        self.text_shape_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_generation_option_changed())
         self.text_template_hint_label = app._label(opts, "text_template_hint", anchor="w", theme_role="info")
-        self.text_template_hint_label.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        self.text_template_hint_label.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(6, 0))
         app._bind_wraplength(self.text_template_hint_label, opts, padding=8)
         text_shape_hint = app._label(opts, "text_shape_mode_hint", anchor="w", theme_role="muted")
-        text_shape_hint.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        text_shape_hint.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(4, 0))
         app._bind_wraplength(text_shape_hint, opts, padding=8)
+
+        forza_row = Frame(opts)
+        forza_row.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        self._forza_font_toggle = Checkbutton(
+            forza_row,
+            text=self._tr("text_use_forza_font"),
+            variable=self.text_use_forza_font,
+            onvalue="1",
+            offvalue="0",
+            command=self._on_forza_font_toggle,
+        )
+        self._forza_font_toggle.pack(side=LEFT)
+        app.translated.append((self._forza_font_toggle, "text_use_forza_font", "text"))
+        app._label(forza_row, "text_forza_font").pack(side=LEFT, padx=(12, 4))
+        self.text_forza_font_combo = ttk.Combobox(
+            forza_row,
+            textvariable=self.text_forza_font_choice,
+            values=list_forza_font_labels(),
+            state="readonly",
+            width=14,
+        )
+        self.text_forza_font_combo.pack(side=LEFT)
+        self.text_forza_font_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_generation_option_changed())
+
+        budget_row = Frame(opts)
+        budget_row.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        self._fit_budget_toggle = Checkbutton(
+            budget_row,
+            text=self._tr("text_fit_layer_budget"),
+            variable=self.text_fit_layer_budget,
+            onvalue="1",
+            offvalue="0",
+            command=self._on_generation_option_changed,
+        )
+        self._fit_budget_toggle.pack(side=LEFT)
+        app.translated.append((self._fit_budget_toggle, "text_fit_layer_budget", "text"))
+        app._label(budget_row, "text_max_drawable_layers").pack(side=LEFT, padx=(12, 4))
+        Entry(budget_row, textvariable=self.text_max_drawable_layers, width=8).pack(side=LEFT)
+
+        extra_row = Frame(opts)
+        extra_row.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        self._extra_shapes_toggle = Checkbutton(
+            extra_row,
+            text=self._tr("text_extra_shapes"),
+            variable=self.text_extra_shapes,
+            onvalue="1",
+            offvalue="0",
+            command=self._on_extra_shapes_toggle,
+        )
+        self._extra_shapes_toggle.pack(side=LEFT)
+        app.translated.append((self._extra_shapes_toggle, "text_extra_shapes", "text"))
+        self._extra_shapes_hint = app._label(
+            extra_row, "text_extra_shapes_hint", anchor="w", theme_role="muted"
+        )
+        self._extra_shapes_hint.pack(side=LEFT, padx=(12, 0))
+        app._bind_wraplength(self._extra_shapes_hint, opts, padding=8)
+
+        self.text_layer_estimate_label = app._label(
+            opts, "text_layer_estimate_idle", anchor="w", theme_role="info", justify="left"
+        )
+        self.text_layer_estimate_label.grid(row=8, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        app._bind_wraplength(self.text_layer_estimate_label, opts, padding=8)
+
         color_section = Frame(opts)
-        color_section.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        color_section.grid(row=9, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         app._label(color_section, "text_color", anchor="w").pack(anchor="w")
         self._color_editor = ColorValuesEditor(color_section, app, include_alpha=True, editable=True)
         self._color_editor.frame.pack(fill=X, pady=(4, 0))
@@ -270,10 +374,13 @@ class TextVinylWorkspace:
         text_color_hint.pack(fill=X, pady=(4, 0))
         app._bind_wraplength(text_color_hint, color_section, padding=8)
         app._label(opts, "text_cell_hint", anchor="w", theme_role="muted").grid(
-            row=5, column=0, columnspan=4, sticky="w", pady=(6, 0)
+            row=10, column=0, columnspan=4, sticky="w", pady=(6, 0)
         )
+        self._forza_mode_hint = app._label(opts, "text_forza_font_hint", anchor="w", theme_role="muted")
+        self._forza_mode_hint.grid(row=11, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        app._bind_wraplength(self._forza_mode_hint, opts, padding=8)
         coverage_row = Frame(opts)
-        coverage_row.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        coverage_row.grid(row=12, column=0, columnspan=4, sticky="ew", pady=(6, 0))
         coverage_row.columnconfigure(0, weight=1)
         self.text_coverage_label = app._label(
             coverage_row, "text_coverage_ok", anchor="w", theme_role="text", justify="left"
@@ -288,6 +395,256 @@ class TextVinylWorkspace:
         opts.columnconfigure(0, weight=1)
         app._bind_wraplength(self.text_coverage_label, opts, padding=8)
         self.update_shape_hint()
+        self._wire_generation_option_traces()
+        self._update_forza_controls_state()
+        self._schedule_layer_estimate()
+
+    def _wire_generation_option_traces(self) -> None:
+        for var in (
+            self.text_font_size,
+            self.text_cell_size,
+            self.text_shape_mode,
+            self.text_use_forza_font,
+            self.text_forza_font_choice,
+            self.text_fit_layer_budget,
+            self.text_extra_shapes,
+            self.text_max_drawable_layers,
+        ):
+            var.trace_add("write", lambda *_args: self._on_generation_option_changed())
+
+    def _refresh_preset_combo(self) -> None:
+        self._preset_label_to_id.clear()
+        self._preset_id_to_label.clear()
+        labels: list[str] = []
+        for preset_id in PRESET_ORDER:
+            label = self._tr(get_preset(preset_id).label_key)
+            labels.append(label)
+            self._preset_label_to_id[label] = preset_id
+            self._preset_id_to_label[preset_id] = label
+        if self.text_preset_combo is not None:
+            self.text_preset_combo.configure(values=labels)
+            current = self.text_preset_id.get()
+            self.text_preset_combo.set(self._preset_id_to_label.get(current, labels[0]))
+
+    def _on_preset_selected(self) -> None:
+        if self.text_preset_combo is None:
+            return
+        label = self.text_preset_combo.get().strip()
+        preset_id = self._preset_label_to_id.get(label, "custom")
+        self._applying_preset = True
+        try:
+            self.text_preset_id.set(preset_id)
+            preset = get_preset(preset_id)
+            if preset.id != "custom":
+                self.text_shape_mode.set(preset.shape_mode)
+                self._refresh_shape_mode_combo()
+                self.text_cell_size.set(str(preset.cell_size))
+                self.text_use_forza_font.set("1" if preset.use_forza_font else "0")
+                self.text_forza_font_choice.set(forza_font_label(preset.forza_font_index))
+                self.text_fit_layer_budget.set("1" if preset.fit_layer_budget else "0")
+                self.text_extra_shapes.set("1" if preset.extra_shapes else "0")
+            self._update_forza_controls_state()
+            self.update_shape_hint()
+            self._schedule_layer_estimate()
+        finally:
+            self._applying_preset = False
+
+    def _on_forza_font_toggle(self) -> None:
+        if self.text_use_forza_font.get() == "1":
+            self.text_extra_shapes.set("0")
+            self.text_preset_id.set("forza_latin" if self.text_preset_id.get() == "custom" else self.text_preset_id.get())
+            if self.text_preset_combo is not None:
+                label = self._preset_id_to_label.get("forza_latin")
+                if label:
+                    self.text_preset_combo.set(label)
+        self._update_forza_controls_state()
+        self._on_generation_option_changed()
+
+    def _on_extra_shapes_toggle(self) -> None:
+        if self.text_extra_shapes.get() == "1":
+            self.text_use_forza_font.set("0")
+            if self.text_preset_id.get() == "custom" and self.text_preset_combo is not None:
+                label = self._preset_id_to_label.get("smooth_cjk_extra")
+                if label:
+                    self.text_preset_combo.set(label)
+                    self.text_preset_id.set("smooth_cjk_extra")
+        self._update_forza_controls_state()
+        self._on_generation_option_changed()
+
+    def _on_generation_option_changed(self) -> None:
+        if not self._applying_preset and self.text_preset_id.get() != "custom":
+            if self.text_preset_combo is not None:
+                self.text_preset_combo.set(self._preset_id_to_label.get("custom", ""))
+            self.text_preset_id.set("custom")
+        self.update_shape_hint()
+        self._schedule_layer_estimate()
+
+    def _generation_options(self) -> dict:
+        try:
+            max_layers = int(self.text_max_drawable_layers.get().strip() or "1800")
+        except ValueError:
+            max_layers = 1800
+        max_layers = max(1, min(max_layers, 2996))
+        use_forza = self.text_use_forza_font.get() == "1" and self.active_script() == SCRIPT_UNIVERSAL
+        extra_shapes = self.text_extra_shapes.get() == "1" and not use_forza
+        try:
+            forza_index = parse_forza_font_label(self.text_forza_font_choice.get())
+        except ValueError:
+            forza_index = 1
+        return {
+            "font_size": int(self.text_font_size.get().strip() or "120"),
+            "cell_size": normalize_trace_cell_size(self.text_cell_size.get().strip() or "1"),
+            "shape_mode": self._resolve_shape_mode(),
+            "use_forza_font": use_forza,
+            "forza_font_index": forza_index,
+            "fit_layer_budget": self.text_fit_layer_budget.get() == "1" and not use_forza,
+            "max_drawable_layers": max_layers,
+            "extra_shapes": extra_shapes,
+        }
+
+    def _update_forza_controls_state(self) -> None:
+        universal = self.active_script() == SCRIPT_UNIVERSAL
+        use_forza = self.text_use_forza_font.get() == "1"
+        enabled_forza = universal and use_forza
+        if hasattr(self, "text_forza_font_combo"):
+            self.text_forza_font_combo.configure(state="readonly" if enabled_forza else "disabled")
+        if hasattr(self, "_forza_font_toggle"):
+            if not universal:
+                self._forza_font_toggle.configure(state="disabled")
+            else:
+                self._forza_font_toggle.configure(state="normal")
+        if hasattr(self, "_fit_budget_toggle"):
+            self._fit_budget_toggle.configure(state="disabled" if use_forza and universal else "normal")
+        if hasattr(self, "text_shape_combo"):
+            if enabled_forza:
+                self.text_shape_combo.configure(state="disabled")
+            elif self.text_extra_shapes.get() == "1":
+                self.text_shape_combo.configure(state="disabled")
+            else:
+                self.text_shape_combo.configure(state="readonly")
+        if hasattr(self, "_trace_cell_entry"):
+            self._trace_cell_entry.configure(state="disabled" if enabled_forza else "normal")
+        if hasattr(self, "_extra_shapes_toggle"):
+            self._extra_shapes_toggle.configure(state="disabled" if enabled_forza else "normal")
+        if hasattr(self, "_forza_mode_hint"):
+            key = (
+                "text_forza_font_hint"
+                if universal
+                else "text_forza_font_universal_only"
+            )
+            self._forza_mode_hint.configure(text=self._tr(key))
+
+    def _schedule_layer_estimate(self) -> None:
+        if self.closed:
+            return
+        if self._layer_estimate_job is not None:
+            try:
+                self.root.after_cancel(self._layer_estimate_job)
+            except Exception:
+                pass
+        self.text_layer_estimate.set(self._tr("text_layer_estimate_working"))
+        self._layer_estimate_job = self.root.after(550, self._start_layer_estimate)
+
+    def _start_layer_estimate(self) -> None:
+        self._layer_estimate_job = None
+        script = self.active_script()
+        panel = self._panel(script)
+        text = panel["input"].get().strip()
+        if not text:
+            self._layer_estimate_signature = None
+            self._set_layer_estimate_message("text_layer_estimate_idle")
+            return
+        try:
+            font_path = self._resolve_font_path(script)
+        except Exception:
+            font_path = None
+        options = self._generation_options()
+        signature = (
+            script,
+            text,
+            str(font_path) if font_path else "",
+            options["font_size"],
+            options["cell_size"],
+            options["shape_mode"],
+            options["use_forza_font"],
+            options["forza_font_index"],
+            options["fit_layer_budget"],
+            options["max_drawable_layers"],
+            options["extra_shapes"],
+        )
+        if signature == self._layer_estimate_signature:
+            return
+        self._layer_estimate_signature = signature
+        threading.Thread(
+            target=self._layer_estimate_worker,
+            args=(text, font_path, options),
+            daemon=True,
+        ).start()
+
+    def _layer_estimate_worker(self, text: str, font_path: Path | None, options: dict) -> None:
+        try:
+            if options["use_forza_font"]:
+                if not is_forza_latin_text(text):
+                    self.queue.put(("text_layer_estimate", ("unsupported", 0, 1)))
+                    return
+                from text_forza_fonts import unsupported_forza_chars
+
+                missing = unsupported_forza_chars(text, font_index=options["forza_font_index"])
+                if missing:
+                    self.queue.put(("text_layer_estimate", ("forza_missing", len(missing), 1)))
+                    return
+            layers, cell_used = estimate_typed_text_layers(
+                text,
+                font_path=font_path,
+                font_size=options["font_size"],
+                cell_size=options["cell_size"],
+                shape_mode=options["shape_mode"],
+                use_forza_font=options["use_forza_font"],
+                forza_font_index=options["forza_font_index"],
+                fit_layer_budget=options["fit_layer_budget"],
+                max_drawable_layers=options["max_drawable_layers"],
+                extra_shapes=options["extra_shapes"],
+            )
+            self.queue.put(("text_layer_estimate", ("ok", layers, cell_used)))
+        except Exception as exc:
+            self.queue.put(("text_layer_estimate", ("error", str(exc), 0)))
+
+    def _set_layer_estimate_message(self, key: str, **kwargs) -> None:
+        if self.text_layer_estimate_label is not None:
+            self.text_layer_estimate_label.configure(text=self._tr(key).format(**kwargs))
+
+    def handle_layer_estimate(self, result: tuple) -> None:
+        kind = result[0]
+        if kind == "ok":
+            layers = int(result[1])
+            cell_used = int(result[2])
+            template_need = layers + FH6_BOUNDARY_LAYERS
+            cell_note = ""
+            if self.text_fit_layer_budget.get() == "1" and self.text_use_forza_font.get() != "1":
+                cell_note = self._tr("text_layer_estimate_cell").format(cell=cell_used)
+            mode_note = ""
+            if self.text_use_forza_font.get() == "1":
+                mode_note = " " + self._tr("text_layer_estimate_forza_mode")
+            elif self.text_extra_shapes.get() == "1":
+                mode_note = " " + self._tr("text_layer_estimate_extra_shapes")
+            self._set_layer_estimate_message(
+                "text_layer_estimate_ok",
+                layers=layers,
+                template=template_need,
+                cell_note=cell_note,
+                mode_note=mode_note,
+            )
+            return
+        if kind == "unsupported":
+            self._set_layer_estimate_message("text_layer_estimate_forza_latin_only")
+            return
+        if kind == "forza_missing":
+            self._set_layer_estimate_message("text_layer_estimate_forza_missing", count=result[1])
+            return
+        if kind == "error":
+            self._set_layer_estimate_message("text_layer_estimate_error", error=result[1])
+            return
+        self._set_layer_estimate_message("text_layer_estimate_idle")
 
     def _build_script_panel(self, parent: Frame, script: str) -> None:
         app = self.app
@@ -324,27 +681,103 @@ class TextVinylWorkspace:
 
         widgets["char_pickers"] = []
         if script == SCRIPT_UNIVERSAL:
-            self._build_char_library(parent, script, LIBRARY_LATIN, "text_char_library_latin")
+            widgets["char_library_specs"] = [(LIBRARY_LATIN, "text_char_library_latin", True)]
+            self._build_char_library_shell(parent, script)
         elif script == SCRIPT_JAPANESE:
-            kana_notebook = ttk.Notebook(parent, style="Script.TNotebook")
-            kana_notebook.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
-            widgets["kana_notebook"] = kana_notebook
-            for library_id, label_key in _JAPANESE_CHAR_LIBRARIES:
-                tab_frame = Frame(kana_notebook)
-                kana_notebook.add(tab_frame, text=self._tr(label_key))
-                self._build_char_library(
-                    tab_frame,
-                    script,
-                    library_id,
-                    label_key,
-                    framed=False,
-                )
+            widgets["char_library_specs"] = list(_JAPANESE_CHAR_LIBRARIES)
+            self._build_char_library_shell(parent, script)
         elif script == SCRIPT_KOREAN:
-            self._build_char_library(parent, script, LIBRARY_HANGUL, "text_char_library_hangul")
+            widgets["char_library_specs"] = [(LIBRARY_HANGUL, "text_char_library_hangul", True)]
+            self._build_char_library_shell(parent, script)
         elif script == SCRIPT_CHINESE:
-            self._build_char_library(parent, script, LIBRARY_HANZI, "text_char_library_hanzi")
+            widgets["char_library_specs"] = [(LIBRARY_HANZI, "text_char_library_hanzi", True)]
+            self._build_char_library_shell(parent, script)
         elif script == SCRIPT_KAOMOJI:
-            self._build_kaomoji_picker(parent, script)
+            widgets["char_library_specs"] = ("kaomoji",)
+            self._build_char_library_shell(parent, script)
+
+    def _build_char_library_shell(self, parent: Frame, script: str) -> None:
+        app = self.app
+        widgets = self._panel(script)["widgets"]
+        host = Frame(parent)
+        host._theme_surface = "panel"  # type: ignore[attr-defined]
+        host.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+        widgets["char_library_host"] = host
+        widgets["char_library_deployed"] = False
+
+        bar = Frame(host)
+        bar._theme_surface = "panel"  # type: ignore[attr-defined]
+        bar.pack(fill=X, padx=10, pady=(0, 6))
+        show_btn = app._button(
+            bar,
+            "text_char_library_show",
+            lambda s=script: self._deploy_char_library(s),
+        )
+        show_btn.pack(side=LEFT)
+        widgets["char_library_show_bar"] = bar
+        widgets["char_library_show_btn"] = show_btn
+        body = Frame(host)
+        body._theme_surface = "panel"  # type: ignore[attr-defined]
+        widgets["char_library_body"] = body
+
+    def _deploy_char_library(self, script: str) -> None:
+        widgets = self._panel(script)["widgets"]
+        if widgets.get("char_library_deployed"):
+            return
+
+        body = widgets.get("char_library_body")
+        specs = widgets.get("char_library_specs")
+        if body is None:
+            return
+
+        try:
+            show_bar = widgets.get("char_library_show_bar")
+            if show_bar is not None:
+                show_bar.pack_forget()
+
+            body.pack(fill=BOTH, expand=True)
+            body._theme_surface = "panel"  # type: ignore[attr-defined]
+            widgets["char_library_deployed"] = True
+            try:
+                self.app.themes.apply_widget(body)
+            except Exception:
+                pass
+            if specs == ("kaomoji",):
+                picker = self._build_kaomoji_picker(body, script)
+                picker.ensure_loaded()
+                return
+
+            if script == SCRIPT_JAPANESE and specs:
+                kana_notebook = ttk.Notebook(body, style="Script.TNotebook")
+                kana_notebook.pack(fill=BOTH, expand=True)
+                widgets["kana_notebook"] = kana_notebook
+                for library_id, label_key in specs:
+                    tab_frame = Frame(kana_notebook)
+                    kana_notebook.add(tab_frame, text=self._tr(label_key))
+                    picker = self._build_char_library(
+                        tab_frame,
+                        script,
+                        library_id,
+                        label_key,
+                        framed=False,
+                    )
+                    picker.ensure_loaded()
+                return
+
+            if specs and len(specs) == 1:
+                library_id, label_key, framed = specs[0]
+                picker = self._build_char_library(body, script, library_id, label_key, framed=framed)
+                picker.ensure_loaded()
+                return
+
+            raise RuntimeError(f"No character library spec for script {script!r}")
+        except Exception as exc:
+            widgets["char_library_deployed"] = False
+            body.pack_forget()
+            show_bar = widgets.get("char_library_show_bar")
+            if show_bar is not None:
+                show_bar.pack(fill=X, padx=10, pady=(0, 6))
+            self.app.log_line(self._tr("text_log_char_library_failed").format(error=exc))
 
     def _build_char_library(
         self,
@@ -363,7 +796,7 @@ class TextVinylWorkspace:
             on_insert=lambda char, s=script: self._insert_char(s, char),
             framed=framed,
         )
-        picker.frame.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+        picker.frame.pack(fill=BOTH, expand=True)
         self._panel(script)["widgets"]["char_pickers"].append(picker)
         return picker
 
@@ -374,7 +807,7 @@ class TextVinylWorkspace:
             on_insert=lambda value, s=script: self._insert_kaomoji(s, value),
             label_key="text_char_library_kaomoji",
         )
-        picker.frame.pack(fill=BOTH, expand=True, padx=10, pady=(0, 10))
+        picker.frame.pack(fill=BOTH, expand=True)
         widgets = self._panel(script)["widgets"]
         widgets.setdefault("char_pickers", []).append(picker)
         return picker
@@ -397,7 +830,6 @@ class TextVinylWorkspace:
                 self.text_script_notebook.select(TEXT_SCRIPT_IDS.index(script))
             except ValueError:
                 pass
-        self._refresh_script_font_combo(script)
         self._schedule_coverage_check()
         threading.Thread(
             target=self._apply_kaomoji_font_recommendation_worker,
@@ -406,7 +838,8 @@ class TextVinylWorkspace:
         ).start()
 
     def _apply_kaomoji_font_recommendation_worker(self, kaomoji: str, script: str) -> None:
-        recommendation = recommend_font_for_text(kaomoji, script=script)
+        discovered = tuple(self._panel(script)["discovered"])
+        recommendation = recommend_font_for_text(kaomoji, script=script, fonts=discovered)
         if not recommendation.label:
             return
 
@@ -419,7 +852,10 @@ class TextVinylWorkspace:
 
     def refresh_char_pickers(self) -> None:
         for script in TEXT_SCRIPT_IDS:
-            for picker in self._panel(script)["widgets"].get("char_pickers", []):
+            widgets = self._panel(script)["widgets"]
+            if not widgets.get("char_library_deployed"):
+                continue
+            for picker in widgets.get("char_pickers", []):
                 picker.refresh()
 
     def on_tab_activated(self) -> None:
@@ -435,8 +871,9 @@ class TextVinylWorkspace:
                 if hint is not None:
                     hint.config(text=self._tr(self._script_hint_key(script)))
         self.update_shape_hint()
-        self.update_coverage_status()
+        self._schedule_coverage_check()
         self._refresh_shape_mode_combo()
+        self._refresh_preset_combo()
         for script in TEXT_SCRIPT_IDS:
             widgets = self._panel(script)["widgets"]
             kana_notebook = widgets.get("kana_notebook")
@@ -451,7 +888,7 @@ class TextVinylWorkspace:
 
     def update_theme_hints(self) -> None:
         self.update_shape_hint()
-        self.update_coverage_status()
+        self._schedule_coverage_check()
 
     def _preview_colors(self) -> tuple[str, str]:
         t = self.app.themes.tokens
@@ -509,27 +946,68 @@ class TextVinylWorkspace:
 
         return find_font_for_text(panel["input"].get(), script=script)
 
-    def refresh_fonts(self) -> None:
-        quick = {
-            script: tuple(
-                font for font in discover_fonts_for_script(script, deep_scan=False) if font.path.exists()
-            )
+    @staticmethod
+    def _merge_discovered_fonts(
+        existing: tuple[DiscoveredFont, ...],
+        incoming: tuple[DiscoveredFont, ...],
+    ) -> tuple[DiscoveredFont, ...]:
+        by_path: dict[Path, DiscoveredFont] = {font.path: font for font in existing}
+        for font in incoming:
+            if not font.path.exists():
+                continue
+            prev = by_path.get(font.path)
+            if prev is None or font.score > prev.score:
+                by_path[font.path] = font
+        return tuple(sorted(by_path.values(), key=lambda item: (-item.score, item.display_name.lower())))
+
+    def refresh_fonts(self, *, full_rescan: bool = True) -> None:
+        if full_rescan:
+            clear_font_discovery_cache()
+            self._fonts_deep_scanned.clear()
+        tier1 = {
+            script: tuple(font for font in default_fonts_for_script(script) if font.path.exists())
             for script in TEXT_SCRIPT_IDS
         }
-        if any(quick.values()):
-            self.apply_fonts_by_script(quick)
+        self.apply_fonts_by_script(tier1, merge=False)
         self.app.log_line(self._tr("text_log_scanning_fonts"))
-        threading.Thread(target=self._refresh_fonts_worker, daemon=True).start()
+        threading.Thread(
+            target=self._refresh_fonts_worker,
+            args=(self.active_script(), full_rescan),
+            daemon=True,
+        ).start()
 
-    def _refresh_fonts_worker(self) -> None:
+    def _refresh_fonts_worker(self, priority_script: str, full_rescan: bool) -> None:
         try:
-            fonts_by_script = {
-                script: tuple(
-                    font for font in discover_fonts_for_script(script, deep_scan=True) if font.path.exists()
+            order = [priority_script] + [s for s in TEXT_SCRIPT_IDS if s != priority_script]
+            fonts_by_script: dict[str, tuple[DiscoveredFont, ...]] = {}
+            for script in order:
+                fonts = tuple(
+                    font
+                    for font in discover_fonts_for_script_cached(script, deep_scan=True)
+                    if font.path.exists()
                 )
-                for script in TEXT_SCRIPT_IDS
-            }
-            self.queue.put(("text_fonts_ready", fonts_by_script))
+                fonts_by_script[script] = fonts
+                self._fonts_deep_scanned.add(script)
+                self.queue.put(("text_fonts_ready", ({script: fonts}, True, False)))
+            if fonts_by_script:
+                self.queue.put(("text_fonts_ready", (fonts_by_script, True, True)))
+        except Exception as exc:
+            self.queue.put(("log", self._tr("text_log_font_scan_failed").format(error=exc)))
+
+    def _schedule_font_scan_for_script(self, script: str) -> None:
+        if script in self._fonts_deep_scanned:
+            return
+        threading.Thread(target=self._scan_one_script_fonts_worker, args=(script,), daemon=True).start()
+
+    def _scan_one_script_fonts_worker(self, script: str) -> None:
+        try:
+            fonts = tuple(
+                font
+                for font in discover_fonts_for_script_cached(script, deep_scan=True)
+                if font.path.exists()
+            )
+            self._fonts_deep_scanned.add(script)
+            self.queue.put(("text_fonts_ready", ({script: fonts}, True, False)))
         except Exception as exc:
             self.queue.put(("log", self._tr("text_log_font_scan_failed").format(error=exc)))
 
@@ -546,48 +1024,37 @@ class TextVinylWorkspace:
         combo["values"] = labels
 
         current = panel["font_choice"].get().strip()
-        browse = panel["font_path"].get().strip()
-        if browse:
-            return
-        text = panel["input"].get().strip()
-        if text:
-            recommendation = recommend_font_for_text(text, script=script)
-            suggest = recommendation.label
-            if suggest and suggest in labels:
-                current_path = panel["font_by_label"].get(current)
-                keep_current = (
-                    current in labels
-                    and current_path is not None
-                    and validate_text_coverage(text, current_path)[0]
-                )
-                if not keep_current:
-                    panel["font_choice"].set(suggest)
-                    return
         if labels and current not in labels:
             panel["font_choice"].set(labels[0])
         elif not labels:
             panel["font_choice"].set("")
 
-    def apply_fonts_by_script(self, fonts_by_script: dict) -> None:
+    def apply_fonts_by_script(self, fonts_by_script: dict, *, merge: bool = True, log: bool = True) -> None:
         total = 0
         for script in TEXT_SCRIPT_IDS:
             fonts = tuple(fonts_by_script.get(script, ()))
+            if not fonts:
+                continue
             panel = self._panel(script)
-            panel["discovered"] = fonts
+            if merge and panel["discovered"]:
+                panel["discovered"] = self._merge_discovered_fonts(panel["discovered"], fonts)
+            else:
+                panel["discovered"] = fonts
             self._refresh_script_font_combo(script)
             total += len(fonts)
-        if total:
-            self.app.log_line(
-                self._tr("text_log_fonts_loaded").format(
-                    latin=len(fonts_by_script.get("universal", ())),
-                    japanese=len(fonts_by_script.get("japanese", ())),
-                    kaomoji=len(fonts_by_script.get("kaomoji", ())),
-                    korean=len(fonts_by_script.get("korean", ())),
-                    chinese=len(fonts_by_script.get("chinese", ())),
+        if log:
+            if total:
+                self.app.log_line(
+                    self._tr("text_log_fonts_loaded").format(
+                        latin=len(fonts_by_script.get("universal", ())),
+                        japanese=len(fonts_by_script.get("japanese", ())),
+                        kaomoji=len(fonts_by_script.get("kaomoji", ())),
+                        korean=len(fonts_by_script.get("korean", ())),
+                        chinese=len(fonts_by_script.get("chinese", ())),
+                    )
                 )
-            )
-        else:
-            self.app.log_line(self._tr("text_log_no_fonts"))
+            else:
+                self.app.log_line(self._tr("text_log_no_fonts"))
         self._schedule_coverage_check()
 
     def browse_font(self, script: str | None = None) -> None:
@@ -613,9 +1080,14 @@ class TextVinylWorkspace:
 
     def _on_input_changed(self, script: str) -> None:
         self._schedule_coverage_check()
+        if script == self.active_script():
+            self._schedule_layer_estimate()
 
     def _on_script_tab_changed(self) -> None:
+        self._schedule_font_scan_for_script(self.active_script())
         self._schedule_coverage_check()
+        self._update_forza_controls_state()
+        self._schedule_layer_estimate()
 
     def _resolve_shape_mode(self) -> str:
         value = self.text_shape_mode.get().strip()
@@ -638,8 +1110,18 @@ class TextVinylWorkspace:
         display = self._shape_mode_mode_to_label.get(current_mode, labels[0] if labels else "")
         self.text_shape_mode.set(display)
 
-    def _shape_template_hint(self, shape_mode: str | None = None) -> str:
-        mode = normalize_text_shape_mode(shape_mode or self._resolve_shape_mode())
+    def _shape_template_hint(
+        self,
+        shape_mode: str | None = None,
+        *,
+        extra_shapes: bool | None = None,
+    ) -> str:
+        options = self._generation_options()
+        mode = normalize_text_shape_mode(shape_mode or options["shape_mode"])
+        use_extra = options["extra_shapes"] if extra_shapes is None else extra_shapes
+        engine_hint = template_hint_for_shape_mode(mode, extra_shapes=use_extra)
+        if use_extra:
+            return engine_hint
         if mode in ("ellipses", "circles", "triangles", "mixed"):
             return self._tr("text_template_hint_sphere")
         return self._tr("text_template_hint_rectangle")
@@ -659,9 +1141,10 @@ class TextVinylWorkspace:
                 self.root.after_cancel(self._coverage_job)
             except Exception:
                 pass
-        self._coverage_job = self.root.after(250, self.update_coverage_status)
+        self._coverage_job = self.root.after(350, self._start_coverage_check)
 
-    def update_coverage_status(self) -> None:
+    def _start_coverage_check(self) -> None:
+        self._coverage_job = None
         if not self.app._widget_alive(self.text_coverage_label):
             return
         script = self.active_script()
@@ -678,47 +1161,122 @@ class TextVinylWorkspace:
         except Exception as exc:
             self.text_coverage_label.config(text=str(exc), fg=self.app.themes.fg("error"))
             return
-        ok, missing = validate_text_coverage(text, font_path)
-        recommendation = recommend_font_for_text(text, script=script)
+
+        self._coverage_generation += 1
+        generation = self._coverage_generation
+        discovered = tuple(panel["discovered"])
+        selected = panel["font_choice"].get().strip()
+        threading.Thread(
+            target=self._coverage_check_worker,
+            args=(generation, script, text, font_path, discovered, selected),
+            daemon=True,
+        ).start()
+
+    def _coverage_check_worker(
+        self,
+        generation: int,
+        script: str,
+        text: str,
+        font_path: Path,
+        discovered: tuple[DiscoveredFont, ...],
+        selected: str,
+    ) -> None:
+        try:
+            ok, missing = validate_text_coverage(text, font_path)
+            recommendation = None
+            if not ok or script == SCRIPT_KAOMOJI:
+                recommendation = recommend_font_for_text(text, script=script, fonts=discovered)
+            elif text_contains_hangul(text) and "[KR]" not in selected.upper():
+                recommendation = recommend_font_for_text(text, script=script, fonts=discovered)
+            self.queue.put(
+                (
+                    "text_coverage_ready",
+                    {
+                        "generation": generation,
+                        "script": script,
+                        "text": text,
+                        "ok": ok,
+                        "missing": missing,
+                        "recommendation": recommendation,
+                    },
+                )
+            )
+        except Exception as exc:
+            self.queue.put(
+                (
+                    "text_coverage_ready",
+                    {
+                        "generation": generation,
+                        "script": script,
+                        "text": text,
+                        "error": str(exc),
+                    },
+                )
+            )
+
+    def handle_coverage_ready(self, payload: dict) -> None:
+        if payload.get("generation") != self._coverage_generation:
+            return
+        if not self.app._widget_alive(self.text_coverage_label):
+            return
+        if payload.get("error"):
+            self.text_coverage_label.config(text=payload["error"], fg=self.app.themes.fg("error"))
+            return
+
+        script = payload.get("script") or self.active_script()
+        panel = self._panel(script)
+        if panel["input"].get().strip() != payload.get("text", ""):
+            return
+
+        text = payload["text"]
+        missing = payload.get("missing") or []
+        ok = bool(payload.get("ok"))
+        recommendation = payload.get("recommendation")
         self._last_font_recommendation = recommendation
         selected = panel["font_choice"].get().strip()
+
         if ok:
             message = self._tr(coverage_message_key(text, True, missing))
-            if recommendation.label and text_contains_hangul(text) and "[KR]" not in selected.upper():
+            if (
+                recommendation is not None
+                and recommendation.label
+                and text_contains_hangul(text)
+                and "[KR]" not in selected.upper()
+            ):
                 message = self._tr("text_coverage_suggest_kr").format(font=recommendation.label)
                 fg = self.app.themes.fg("hint")
             else:
                 fg = self.app.themes.fg("success")
             self.text_coverage_label.config(text=message, fg=fg)
-        else:
-            key = coverage_message_key(text, False, missing)
-            message = self._tr(key).format(
-                count=len(missing),
-                chars=format_missing_chars(missing),
-            )
-            if recommendation.label:
-                if recommendation.complete:
-                    message = (
-                        f"{message} {self._tr('text_coverage_suggest_font').format(font=recommendation.label)}"
-                    )
-                else:
-                    message = self._tr("text_coverage_partial").format(
-                        covered=recommendation.covered,
-                        total=recommendation.total,
-                        font=recommendation.label,
-                        chars=format_missing_chars(missing),
-                    )
-            if (
-                recommendation.font is not None
-                and recommendation.label
-                and recommendation.label != selected
-                and self._coverage_apply_button is not None
-            ):
-                self._coverage_apply_button.config(state="normal")
-            self.text_coverage_label.config(
-                text=message,
-                fg=self.app.themes.fg("error"),
-            )
+            return
+
+        key = coverage_message_key(text, False, missing)
+        message = self._tr(key).format(
+            count=len(missing),
+            chars=format_missing_chars(missing),
+        )
+        if recommendation is not None and recommendation.label:
+            if recommendation.complete:
+                message = f"{message} {self._tr('text_coverage_suggest_font').format(font=recommendation.label)}"
+            else:
+                message = self._tr("text_coverage_partial").format(
+                    covered=recommendation.covered,
+                    total=recommendation.total,
+                    font=recommendation.label,
+                    chars=format_missing_chars(missing),
+                )
+        if (
+            recommendation is not None
+            and recommendation.font is not None
+            and recommendation.label
+            and recommendation.label != selected
+            and self._coverage_apply_button is not None
+        ):
+            self._coverage_apply_button.config(state="normal")
+        self.text_coverage_label.config(text=message, fg=self.app.themes.fg("error"))
+
+    def update_coverage_status(self) -> None:
+        self._schedule_coverage_check()
 
     def apply_recommended_font(
         self,
@@ -765,11 +1323,21 @@ class TextVinylWorkspace:
         if not text:
             self.app.log_line(self._tr("text_log_enter_text"))
             return
-        try:
-            font_path = self._resolve_font_path(script)
-        except Exception as exc:
-            self.app.log_line(f"{self._tr('text_failed')}: {exc}")
-            return
+        options = self._generation_options()
+        if options["use_forza_font"]:
+            if script != SCRIPT_UNIVERSAL:
+                self.app.log_line(self._tr("text_log_forza_universal_only"))
+                return
+            if not is_forza_latin_text(text):
+                self.app.log_line(self._tr("text_log_forza_latin_only"))
+                return
+            font_path = None
+        else:
+            try:
+                font_path = self._resolve_font_path(script)
+            except Exception as exc:
+                self.app.log_line(f"{self._tr('text_failed')}: {exc}")
+                return
         self.app.status.set(self._tr("running"))
         threading.Thread(target=self._typed_worker, args=(text, font_path), daemon=True).start()
 
@@ -790,8 +1358,14 @@ class TextVinylWorkspace:
         paths = text_vinyl_workspace(mode, identity).ensure()
         return paths.json_finals / f"{safe[:48]}.json"
 
-    def finish_json(self, payload, output: Path, shape_mode: str | None = None) -> None:
-        write_geometry_json(output, payload)
+    def finish_json(
+        self,
+        payload,
+        output: Path,
+        shape_mode: str | None = None,
+        extra_shapes: bool = False,
+    ) -> None:
+        write_text_design_json(output, payload)
         layers = estimate_layer_count(payload)
         try:
             import json
@@ -822,8 +1396,10 @@ class TextVinylWorkspace:
         self.render_json_list()
         self.set_json_preview(output)
         self.app.log_line(self._tr("text_done").format(layers=layers, path=output))
-        if shape_mode:
-            self.app.log_line(self._shape_template_hint(shape_mode))
+        if shape_mode or extra_shapes:
+            self.app.log_line(
+                self._shape_template_hint(shape_mode, extra_shapes=extra_shapes)
+            )
         self.app.status.set(self._tr("done"))
 
     def render_json_list(self) -> None:
@@ -966,31 +1542,48 @@ class TextVinylWorkspace:
             label.config(image="", text=self._tr("preview_unavailable"), bg=preview_bg, fg=preview_fg)
             label.image = None
             return
-        _render_source_image, render_geometry_json = self._preview_renderers()
-        data = render_geometry_json(path, self.app._preview_bounds(label))
-        if not data:
-            label.config(image="", text=self._tr("preview_unavailable"), bg=preview_bg, fg=preview_fg)
-            label.image = None
-            return
-        image = PhotoImage(data=data)
-        label.config(image=image, text="", bg=preview_bg)
-        label.image = image
+        bounds = self.app._preview_bounds(label)
+        slot = self.app._geometry_preview_slot_for_label(label)
 
-    def _typed_worker(self, text: str, font_path: Path) -> None:
+        def on_ready(png_bytes) -> None:
+            if not self.app._widget_alive(label):
+                return
+            if not png_bytes:
+                label.config(
+                    image="",
+                    text=self._tr("preview_unavailable"),
+                    bg=preview_bg,
+                    fg=preview_fg,
+                )
+                label.image = None
+                return
+            image = PhotoImage(data=png_bytes)
+            label.config(image=image, text="", bg=preview_bg)
+            label.image = image
+
+        self.app.schedule_geometry_json_preview(slot, path, bounds, on_ready)
+
+    def _typed_worker(self, text: str, font_path: Path | None) -> None:
         try:
             self.queue.put(("log", self._tr("text_generating")))
             color = self._parse_color()
-            font_size = int(self.text_font_size.get().strip() or "120")
-            cell_size = normalize_trace_cell_size(self.text_cell_size.get().strip() or "1")
-            shape_mode = self._resolve_shape_mode()
-            payload = build_geometry_from_text(
+            options = self._generation_options()
+            payload, cell_used = build_typecode_from_text_with_options(
                 text,
                 color=color,
                 font_path=font_path,
-                font_size=font_size,
-                cell_size=cell_size,
-                shape_mode=shape_mode,
+                font_size=options["font_size"],
+                cell_size=options["cell_size"],
+                shape_mode=options["shape_mode"],
+                use_forza_font=options["use_forza_font"],
+                forza_font_index=options["forza_font_index"],
+                fit_layer_budget=options["fit_layer_budget"],
+                max_drawable_layers=options["max_drawable_layers"],
+                extra_shapes=options["extra_shapes"],
             )
+            if cell_used != options["cell_size"]:
+                self.queue.put(("text_cell_size_applied", str(cell_used)))
+            shape_mode = options["shape_mode"]
             paths = text_vinyl_workspace("typed", text).ensure()
             write_manifest(
                 paths,
@@ -1001,7 +1594,9 @@ class TextVinylWorkspace:
                 },
             )
             output = self.output_path(text[:12], mode="typed", identity=text)
-            self.queue.put(("text_json_done", (payload, output, shape_mode)))
+            self.queue.put(
+                ("text_json_done", (payload, output, shape_mode, options["extra_shapes"]))
+            )
         except Exception as exc:
             self.queue.put(("log", f"{self._tr('text_failed')}: {exc}"))
             self.queue.put(("status", self._tr("failed")))
@@ -1010,8 +1605,10 @@ class TextVinylWorkspace:
         try:
             self.queue.put(("log", self._tr("text_generating")))
             color = self._parse_color()
-            cell_size = normalize_trace_cell_size(self.text_cell_size.get().strip() or "1")
-            shape_mode = self._resolve_shape_mode()
+            options = self._generation_options()
+            cell_size = options["cell_size"]
+            shape_mode = options["shape_mode"]
+            extra_shapes = options["extra_shapes"]
             source = Path(path)
             identity = str(source.resolve()) if source.exists() else path
             paths = text_vinyl_workspace("trace", identity).ensure()
@@ -1028,12 +1625,13 @@ class TextVinylWorkspace:
                     trace_input = destination
                 except OSError:
                     trace_input = source
-            payload = build_geometry_from_text_image(
+            payload = build_typecode_from_text_image(
                 trace_input,
                 color=color,
                 cell_size=cell_size,
                 invert=self.text_invert.get() == "1",
                 shape_mode=shape_mode,
+                extra_shapes=extra_shapes,
             )
             output = self.output_path(source.stem, mode="trace", identity=identity)
             write_manifest(
@@ -1045,7 +1643,7 @@ class TextVinylWorkspace:
                     "shape_mode": shape_mode,
                 },
             )
-            self.queue.put(("text_json_done", (payload, output, shape_mode)))
+            self.queue.put(("text_json_done", (payload, output, shape_mode, extra_shapes)))
         except Exception as exc:
             self.queue.put(("log", f"{self._tr('text_failed')}: {exc}"))
             self.queue.put(("status", self._tr("failed")))

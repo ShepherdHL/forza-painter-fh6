@@ -17,6 +17,8 @@ from utils import clamp_byte
 class TestShapeTypeEnum:
     def test_members(self):
         assert ShapeType.RECTANGLE == 1
+        assert ShapeType.ROTATED_RECTANGLE == 2
+        assert ShapeType.ELLIPSE == 8
         assert ShapeType.ROTATED_ELLIPSE == 16
 
     def test_backward_compat_aliases(self):
@@ -38,6 +40,19 @@ class TestNormalizeGeometryPayload:
         ]
         with pytest.raises(ValueError, match="supported shapes"):
             normalize_geometry_payload(payload)
+
+    def test_background_rectangle_dimensions_are_integers(self):
+        payload = [
+            {"type": 1, "data": [0, 0, 326, 597], "color": [0, 0, 0, 0]},
+            {"type": 16, "data": [50, 50, 10, 10, 0], "color": [255, 0, 0, 255]},
+        ]
+        result = normalize_geometry_payload(payload)
+        width, height = result["shapes"][0]["data"][2:]
+        assert isinstance(width, int)
+        assert isinstance(height, int)
+
+        np = pytest.importorskip("numpy")
+        np.zeros((height, width, 3), np.uint8)
 
 
 class TestDrawableShapeCount:

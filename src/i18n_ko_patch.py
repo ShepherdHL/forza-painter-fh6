@@ -61,6 +61,7 @@ TEXT_KO_PATCH: dict[str, str] = {
     "text_coverage_suggest_kr": "한국어가 감지되었습니다 — {font} 같은 [KR] 글꼴을 선택하세요.",
     "text_coverage_suggest_font": "{font}을(를) 사용해 보세요.",
     "text_apply_recommended_font": "권장 글꼴 사용",
+    "text_char_library_show": "문자 라이브러리 표시",
     "text_char_library": "중국어 문자 라이브러리(GB2312 한자)",
     "text_char_library_latin": "라틴 확장 및 기호",
     "text_char_library_hiragana": "히라가나",

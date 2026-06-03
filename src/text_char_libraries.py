@@ -165,6 +165,17 @@ def library_total(library_id: str) -> int:
     return len(library_chars(library_id))
 
 
+def filtered_char_count(library_id: str, query: str) -> int:
+    """Character count after search filter (without materializing the full library)."""
+    library = library_chars(library_id)
+    query = (query or "").strip()
+    if not query:
+        return len(library)
+    if len(query) == 1 and query in library:
+        return 1
+    return sum(1 for char in library if query in char)
+
+
 def filter_library(library_id: str, query: str) -> List[str]:
     """Return matching characters in library order (list for pagination)."""
     library = library_chars(library_id)
@@ -174,6 +185,28 @@ def filter_library(library_id: str, query: str) -> List[str]:
     if len(query) == 1 and query in library:
         return [query]
     return [char for char in library if query in char]
+
+
+def paginate_library(
+    library_id: str,
+    page: int,
+    query: str = "",
+    *,
+    page_size: int = PAGE_SIZE,
+) -> Tuple[List[str], int, int]:
+    """Return one page of characters without building a full list when the search is empty."""
+    library = library_chars(library_id)
+    query = (query or "").strip()
+    if not query:
+        total = len(library)
+        if total <= 0:
+            return [], 0, 1
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = max(0, min(page, total_pages - 1))
+        start = page * page_size
+        return list(library[start : start + page_size]), page, total_pages
+    filtered = filter_library(library_id, query)
+    return paginate_chars(filtered, page, page_size=page_size)
 
 
 def paginate_chars(

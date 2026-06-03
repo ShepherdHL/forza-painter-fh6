@@ -61,7 +61,7 @@ def test_recommend_font_label_for_text_prefers_covering_font(monkeypatch) -> Non
 
     monkeypatch.setattr(
         "text_fonts.rank_fonts_for_text",
-        lambda text, script=None, limit=12: [(good, 7, 7), (bad, 3, 7)],
+        lambda text, script=None, limit=12, fonts=None: [(good, 7, 7), (bad, 3, 7)],
     )
 
     assert recommend_font_label_for_text("Phoenix", script=SCRIPT_UNIVERSAL) == good.label
@@ -102,7 +102,7 @@ def test_recommend_font_for_text_returns_best(monkeypatch) -> None:
 
     monkeypatch.setattr(
         "text_fonts.rank_fonts_for_text",
-        lambda text, script=None, limit=12: [(good, 7, 7)],
+        lambda text, script=None, limit=12, fonts=None: [(good, 7, 7)],
     )
     rec = recommend_font_for_text("(◕‿◕)", script=SCRIPT_KAOMOJI)
     assert rec.complete
@@ -113,3 +113,24 @@ def test_text_script_ids_include_kaomoji() -> None:
     from text_fonts import TEXT_SCRIPT_IDS
 
     assert SCRIPT_KAOMOJI in TEXT_SCRIPT_IDS
+
+
+def test_rank_fonts_uses_provided_font_list(monkeypatch) -> None:
+    from text_fonts import DiscoveredFont
+
+    good = DiscoveredFont("Good", Path("C:/Windows/Fonts/good.ttf"), ("latin",), 100)
+
+    monkeypatch.setattr("text_fonts.missing_glyphs", lambda _text, _path: [])
+
+    ranked = rank_fonts_for_text("Hi", script=SCRIPT_UNIVERSAL, fonts=(good,))
+    assert ranked[0][0] is good
+
+
+def test_default_fonts_for_script_returns_entries() -> None:
+    from text_fonts import default_fonts_for_script
+
+    fonts = default_fonts_for_script(SCRIPT_UNIVERSAL)
+    assert isinstance(fonts, tuple)
+    if Path(r"C:\Windows\Fonts\arial.ttf").exists():
+        assert fonts
+        assert all(font.path.suffix.lower() in {".ttf", ".ttc", ".otf"} for font in fonts)

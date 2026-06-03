@@ -10,12 +10,16 @@ from enum import Enum
 from pathlib import Path
 from typing import Iterable, Iterator, List, Sequence, Tuple
 
+from fh6_shape_catalog import get_square_type_code
 from security_policy import MAX_IMAGE_DIMENSION, MAX_TEMPLATE_LAYER_COUNT
 
 ColorRGBA = Tuple[int, int, int, int]
 RectColor = Tuple[int, int, int, int, ColorRGBA]  # x, y, w, h, color
 
-FH6_SQUARE_TYPECODE = 1048677
+try:
+    FH6_SQUARE_TYPECODE = get_square_type_code()
+except FileNotFoundError:
+    FH6_SQUARE_TYPECODE = 1048677
 POSITION_SCALE = 1.28
 SIZE_SCALE = 0.01
 DEFAULT_SCORE = 0.8008135

@@ -28,7 +28,14 @@ from native import (
 )
 from internal_classes import Color, Shape
 from game_profiles import iter_profiles, PROFILES
-from geometry_json import RECTANGLE, ROTATED_ELLIPSE, load_normalized_geometry
+from fh6_vinyl_scale import FH6_CIRCLE_BASE_SIZE, FH6_RECTANGLE_BASE_SIZE
+from geometry_json import (
+    ELLIPSE,
+    RECTANGLE,
+    ROTATED_ELLIPSE,
+    ROTATED_RECTANGLE,
+    load_normalized_geometry,
+)
 from security_policy import (
     memory_addresses_allowed,
     validate_geometry_path,
@@ -207,8 +214,12 @@ def draw_memory_shape(pid: int, profile, shape: Shape, index: int, cLiveryLayerT
         validate_user_address(current_layer_address, "layer object address")
         pos_data = struct.pack('f', shape.x) + struct.pack('f', -shape.y)
         write_process_memory(pid, current_layer_address + profile.layer_position_offset, pos_data)
-        scale_divisor = 63 if shape.type_id == 16 else 127
-        scale_data = struct.pack('f', shape.w / scale_divisor) + struct.pack('f', shape.h / scale_divisor)
+        scale_divisor = (
+            FH6_CIRCLE_BASE_SIZE if shape.type_id == ROTATED_ELLIPSE else FH6_RECTANGLE_BASE_SIZE
+        )
+        scale_data = struct.pack('f', float(shape.w) / scale_divisor) + struct.pack(
+            'f', float(shape.h) / scale_divisor
+        )
         write_process_memory(pid, current_layer_address + profile.layer_scale_offset, scale_data)
         rot_data = struct.pack('f', 360 - shape.rot_deg)
         write_process_memory(pid, current_layer_address + profile.layer_rotation_offset, rot_data)
@@ -249,7 +260,7 @@ def load_geometry(
         return
 
     # validation and build our collection of shapes
-    image_w, image_h = data['shapes'][0]['data'][2:]
+    image_w, image_h = [int(v) for v in data['shapes'][0]['data'][2:]]
     bg_r, bg_g, bg_b, bg_a = data['shapes'][0]['color']
     shapes = []
     
@@ -265,13 +276,22 @@ def load_geometry(
         if len(shape.get('color', [])) == 4 and int(shape['color'][3]) <= 0:
             continue
         if shape['type'] == ROTATED_ELLIPSE:
-            x,y,w,h,rot_deg = shape['data']
-            r,g,b,a = shape['color']
-            shapes.append(Shape(shape['type'], x, y, w, h, rot_deg, Color(r,g,b,a), False))
+            x, y, w, h, rot_deg = shape['data']
+            r, g, b, a = shape['color']
+            shapes.append(Shape(ROTATED_ELLIPSE, x, y, w, h, rot_deg, Color(r, g, b, a), False))
+        elif shape['type'] == ELLIPSE:
+            x, y, w, h = shape['data'][:4]
+            rot_deg = shape['data'][4] if len(shape['data']) >= 5 else 0
+            r, g, b, a = shape['color']
+            shapes.append(Shape(ROTATED_ELLIPSE, x, y, w, h, rot_deg, Color(r, g, b, a), False))
+        elif shape['type'] == ROTATED_RECTANGLE:
+            x, y, w, h, rot_deg = shape['data']
+            r, g, b, a = shape['color']
+            shapes.append(Shape(RECTANGLE, x, y, w, h, rot_deg, Color(r, g, b, a), False))
         elif shape['type'] == RECTANGLE:
-            x,y,w,h = shape['data']
-            r,g,b,a = shape['color']
-            shapes.append(Shape(shape['type'], x, y, w, h, 0, Color(r,g,b,a), False))
+            x, y, w, h = shape['data']
+            r, g, b, a = shape['color']
+            shapes.append(Shape(RECTANGLE, x, y, w, h, 0, Color(r, g, b, a), False))
         else:
             print("Skipping unsupported shape type {}.".format(shape.get("type")))
     if len(shapes) == 0:
@@ -279,7 +299,7 @@ def load_geometry(
         return
     
     loaded = load_cv2()
-    if loaded:
+    if preview_enabled and loaded:
         cv2, np = loaded
         preview = np.zeros((image_h, image_w, 3), np.uint8)
         if bg_a > 0:
@@ -290,7 +310,16 @@ def load_geometry(
             if shape.color.a <= 0:
                 continue
             if shape.type_id == ROTATED_ELLIPSE:
-                preview = cv2.ellipse(preview, (shape.x, shape.y), (shape.h,shape.w), -90 + shape.rot_deg, 0., 360, (shape.color.b, shape.color.g, shape.color.r), thickness=-1)
+                preview = cv2.ellipse(
+                    preview,
+                    (shape.x, shape.y),
+                    (max(1, int(shape.h)), max(1, int(shape.w))),
+                    -90 + shape.rot_deg,
+                    0.0,
+                    360,
+                    (shape.color.b, shape.color.g, shape.color.r),
+                    thickness=-1,
+                )
             elif shape.type_id == RECTANGLE:
                 x0 = int(round(shape.x - shape.w / 2))
                 y0 = int(round(shape.y - shape.h / 2))
@@ -298,10 +327,9 @@ def load_geometry(
                 y1 = int(round(shape.y + shape.h / 2))
                 preview = cv2.rectangle(preview, (x0, y0), (x1, y1), (shape.color.b, shape.color.g, shape.color.r), thickness=-1)
 
-        if preview_enabled:
-            print("Here is a preview of your image, click it then press any key to start!")
-            show_image(preview)
-            cv2.imwrite("preview.png", preview)
+        print("Here is a preview of your image, click it then press any key to start!")
+        show_image(preview)
+        cv2.imwrite("preview.png", preview)
     elif preview_enabled:
         print("Preview unavailable because OpenCV/Numpy could not be loaded. Import will continue.")
     

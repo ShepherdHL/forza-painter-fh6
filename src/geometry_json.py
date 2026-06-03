@@ -3,18 +3,31 @@ from __future__ import annotations
 from enum import IntEnum
 from pathlib import Path
 
-from security_policy import MAX_GEOMETRY_SHAPES, MAX_IMAGE_DIMENSION, load_geometry_json_text
+from security_policy import MAX_GEOMETRY_SHAPES, MAX_IMAGE_DIMENSION
 from utils import clamp_byte
 
 
 class ShapeType(IntEnum):
     RECTANGLE = 1
+    ROTATED_RECTANGLE = 2
+    ELLIPSE = 8
     ROTATED_ELLIPSE = 16
 
 
 # Backwards-compatible module-level aliases.
 RECTANGLE = ShapeType.RECTANGLE
+ROTATED_RECTANGLE = ShapeType.ROTATED_RECTANGLE
+ELLIPSE = ShapeType.ELLIPSE
 ROTATED_ELLIPSE = ShapeType.ROTATED_ELLIPSE
+
+_DRAWABLE_TYPES = frozenset(
+    {
+        ShapeType.RECTANGLE,
+        ShapeType.ROTATED_RECTANGLE,
+        ShapeType.ELLIPSE,
+        ShapeType.ROTATED_ELLIPSE,
+    }
+)
 
 
 TYPE_ALIASES = {
@@ -22,8 +35,14 @@ TYPE_ALIASES = {
     "rect": ShapeType.RECTANGLE,
     "rectangle": ShapeType.RECTANGLE,
     "box": ShapeType.RECTANGLE,
+    "2": ShapeType.ROTATED_RECTANGLE,
+    "rotatedrectangle": ShapeType.ROTATED_RECTANGLE,
+    "rotated_rectangle": ShapeType.ROTATED_RECTANGLE,
+    "rotatedrect": ShapeType.ROTATED_RECTANGLE,
+    "rotated rect": ShapeType.ROTATED_RECTANGLE,
+    "8": ShapeType.ELLIPSE,
+    "ellipse": ShapeType.ELLIPSE,
     "16": ShapeType.ROTATED_ELLIPSE,
-    "ellipse": ShapeType.ROTATED_ELLIPSE,
     "ellipsis": ShapeType.ROTATED_ELLIPSE,
     "rotatedellipse": ShapeType.ROTATED_ELLIPSE,
     "rotated_ellipse": ShapeType.ROTATED_ELLIPSE,
@@ -33,7 +52,9 @@ TYPE_ALIASES = {
 
 
 def load_geometry_payload(path):
-    return load_geometry_json_text(Path(path))
+    from preview.geometry_preview_cache import read_json_cached
+
+    return read_json_cached(Path(path))
 
 
 def normalize_geometry_payload(payload):
@@ -75,6 +96,14 @@ def load_normalized_geometry(path):
 
 
 def drawable_shape_count(path):
+    path = Path(path)
+    try:
+        from fh6_typecode_json import is_typecode_geometry_json, typecode_shape_count
+
+        if is_typecode_geometry_json(path):
+            return typecode_shape_count(path, allow_unknown_low_byte=True)
+    except Exception:
+        pass
     try:
         data = load_normalized_geometry(path)
     except Exception:
@@ -84,7 +113,7 @@ def drawable_shape_count(path):
         color = shape.get("color", [])
         if len(color) == 4 and int(color[3]) <= 0:
             continue
-        if int(shape.get("type", 0)) in (ShapeType.RECTANGLE, ShapeType.ROTATED_ELLIPSE):
+        if int(shape.get("type", 0)) in _DRAWABLE_TYPES:
             count += 1
     return count
 
@@ -111,7 +140,7 @@ def _normalize_shape(shape):
     if not isinstance(shape, dict):
         return None
     type_id = _normalize_type(_pick(shape, "type", "Type", "shapeType", "ShapeType", "primitive", "Primitive"))
-    if type_id not in (ShapeType.RECTANGLE, ShapeType.ROTATED_ELLIPSE):
+    if type_id not in _DRAWABLE_TYPES:
         return None
     data = _normalize_data(shape, type_id)
     color = _normalize_color(_pick(shape, "color", "Color", "colour", "Colour", "rgba", "RGBA"))
@@ -163,8 +192,10 @@ def _normalize_data(shape, type_id):
         return None
 
     if type_id == ShapeType.RECTANGLE:
-        return [round(x), round(y), max(0, round(w)), max(0, round(h))]
-    return [round(x), round(y), max(1, round(w)), max(1, round(h)), round(rot) % 360]
+        return [round(x), round(y), round(max(0.0, w)), round(max(0.0, h))]
+    if type_id == ShapeType.ELLIPSE:
+        return [round(x), round(y), max(1.0, w), max(1.0, h), 0.0]
+    return [round(x), round(y), max(1.0, w), max(1.0, h), round(rot) % 360]
 
 
 def _normalize_color(value):

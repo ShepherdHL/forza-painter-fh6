@@ -26,6 +26,9 @@ LEGACY_FILTER_PREVIEW_DIR = ROOT / "imgs" / "filter-previews"
 
 _SAFE_STEM_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
+WORKSPACE_SIGNATURE_NAME = "SIGNATURE.txt"
+_LEGACY_WORKSPACE_SIGNATURE_NAME = "SIGNATURE"
+
 
 def workspace_root(kind: WorkspaceKind) -> Path:
     if kind == "image":
@@ -92,6 +95,7 @@ class WorkspacePaths:
             self.logs,
         ):
             path.mkdir(parents=True, exist_ok=True)
+        write_workspace_signature(self)
         return self
 
 
@@ -146,6 +150,74 @@ def workspace_source_file(paths: WorkspacePaths, suffix: str = ".png") -> Path:
     return paths.source / f"{IMAGE_SOURCE_BASENAME}{ext.lower()}"
 
 
+def _path_points_into_workspace(path_str: str, paths: WorkspacePaths) -> bool:
+    if not path_str:
+        return False
+    try:
+        resolved = Path(path_str).resolve()
+        root = paths.root.resolve()
+        return resolved == root or root in resolved.parents
+    except OSError:
+        return False
+
+
+def _stem_is_internal_copy_name(stem: str) -> bool:
+    return safe_stem(stem).lower() == IMAGE_SOURCE_BASENAME
+
+
+def workspace_id_display_stem(paths: WorkspacePaths) -> str:
+    """Human stem from workspace folder id (e.g. kiara_bluefield_nobg__ca0663de -> kiara_bluefield_nobg)."""
+    workspace_id = paths.workspace_id
+    if "__" in workspace_id:
+        prefix = workspace_id.rsplit("__", 1)[0]
+    else:
+        prefix = workspace_id
+    prefix = safe_stem(prefix)
+    if prefix and not _stem_is_internal_copy_name(prefix):
+        return prefix
+    return ""
+
+
+def _import_stem_from_manifest(paths: WorkspacePaths, manifest: dict) -> str:
+    source_original = str(manifest.get("source_original", "")).strip()
+    if source_original and not _path_points_into_workspace(source_original, paths):
+        stem = safe_stem(Path(source_original).stem)
+        if not _stem_is_internal_copy_name(stem):
+            return stem
+
+    label = str(manifest.get("label", "")).strip()
+    if label and not _stem_is_internal_copy_name(Path(label).stem):
+        return safe_stem(Path(label).stem)
+
+    return workspace_id_display_stem(paths)
+
+
+def _display_filename_for_stem(stem: str, source: Path, paths: WorkspacePaths) -> str:
+    if source.suffix:
+        return f"{stem}{source.suffix.lower()}"
+    for candidate in sorted(paths.source.glob(f"{IMAGE_SOURCE_BASENAME}.*")):
+        if candidate.is_file():
+            return f"{stem}{candidate.suffix.lower()}"
+    return f"{stem}.png"
+
+
+def generated_run_folder_label(folder: str | Path) -> str:
+    """Label for Import past-generations list (workspace name, not bare 'json')."""
+    folder = Path(folder)
+    try:
+        resolved = folder.resolve()
+        ws_root = IMAGE_WORKSPACE_ROOT.resolve()
+        if ws_root in resolved.parents:
+            workspace_id = resolved.relative_to(ws_root).parts[0]
+            stem = workspace_id.rsplit("__", 1)[0] if "__" in workspace_id else workspace_id
+            stem = safe_stem(stem)
+            if stem and not _stem_is_internal_copy_name(stem):
+                return stem
+    except (OSError, ValueError):
+        pass
+    return folder.name
+
+
 def ensure_image_workspace_source(source: str | Path, *, copy_external: bool) -> Path:
     """Return the path used to read image bytes; optionally copy externals into workspace."""
     source = Path(source)
@@ -155,21 +227,31 @@ def ensure_image_workspace_source(source: str | Path, *, copy_external: bool) ->
     except OSError:
         original = str(source)
     manifest = read_manifest(paths)
-    if manifest is None:
-        write_manifest(
-            paths,
-            {
-                "label": source.name,
-                "source_original": original,
-            },
-        )
-    elif manifest.get("source_original") != original:
-        body = dict(manifest)
-        body["source_original"] = original
-        body["label"] = source.name
-        write_manifest(paths, body)
+    inside_workspace = is_path_in_workspace(source, paths)
 
-    if is_path_in_workspace(source, paths):
+    if manifest is None:
+        if not inside_workspace:
+            write_manifest(
+                paths,
+                {
+                    "label": source.name,
+                    "source_original": original,
+                },
+            )
+    elif not inside_workspace:
+        if manifest.get("source_original") != original or manifest.get("label") != source.name:
+            body = dict(manifest)
+            body["source_original"] = original
+            body["label"] = source.name
+            write_manifest(paths, body)
+    elif _path_points_into_workspace(str(manifest.get("source_original", "")), paths):
+        body = dict(manifest)
+        stem = workspace_id_display_stem(paths)
+        if stem:
+            body["label"] = _display_filename_for_stem(stem, source, paths)
+            write_manifest(paths, body)
+
+    if inside_workspace:
         for candidate in sorted(paths.source.glob(f"{IMAGE_SOURCE_BASENAME}.*")):
             if candidate.is_file():
                 return candidate
@@ -218,10 +300,68 @@ def normalize_filter_mode(mode: str) -> str:
     return str(mode or "none").strip().lower()
 
 
-def generator_json_output_base(source: str | Path) -> Path:
+def generator_json_output_base(source: str | Path, preprocess_mode: str | None = None) -> Path:
+    from preprocess.filters import filter_json_slug, normalize_preprocess_mode
+
     source = Path(source)
     paths = image_workspace(source).ensure()
-    return paths.json_root / workspace_source_stem(source)
+    stem = workspace_json_stem(source)
+    slug = filter_json_slug(normalize_preprocess_mode(preprocess_mode))
+    return paths.json_root / f"{stem}_{slug}"
+
+
+def canonicalize_generator_json_outputs(
+    json_dir: str | Path,
+    stem: str,
+    slug: str,
+) -> list[Path]:
+    """Rename {stem}_{slug}.{N}.json and {stem}_{slug}.json to {stem}_{slug}_{N}.json."""
+    from geometry_json import drawable_shape_count
+
+    json_dir = Path(json_dir)
+    if not json_dir.is_dir():
+        return []
+
+    prefix = f"{stem}_{slug}"
+    renamed: list[Path] = []
+    checkpoint_re = re.compile(rf"^{re.escape(prefix)}\.(\d+)\.json$", re.IGNORECASE)
+
+    for path in sorted(json_dir.glob(f"{prefix}.*.json")):
+        match = checkpoint_re.match(path.name)
+        if not match:
+            continue
+        dest = json_dir / f"{prefix}_{match.group(1)}.json"
+        if path.resolve() == dest.resolve():
+            continue
+        if dest.exists():
+            dest.unlink()
+        path.rename(dest)
+        renamed.append(dest)
+
+    final_src = json_dir / f"{prefix}.json"
+    if not final_src.is_file():
+        return renamed
+
+    layer_count = drawable_shape_count(final_src)
+    if layer_count <= 0:
+        highest = 0
+        for path in json_dir.glob(f"{prefix}_*.json"):
+            match = re.match(rf"^{re.escape(prefix)}_(\d+)\.json$", path.name, re.IGNORECASE)
+            if match:
+                highest = max(highest, int(match.group(1)))
+        layer_count = highest
+
+    if layer_count <= 0:
+        return renamed
+
+    dest = json_dir / f"{prefix}_{layer_count}.json"
+    if final_src.resolve() == dest.resolve():
+        return renamed
+    if dest.exists():
+        dest.unlink()
+    final_src.rename(dest)
+    renamed.append(dest)
+    return renamed
 
 
 def generator_live_preview_path(source: str | Path) -> Path:
@@ -264,6 +404,58 @@ def text_vinyl_workspace(mode: str, identity: str) -> WorkspacePaths:
     )
 
 
+def workspace_signature_path(paths: WorkspacePaths) -> Path:
+    return paths.root / WORKSPACE_SIGNATURE_NAME
+
+
+def _remove_workspace_signature_files(paths: WorkspacePaths) -> None:
+    for name in (WORKSPACE_SIGNATURE_NAME, _LEGACY_WORKSPACE_SIGNATURE_NAME):
+        candidate = paths.root / name
+        if candidate.is_file():
+            try:
+                candidate.unlink()
+            except OSError:
+                pass
+
+
+def write_workspace_signature(paths: WorkspacePaths) -> Path | None:
+    """Write human-readable provenance at the workspace root (not inside JSON)."""
+    from ui.workspace_signature_option import should_write_workspace_signature
+    from version import (
+        APP_LINE_VERSION,
+        GENERATOR_AUTHOR,
+        REPOSITORY_URL,
+    )
+
+    if not should_write_workspace_signature():
+        _remove_workspace_signature_files(paths)
+        return None
+
+    paths.root.mkdir(parents=True, exist_ok=True)
+    _remove_legacy_workspace_signature(paths)
+    written_at = datetime.now(timezone.utc).isoformat()
+    lines = [
+        f"Generator Author: {GENERATOR_AUTHOR}",
+        f"Repo Link: {REPOSITORY_URL}",
+        f"Program Version: {APP_LINE_VERSION}",
+        f"Workspace ID: {paths.workspace_id}",
+        f"Workspace Kind: {paths.kind}",
+        f"Written: {written_at}",
+    ]
+    destination = workspace_signature_path(paths)
+    destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return destination
+
+
+def _remove_legacy_workspace_signature(paths: WorkspacePaths) -> None:
+    legacy = paths.root / _LEGACY_WORKSPACE_SIGNATURE_NAME
+    if legacy.is_file():
+        try:
+            legacy.unlink()
+        except OSError:
+            pass
+
+
 def write_manifest(paths: WorkspacePaths, payload: dict) -> None:
     paths.ensure()
     body = dict(payload)
@@ -284,28 +476,48 @@ def read_manifest(paths: WorkspacePaths) -> dict | None:
 
 
 def workspace_display_name(source: str | Path) -> str:
-    """Human-readable filename for queue labels (manifest label, not workspace `original.*`)."""
+    """Human-readable filename for queue labels (prefer import name, not workspace copy)."""
     source = Path(source)
-    manifest = read_manifest(image_workspace(source))
+    paths = image_workspace(source)
+    manifest = read_manifest(paths)
     if manifest:
-        label = str(manifest.get("label", "")).strip()
-        if label:
-            return label
-        original = str(manifest.get("source_original", "")).strip()
-        if original:
-            return Path(original).name
+        stem = _import_stem_from_manifest(paths, manifest)
+        if stem:
+            return _display_filename_for_stem(stem, source, paths)
+    stem = workspace_id_display_stem(paths)
+    if stem:
+        return _display_filename_for_stem(stem, source, paths)
     return source.name
 
 
 def workspace_source_stem(source: str | Path) -> str:
-    """Filename stem used for variant files (manifest label stem, else source stem)."""
+    """Filename stem used for variant files (manifest import name, else workspace id)."""
     source = Path(source)
-    manifest = read_manifest(image_workspace(source))
+    paths = image_workspace(source)
+    manifest = read_manifest(paths)
     if manifest:
-        label = str(manifest.get("label", "")).strip()
-        if label:
-            return safe_stem(Path(label).stem)
+        stem = _import_stem_from_manifest(paths, manifest)
+        if stem:
+            return stem
+    stem = workspace_id_display_stem(paths)
+    if stem:
+        return stem
     return safe_stem(source.stem)
+
+
+def workspace_json_stem(source: str | Path) -> str:
+    """Stem for generated JSON names (prefer import filename, not workspace copy)."""
+    source = Path(source)
+    paths = image_workspace(source)
+    manifest = read_manifest(paths)
+    if manifest:
+        stem = _import_stem_from_manifest(paths, manifest)
+        if stem:
+            return stem
+    stem = workspace_id_display_stem(paths)
+    if stem:
+        return stem
+    return safe_stem(source.stem) or "image"
 
 
 def iter_workspaces(kind: WorkspaceKind | None = None) -> list[WorkspacePaths]:

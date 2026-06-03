@@ -24,12 +24,12 @@
 </p>
 
 <p align="center">
-  <code>v1.6.X (사전 릴리스)</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>One-file EXE</code>
+  <code>v1.6.X (Beta)</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>One-file EXE</code>
 </p>
 
 PNG/JPG/BMP 이미지를 Forza Horizon 6 비닐 그룹 레이어로 변환합니다. 앱에서 생성, 미리보기, 가져오기를 한 번에 처리하며 일반 사용자는 Python, `.venv`, 배치 파일, 메모리 주소 입력이 필요 없습니다.
 
-> **EXE 다운로드:** [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases)에서 `forza-painter-fh6-v1.6.X.exe`를 내려받아 바로 실행하세요. ShepherdHL 포크의 **1.6.X 사전 릴리스 실험 빌드**입니다.
+> **EXE 다운로드:** [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases)에서 `forza-painter-fh6-v1.6.X.exe`를 내려받아 바로 실행하세요. ShepherdHL 포크의 **1.6.X Beta 빌드**입니다.
 
 > **결과가 흐릿하면:** 먼저 **Random samples** 값을 높이세요. **200000** 이상부터 품질 차이가 크게 보이는 경우가 많습니다.
 

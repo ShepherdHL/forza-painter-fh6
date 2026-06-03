@@ -12,148 +12,26 @@ Release notes for Forza Painter FH6. The in-app update prompt reads from this fi
 
 ## Unreleased
 
-## v1.6.X (Pre-Release) / 2026-05-30
+## v1.6.X (Beta) / 2026-06-02
 
-- **Pre-release** experimental build on the **1.6.X** line ([ShepherdHL/forza-painter-fh6](https://github.com/ShepherdHL/forza-painter-fh6)). Release package: `forza-painter-fh6-v1.6.X.exe`. Not affiliated with upstream Forza Painter or other FH6 fork releases.
+Beta release of the ShepherdHL **1.6.X** line ([ShepherdHL/forza-painter-fh6](https://github.com/ShepherdHL/forza-painter-fh6)).
+Download `forza-painter-fh6-v1.6.X.exe` from [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases).
+Not affiliated with upstream Forza Painter or other FH6 fork releases.
 
-### Text Vinyl
+### Highlights
 
-- **Trace cell size** now defaults to **1** instead of 4 for sharper traced detail.
-- **Kaomoji** script tab: searchable paginated library, one-click insert, and automatic font recommendation for symbol-heavy text.
-
-### Hardware selection
-
-- Hardware used for generation can be selected in the header **Resource Monitor** (↻ refresh).
-- Choose among **multiple graphics adapters** (discrete or integrated). Integrated entries show **(integrated)** and require confirmation.
-- You can steer generation to an **integrated / iGPU** adapter (similar in spirit to early community builds). **Use at your own risk** — slower, hotter, and less stable than a discrete GPU.
-- **Backend** dropdown: **Auto**, **OpenCL**, or **Vulkan** for the bundled GPU generator. See [`docs/GPU_GENERATION.md`](docs/GPU_GENERATION.md).
-
-### User interface
-
-- Cleaned up UI elements, hints, and theme tokens for readability.
-- Sticky footers and pane minimums help keep main actions (**Generate**, **Import**, **Text vinyl**) visible when resizing.
-- **Image Preview → Generate JSON:** pick a preprocess filter on Preview and the same filter is active on Generate (one shared pipeline).
-- Generate image queue shows the **original filename plus filter tag** (e.g. `Kiara.png · [Bilateral]`).
-
-### Storage & stability
-
-- Preprocessed filter outputs on disk use **`variants/{name}.{filter}.ext`** (e.g. `Kiara_pr-img.bilateral.png`). Legacy `variants/{filter}.ext` files are still detected.
-- Generate **compare-column previews**, **checkpoint scans**, and **Kaomoji font picks** run off the UI thread to reduce freezes when changing filters, adding images, or inserting kaomoji.
-- Generation log shows **`Generated layer N/M`** while the GPU generator runs; benign `errorGridSize` preset lines are ignored.
-- **`Start Forza Painter.bat`** resolves the app root after GitHub ZIP extract (including double `forza-painter-fh6-main` folders), runs a startup import check, and launches with a stable working directory.
+- **JSON previews** — FH6-aware previews for generated and Kloudy-style type-code JSON (shared across Preview, Import, Text vinyl, and Pixel art), with cached redraws.
+- **Clearer output names** — Generated files keep the original image name; active filter preset is appended as a suffix (on disk and in the generate queue).
+- **Optional SIGNATURE.txt** — Per-workspace provenance file (author, repo, version) when enabled in settings.
+- **Text vinyl fonts** — Default fonts load immediately; full per-script lists fill in in the background.
+- **Workflow split** — Separate Create/Import paths for photo JSON, text vinyl, and pixel art.
+- **Files tab** — Workspace overview and cache cleanup presets.
 
 ### Known issues
 
-- Primary layout testing was on **1920×1080**. Smaller or ultrawide displays may need splitter adjustment.
-- First **Image Preview** analysis per image still takes time (filter thumbnails computed in the background).
-
-### GPU selection & generation routing (detail)
-
-- **Monitor GPU** dropdown in the header Resource Monitor (↻ refresh): choose which adapter drives telemetry, eco cooldown, and generation routing. **Auto (recommended)** is the default.
-- **Integrated GPU** entries are labeled **(integrated)**; selecting one shows a confirmation dialog before saving.
-- **Backend** dropdown: **Auto**, **OpenCL**, or **Vulkan** — passed to the bundled generator as `-backend` when not Auto.
-- **Windows GPU preference** routing for `forza-painter-geometrize-go.exe` when a discrete/integrated card is selected (Phase 2).
-- **Future-ready direct binding:** capability probe + `-list-devices` / `-gpu-id` plumbing; activates automatically when a newer bundled generator adds those flags (no app update required beyond replacing the exe).
-- Settings persist in `runtime/settings/generator_gpu.json`.
-- New modules: `gpu_adapters.py`, `generator_gpu_settings.py`, `generator_capabilities.py`, `generator_devices.py`, `generator_launch_options.py`, `windows_gpu_preference.py`.
-- FAQ troubleshooting rows for wrong GPU, backend choice, and future exact binding.
-- **Plain-language guide** to OpenCL vs Vulkan in FAQ and [`docs/GPU_GENERATION.md`](docs/GPU_GENERATION.md); explanation logged when Backend is changed.
-- See [`docs/GPU_GENERATION.md`](docs/GPU_GENERATION.md) for routing details and upstream generator contract.
-
-### Generate presets
-
-- **Experimental tailored preset (slot 0, opt-in):** after Image Preview analyzes an image, the app writes `runtime/image-profiles/tailored-active.ini` with `stopAt`, checkpoints, samples, and resolution derived from the complexity estimate. Bundled presets Eco–Maximum Power are renumbered 1–7. **Normal remains the default** — tailored is not auto-selected after analysis; pick slot 0 when you want it.
-
-### UI themes
-
-- **Centralized theme engine:** new `ThemeManager` + semantic `ThemeTokens` drive all tk/ttk styling; legacy `COLOR_*` globals stay synced for migration.
-- **CryNet theme:** replaces Spirit of Horizon (Crysis HUD-inspired black + cyan palette); saved `spirit_of_horizon` / `sakura` ids migrate automatically.
-- **New Eden theme:** light-mode option (white surfaces, cherry-red accents); replaces Y2K / Mirror's Edge naming. Saved `y2k`, `light`, and `mirrors_edge` ids migrate automatically.
-- **Theme dropdown order:** New Eden and Red Phosphorous remain at the bottom of the list.
-- **Interactive state layer:** new `theme_states` module normalizes selection, emphasis, validation, and indicator styling; ttk notebooks/scrollbars refresh on theme switch.
-- **Eurocorp palette:** refined toward Syndicate (2012) — matte black and steel surfaces, restrained tactical orange accents, muted steel-blue info and instrument-gray telemetry (replacing generic cyan/neon defaults).
-- **CryNet palette:** refined toward Crysis 2 / CryNet Systems HUD — near-black layered surfaces, cool readable body text, restrained ice-cyan holographic accents; new HUD semantic tokens (`surface_hud`, `overlay_glass`, `border_illuminated`, `accent_holographic`, `text_technical`, `interactive_glow`).
-- **UNATCO theme:** government-terminal aesthetic — pure black field, navy title chrome, holo-green layered panels, lime status accents and cyan instrumentation; saved `deus_ex` id migrates automatically. Renamed from “Deus Ex” display label.
-
-### Trust & transparency
-
-- **Import-only elevation:** the GUI no longer requests Administrator rights at launch; UAC is prompted when you start import, export, or FH6 memory diagnostics.
-- **Pre-memory consent dialog** with link to `docs/SAFETY.md`; consent may be remembered via `runtime/settings/memory_work_consent.flag`.
-- **Helper visibility:** user log shows which helper task started (same application, helper mode) with redacted command line.
-- **Privilege indicator** in the process bar (Standard user / Administrator).
-- **Permission-denied retry:** offers to restart elevated when Windows blocks `OpenProcess`.
-- **Transparency pack:** `SECURITY.md`, `docs/SAFETY.md`, `docs/ENVIRONMENT.md`, `docs/RELEASE_CHECKLIST.md`, README trust section.
-- **`start_app.bat`:** no longer auto-elevates hidden on dev launch.
-- **Tests:** `tests/test_security_policy.py` for address/session/network limits.
-- **Fix:** `trust_workflow.is_windows_admin()` uses `IsUserAnAdmin` (startup crash on launch).
-- **UI:** 🛡 prefix on import/export/FH6 memory buttons when running as standard user; status bar explains marked actions.
-
-### UI hubs (Phase 3)
-
-- **4 hub tabs:** Create (Preview, Generate, Text vinyl), Import (Final, Handmade, Export), Tools, Dev Tools (FH6 memory diagnostics).
-- **Help menu** (header): Tutorial, Acknowledgements, Safety guide — no longer top-level tabs.
-- **Compact telemetry** by default (higher threshold for full donut layout).
-
-### First-run & release (Phases 4–5)
-
-- **First-run welcome** dialog (`ui/first_run.py`); preference stored in `runtime/settings/ui_preferences.json`.
-- **`scripts/publish_release.ps1`:** build EXE + SHA-256 + GitHub release notes snippet.
-- **`src/ui/views/`** package stub for incremental extraction from `app.py`.
-- Source ZIP release includes `SECURITY.md` (`scripts/make_release.ps1`).
-- **Safety guide:** in-app viewer with language picker (EN / 中文 / 日本語 / 한국어); no longer opens `.md` in Visual Studio.
-- **Developer Tools** hub tab pinned to the far right of the main tab bar (FH6 diagnostics; replaces developer-mode checkbox).
-- **Fix:** hub tabs (Create / Import / Tools / Developer Tools) render at the top of the workspace again, not below content.
-- **Text vinyl:** color field uses Color Picker–style hex/RGB/alpha/Forza values instead of a single `R,G,B,A` text box.
-- **Text vinyl:** paginated character grids on every script tab (Latin, Hiragana/Katakana/Kanji, Hangul, GB2312); scroll hint moved to top.
-- **Fix:** missing `X` import in Text vinyl UI (same startup `NameError` class as hub navigation).
-- **Tests:** `tests/test_tk_constant_imports.py` fails CI if a module uses `fill=X` / `side=LEFT` without importing the constant.
-- **Header:** new product line copy, build version row with italic *Experimental*, and updated subtitle.
-
-### Core / upstream merge
-
-- Merged upstream v1.6.5–v1.6.6 core fixes while keeping fork features (text vinyl, colors tab, resource monitor, security policy).
-- Added `utils.py` with shared helpers, typed exceptions, and lazy OpenCV/Pillow loaders.
-- Fixed `luma_band` preprocessing to use BGR→LAB (OpenCV-native) and atomic file writes.
-- Generator runs use a sanitized environment; polling intervals match upstream to reduce UI overhead.
-- Preprocessed generation inputs are tracked via `input_image` so JSON/previews are discovered correctly.
-- Import requires template layer count before starting; added Traditional Chinese (`zh-tw`) UI option.
-- Bundled presets set `forceOpaqueShapes = false`; heaviest preset uses `previewEvery = 100`.
-- Updated bundled GPU generator to upstream `v1.2-Canary-20260525`; frozen `Color`/`Shape` dataclasses and `ShapeType` enum.
-
-### Generation & preprocess
-
-- **Eco cool GPU (experimental)** preset: lower `randomSamples`, resolution, and layer cap for reduced GPU load; optional **GPU cooldown between images** (waits for ≤75°C or fixed pause when sensors unavailable).
-- Renamed bundled quality presets (0–6): Eco, Maximum Speed, Fast, Normal, Slow (Conserve Shapes), Maximum Quality, Maximum Power.
-- **Image Preview** preset panel: shows selected Generate preset, projected layer count vs cap, downscale note, GPU load tier, and approximation disclaimer (no JSON required).
-- Block mouse wheel from changing Combobox/Listbox selections unless the control is focused; wheel still scrolls the nearest panel when hovering dropdowns.
-- **Image Preview** tab: compare preprocess filters and estimated layer cost before generating.
-- **Preprocess filter** dropdown on Generate: Original, Luma Bands, Bilateral, Posterize, CLAHE, Mild Blur, Soft Cel Shading, Heavy Ink Cel Shading.
-- Source/result compare panels on Generate when a filter is active.
-- `src/preprocess/` package (`filters.py`, `luma.py`, `complexity.py`, `common.py`).
-
-### FH6 import / export (Kloudy-style workflow)
-
-- Three dedicated tabs: **Import Final JSON**, **Import Handmade JSON**, **Export Game JSON**.
-- **Import Final JSON**: generated geometry JSON, run-folder browser, best-safe-final selection, preview, import.
-- **Import Handmade JSON**: FH6 type-code / handmade JSON with supported/unsupported shape counts and preview.
-- **Export Game JSON**: export open vinyl group to type-code JSON (`runtime/typecode-export/`).
-- New helpers: `fh6_import_typecode_json.py`, `fh6_export_typecode_json.py`, `fh6_trim_group_count.py`, `fh6_typecode_json.py`.
-- Auto-route type-code vs geometry JSON; optional trim group layer count after handmade import.
-
-### UI & other
-
-- Resource monitor: CPU/GPU load, clock, and temperature bar with green/yellow/red temp colors (80°C / 90°C), persistent heat warnings, and log messages when thresholds are crossed.
-- Text vinyl: selectable trace shape modes (rectangles, squares, ellipses, circles, triangles, mixed) with FH6 template guidance in the UI and `--shape-mode` CLI flag.
-- Text vinyl: Korean (Hangul) coverage checks, improved glyph detection, [KR] fonts ranked first when Hangul is typed, and Malgun Gothic fallbacks on Windows.
-- Text vinyl: script sub-tabs (Universal/Latin, Japanese, Korean, Chinese) with separate text and font selections per tab, plus a font search bar on each tab.
-- UI locked to dark mode for consistent, readable text and inputs; appearance picker removed until a fuller UI overhaul. Dark palette contrast improved (inputs, labels, log font).
-- Workspace split: Generate JSON and import tabs on the left; Text vinyl, Colors, Tools, and Tutorial on the right (resizable divider).
-- Default single tab bar (less clutter); optional **Split workspace** in the header restores two-column tabs (applies immediately; saved in `ui_layout.json`).
-- Colors tab: click saves the color to a swatch history; hover only previews on the swatch.
-- Colors tab: sample pixels from Generate-tab images (prev/next cycle), with Hex/RGB/HSL/HSB and Forza H/S/B matching [Bang's Forza Color Converter](https://dxbang.github.io/forza-colors/).
-- Appearance themes (System/Light/Sakura/Elite) deferred: only dark is active in the desktop app.
-- Resizable panel dividers: drag to resize the log vs main workspace, Generate/Import previews, and Text vinyl reference section. Layout saved to `runtime/settings/ui_layout.json`.
-- `requirements-preview.txt`: Pillow for filter and handmade JSON previews in dev/venv setups.
+- Layout primarily tested at **1920×1080**.
+- First **Image Preview** filter pass per image can take a while.
+- Beta: expect rough edges near FH6 layer limits and on integrated GPU generation.
 
 ## v1.6.1 / 2026-05-24
 

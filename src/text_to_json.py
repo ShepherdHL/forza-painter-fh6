@@ -13,14 +13,14 @@ import sys
 from pathlib import Path
 
 from text_geometry import (
-    build_geometry_from_text,
-    build_geometry_from_text_image,
+    build_typecode_from_text,
+    build_typecode_from_text_image,
     contains_cjk,
     estimate_layer_count,
     normalize_text_shape_mode,
     template_hint_for_shape_mode,
     text_shape_mode_choices,
-    write_geometry_json,
+    write_text_design_json,
 )
 from text_fonts import discover_cjk_fonts, find_cjk_font, format_missing_chars, resolve_font_path, validate_text_coverage
 
@@ -48,8 +48,8 @@ def main(argv=None):
         choices=text_shape_mode_choices(),
         default="rectangles",
         help=(
-            "Primitive used to fill traced cells: rectangles, squares, ellipses, circles, "
-            "triangles (diamond ellipses), or mixed."
+            "FH6 vinyl primitive per traced cell: rectangles/squares, circles, ellipses, "
+            "triangles, or mixed (outputs type-code JSON for Import text)."
         ),
     )
     parser.add_argument("--color", type=parse_color, default="255,255,255,255", help="Shape color R,G,B,A.")
@@ -78,7 +78,7 @@ def main(argv=None):
     print(template_hint_for_shape_mode(shape_mode))
 
     if args.image:
-        payload = build_geometry_from_text_image(
+        payload = build_typecode_from_text_image(
             Path(args.image),
             color=args.color,
             cell_size=args.cell_size,
@@ -97,7 +97,7 @@ def main(argv=None):
                 f"Warning: font is missing {len(missing)} glyph(s): {format_missing_chars(missing)}",
                 file=sys.stderr,
             )
-        payload = build_geometry_from_text(
+        payload = build_typecode_from_text(
             args.text,
             color=args.color,
             font_path=font_path,
@@ -106,7 +106,7 @@ def main(argv=None):
             shape_mode=shape_mode,
         )
 
-    write_geometry_json(output, payload)
+    write_text_design_json(output, payload)
     layers = estimate_layer_count(payload)
     print(f"Wrote {output} ({layers} drawable shapes, mode={shape_mode})")
     return 0

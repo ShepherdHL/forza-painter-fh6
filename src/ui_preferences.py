@@ -15,6 +15,7 @@ def _default_preferences() -> Dict[str, Any]:
     return {
         "first_run_complete": False,
         "telemetry_compact": True,
+        "write_workspace_signature": True,
     }
 
 
@@ -29,6 +30,7 @@ def load_ui_preferences() -> Dict[str, Any]:
         pass
     prefs["first_run_complete"] = bool(prefs.get("first_run_complete"))
     prefs["telemetry_compact"] = bool(prefs.get("telemetry_compact", True))
+    prefs["write_workspace_signature"] = bool(prefs.get("write_workspace_signature", True))
     return prefs
 
 

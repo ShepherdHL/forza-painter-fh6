@@ -17,12 +17,14 @@ from text_char_libraries import (
     LIBRARY_LATIN,
     PAGE_SIZE,
     filter_library,
+    filtered_char_count,
     hiragana_library,
     kanji_library,
     latin_extended_library,
     library_chars,
     library_total,
     paginate_chars,
+    paginate_library,
 )
 
 
@@ -69,3 +71,11 @@ def test_paginate_slice_length() -> None:
 
 def test_grid_columns_positive() -> None:
     assert GRID_COLUMNS >= 8
+
+
+def test_paginate_library_without_full_list() -> None:
+    page_chars, page, total_pages = paginate_library(LIBRARY_HANZI, 0, "")
+    assert len(page_chars) <= PAGE_SIZE
+    assert page == 0
+    assert total_pages >= 1
+    assert filtered_char_count(LIBRARY_HANZI, "") == library_total(LIBRARY_HANZI)

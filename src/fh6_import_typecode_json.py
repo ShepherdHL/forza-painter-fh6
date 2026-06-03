@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import ctypes
 import json
 import struct
@@ -149,17 +150,33 @@ def shape_mask_flag(shape, data):
     return False
 
 
-SUPPORTED_PAGE1_CODES = {
-    1048677,  # Square
-    1048678,  # Circle
-    1048679,  # Triangle
-    1048688,  # Circle Border
-    1048712,  # Ellipse
-}
+def _shape_allowed(type_code: int, *, allow_unknown: bool) -> bool:
+    from fh6_shape_catalog import is_known_type_code
+
+    if is_known_type_code(type_code):
+        return True
+    return bool(allow_unknown)
+
+
+def _backup_layer_entry(index: int, ptr: int, raw: bytes, *, partial: bool = False) -> dict:
+    entry = {
+        "index": index,
+        "ptr": hx(ptr),
+        "raw_b64": base64.b64encode(raw).decode("ascii"),
+    }
+    if partial:
+        entry["partial"] = True
+    return entry
+
+
+def _write_json_compact(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload, separators=(",", ":"), ensure_ascii=False), encoding="utf-8")
 
 
 def load_shapes(path, allow_unknown_low_byte=False):
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    from preview.geometry_preview_cache import read_json_cached
+
+    payload = read_json_cached(path)
     shapes = payload.get("shapes")
     if not isinstance(shapes, list) or not shapes:
         raise ValueError("JSON must contain non-empty shapes list.")
@@ -167,16 +184,16 @@ def load_shapes(path, allow_unknown_low_byte=False):
     skipped = []
     for i, shape in enumerate(shapes):
         code = int(shape["type"])
-        if code not in SUPPORTED_PAGE1_CODES and not allow_unknown_low_byte:
+        if not _shape_allowed(code, allow_unknown=allow_unknown_low_byte):
             skipped_item = {
                 "source_index": i,
                 "source_layer": i + 1,
                 "type_code": code,
                 "hex": f"0x{code:x}",
-                "reason": "unsupported non-page-1 primitive code",
+                "reason": "unknown type code (not in FH6 shape catalog)",
             }
             skipped.append(skipped_item)
-            print(f"[skip] unsupported type code {code} / 0x{code:x} at source layer {i + 1}", flush=True)
+            print(f"[skip] unknown catalog type code {code} / 0x{code:x} at source layer {i + 1}", flush=True)
             continue
         data = shape["data"]
         if len(data) < 5:
@@ -247,7 +264,7 @@ def main():
                 report_layers.append({**failure, "shape": item, "target_index": idx})
                 log(f"FAILED import layer {idx + 1}: {failure['reason']} ptr={hx(ptr)}")
                 continue
-            backup_layers.append({"index": idx, "ptr": hx(ptr), "raw_hex": before.hex(), "decoded": decode(before)})
+            backup_layers.append(_backup_layer_entry(idx, ptr, before))
             writes = [
                 (0x18, struct.pack("<ff", item["x"], item["y"])),
                 (0x28, struct.pack("<ff", item["sx"], item["sy"])),
@@ -321,9 +338,9 @@ def main():
                         "reason": f"full layer read crossed unreadable memory; cleared writable prefix {len(before)} bytes",
                     }
                     partial_clears.append(partial_item)
-                    backup_layers.append({"index": idx, "ptr": hx(ptr), "raw_hex": before.hex(), "decoded": decode_partial(before), "partial": True})
+                    backup_layers.append(_backup_layer_entry(idx, ptr, before, partial=True))
                 else:
-                    backup_layers.append({"index": idx, "ptr": hx(ptr), "raw_hex": before.hex(), "decoded": decode(before)})
+                    backup_layers.append(_backup_layer_entry(idx, ptr, before))
                 for offset, raw in clear_writes:
                     write_memory(handle, ptr + offset, raw, args.write)
                 if partial:
@@ -333,7 +350,13 @@ def main():
     finally:
         close_handle(handle)
 
-    backup = {"format": "fh6_typecode_json_import_backup_v1", "pid": args.pid, "table": args.table, "source_json": args.json, "layers": backup_layers}
+    backup = {
+        "format": "fh6_typecode_json_import_backup_v2",
+        "pid": args.pid,
+        "table": args.table,
+        "source_json": args.json,
+        "layers": backup_layers,
+    }
     report = {
         "format": "fh6_typecode_json_import_report_v1",
         "pid": args.pid,
@@ -352,8 +375,8 @@ def main():
         "failures": failures,
         "layers": report_layers,
     }
-    Path(args.backup).write_text(json.dumps(backup, indent=2), encoding="utf-8")
-    Path(args.report).write_text(json.dumps(report, indent=2), encoding="utf-8")
+    _write_json_compact(Path(args.backup), backup)
+    _write_json_compact(Path(args.report), report)
     log(f"backup: {args.backup}")
     log(f"report: {args.report}")
     log(f"failures: {len(failures)}")

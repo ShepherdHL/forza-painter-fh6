@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from asset_workspace import (
+    WORKSPACE_SIGNATURE_NAME,
     clear_workspace_tier1,
     clear_workspace_tier2,
     folder_size_bytes,
@@ -13,8 +14,10 @@ from asset_workspace import (
     image_workspace_id,
     text_vinyl_workspace,
     workspace_display_name,
+    workspace_signature_path,
     write_manifest,
 )
+from version import APP_LINE_VERSION, GENERATOR_AUTHOR, REPOSITORY_URL
 from file_management_settings import (
     PRESET_CUSTOM,
     PRESET_KEEP_ALL,
@@ -36,6 +39,56 @@ def test_image_workspace_id_is_stable(tmp_path, monkeypatch):
     second = image_workspace_id(source)
     assert first == second
     assert first.startswith("logo__")
+
+
+def test_workspace_signature_skipped_when_disabled(tmp_path, monkeypatch):
+    monkeypatch.setattr("asset_workspace.ROOT", tmp_path)
+    monkeypatch.setattr("asset_workspace.IMAGE_WORKSPACE_ROOT", tmp_path / "runtime" / "workspace")
+    monkeypatch.setattr(
+        "ui.workspace_signature_option.should_write_workspace_signature",
+        lambda: False,
+    )
+    source = tmp_path / "art.png"
+    source.write_bytes(b"x")
+    paths = image_workspace(source).ensure()
+    assert not workspace_signature_path(paths).is_file()
+
+
+def test_workspace_signature_written_on_ensure(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "ui.workspace_signature_option.should_write_workspace_signature",
+        lambda: True,
+    )
+    monkeypatch.setattr("asset_workspace.ROOT", tmp_path)
+    monkeypatch.setattr("asset_workspace.IMAGE_WORKSPACE_ROOT", tmp_path / "runtime" / "workspace")
+    source = tmp_path / "art.png"
+    source.write_bytes(b"x")
+    paths = image_workspace(source).ensure()
+    signature = workspace_signature_path(paths)
+    assert signature.name == WORKSPACE_SIGNATURE_NAME
+    assert signature.suffix.lower() == ".txt"
+    assert signature.is_file()
+    text = signature.read_text(encoding="utf-8")
+    assert f"Generator Author: {GENERATOR_AUTHOR}" in text
+    assert f"Repo Link: {REPOSITORY_URL}" in text
+    assert f"Program Version: {APP_LINE_VERSION}" in text
+    assert f"Workspace ID: {paths.workspace_id}" in text
+    assert "Workspace Kind: image" in text
+    assert "Written:" in text
+
+
+def test_tier_cleanup_preserves_signature(tmp_path, monkeypatch):
+    monkeypatch.setattr("asset_workspace.ROOT", tmp_path)
+    monkeypatch.setattr("asset_workspace.IMAGE_WORKSPACE_ROOT", tmp_path / "runtime" / "workspace")
+    source = tmp_path / "art.png"
+    source.write_bytes(b"x")
+    paths = image_workspace(source).ensure()
+    signature = workspace_signature_path(paths)
+    assert signature.is_file()
+    (paths.cache / "scratch.tmp").write_text("temp", encoding="utf-8")
+    clear_workspace_tier1(paths)
+    clear_workspace_tier2(paths)
+    assert signature.is_file()
 
 
 def test_tier_cleanup_preserves_final_json(tmp_path, monkeypatch):
@@ -170,6 +223,115 @@ def test_variant_image_path_uses_stem_and_mode(tmp_path, monkeypatch):
     path = variant_image_path(workspace_source, "bilateral")
     assert path.name == "Kiara_pr-img.bilateral.png"
     assert path.parent.name == "variants"
+
+
+def test_workspace_json_stem_falls_back_to_workspace_id_when_manifest_is_internal(tmp_path, monkeypatch):
+    monkeypatch.setattr("asset_workspace.ROOT", tmp_path)
+    monkeypatch.setattr("asset_workspace.IMAGE_WORKSPACE_ROOT", tmp_path / "runtime" / "workspace")
+    from asset_workspace import ensure_image_workspace_source, workspace_display_name, workspace_json_stem
+
+    external = tmp_path / "kiara_bluefield_nobg.png"
+    external.write_bytes(b"png")
+    paths = image_workspace(external).ensure()
+    workspace_source = paths.source / "original.png"
+    workspace_source.write_bytes(b"png")
+    write_manifest(
+        paths,
+        {
+            "label": "original.png",
+            "source_original": str(workspace_source.resolve()),
+        },
+    )
+    assert workspace_json_stem(workspace_source) == "kiara_bluefield_nobg"
+    assert workspace_display_name(workspace_source) == "kiara_bluefield_nobg.png"
+
+    repaired = ensure_image_workspace_source(workspace_source, copy_external=False)
+    assert repaired == workspace_source
+    manifest = paths.manifest.read_text(encoding="utf-8")
+    assert "kiara_bluefield_nobg.png" in manifest
+
+
+def test_ensure_image_workspace_source_does_not_clobber_external_manifest(tmp_path, monkeypatch):
+    monkeypatch.setattr("asset_workspace.ROOT", tmp_path)
+    monkeypatch.setattr("asset_workspace.IMAGE_WORKSPACE_ROOT", tmp_path / "runtime" / "workspace")
+    from asset_workspace import ensure_image_workspace_source, read_manifest
+
+    external = tmp_path / "kiara_bluefield_nobg.png"
+    external.write_bytes(b"png")
+    paths = image_workspace(external).ensure()
+    dest = paths.source / "original.png"
+    dest.write_bytes(b"png")
+    write_manifest(
+        paths,
+        {"label": "kiara_bluefield_nobg.png", "source_original": str(external.resolve())},
+    )
+    ensure_image_workspace_source(dest, copy_external=False)
+    manifest = read_manifest(paths)
+    assert manifest is not None
+    assert Path(manifest["source_original"]).name == "kiara_bluefield_nobg.png"
+
+
+def test_generated_run_folder_label_uses_workspace_id(tmp_path, monkeypatch):
+    monkeypatch.setattr("asset_workspace.ROOT", tmp_path)
+    monkeypatch.setattr("asset_workspace.IMAGE_WORKSPACE_ROOT", tmp_path / "runtime" / "workspace")
+    from asset_workspace import generated_run_folder_label
+
+    ws = tmp_path / "runtime" / "workspace" / "kiara_bluefield_nobg__ca0663de"
+    json_dir = ws / "json"
+    json_dir.mkdir(parents=True)
+    (json_dir / "kiara_bluefield_nobg_og_3000.json").write_text("[]", encoding="utf-8")
+    assert generated_run_folder_label(json_dir) == "kiara_bluefield_nobg"
+
+
+def test_workspace_json_stem_prefers_source_original(tmp_path, monkeypatch):
+    monkeypatch.setattr("asset_workspace.ROOT", tmp_path)
+    monkeypatch.setattr("asset_workspace.IMAGE_WORKSPACE_ROOT", tmp_path / "runtime" / "workspace")
+    from asset_workspace import workspace_json_stem
+
+    source = tmp_path / "bigwalk.png"
+    source.write_bytes(b"png")
+    paths = image_workspace(source).ensure()
+    workspace_source = paths.source / "original.png"
+    workspace_source.write_bytes(b"png")
+    write_manifest(paths, {"label": "original.png", "source_original": str(source)})
+    assert workspace_json_stem(workspace_source) == "bigwalk"
+
+
+def test_generator_json_output_base_includes_stem_and_slug(tmp_path, monkeypatch):
+    monkeypatch.setattr("asset_workspace.ROOT", tmp_path)
+    monkeypatch.setattr("asset_workspace.IMAGE_WORKSPACE_ROOT", tmp_path / "runtime" / "workspace")
+    from asset_workspace import generator_json_output_base
+
+    source = tmp_path / "bigwalk.png"
+    source.write_bytes(b"png")
+    paths = image_workspace(source).ensure()
+    workspace_source = paths.source / "original.png"
+    workspace_source.write_bytes(b"png")
+    write_manifest(paths, {"label": "original.png", "source_original": str(source)})
+    assert generator_json_output_base(workspace_source, "none").name == "bigwalk_og"
+    assert generator_json_output_base(workspace_source, "luma_band").name == "bigwalk_lu"
+
+
+def test_canonicalize_generator_json_outputs_renames_dot_checkpoints(tmp_path, monkeypatch):
+    monkeypatch.setattr("asset_workspace.ROOT", tmp_path)
+    monkeypatch.setattr("asset_workspace.IMAGE_WORKSPACE_ROOT", tmp_path / "runtime" / "workspace")
+    from asset_workspace import canonicalize_generator_json_outputs
+
+    json_dir = tmp_path / "json"
+    json_dir.mkdir()
+    payload = (
+        '[{"type":1,"data":[0,0,10,10],"color":[0,0,0,0]},'
+        '{"type":16,"data":[5,5,2,2,0],"color":[255,255,255,255]}]'
+    )
+    (json_dir / "bigwalk_og.1200.json").write_text(payload, encoding="utf-8")
+    (json_dir / "bigwalk_og.json").write_text(payload, encoding="utf-8")
+
+    renamed = canonicalize_generator_json_outputs(json_dir, "bigwalk", "og")
+    assert (json_dir / "bigwalk_og_1200.json").is_file()
+    assert (json_dir / "bigwalk_og_1.json").is_file()
+    assert not (json_dir / "bigwalk_og.1200.json").exists()
+    assert not (json_dir / "bigwalk_og.json").exists()
+    assert len(renamed) == 2
 
 
 def test_legacy_variant_image_path_layout(tmp_path, monkeypatch):

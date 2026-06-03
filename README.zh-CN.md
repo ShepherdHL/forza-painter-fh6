@@ -24,12 +24,12 @@
 </p>
 
 <p align="center">
-  <code>v1.6.X（预发布）</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>单文件 EXE</code>
+  <code>v1.6.X（Beta）</code> · <code>Windows</code> · <code>Forza Horizon 6</code> · <code>GPU/OpenCL</code> · <code>单文件 EXE</code>
 </p>
 
 把 PNG/JPG/BMP 图片转换成 Forza Horizon 6 的 Vinyl Group 图层。软件内完成生成、预览和导入，普通用户不需要 Python、`.venv`、批处理文件，也不需要手动填写内存地址。
 
-> **下载 EXE：** 从 [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) 下载 `forza-painter-fh6-v1.6.X.exe`，直接运行。这是 ShepherdHL 分支的 **1.6.X 预发布实验版**。
+> **下载 EXE：** 从 [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases) 下载 `forza-painter-fh6-v1.6.X.exe`，直接运行。这是 ShepherdHL 分支的 **1.6.X Beta 版**。
 
 > **画面发糊先看这里：** 优先提高 **随机样本（Random samples）**。数值在 **200000 以上** 通常会有明显质变；越高越清晰，但生成时间也更长。
 
