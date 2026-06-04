@@ -9,6 +9,7 @@ from tkinter import BOTH, Frame, ttk
 
 from ui.tools.panel_base import ToolPanel, build_resource_card, build_tool_hint
 
+DELPHITOOLS_URL = "https://tools.rmv.fyi/"
 ILOVEIMG_BG_URL = "https://www.iloveimg.com/remove-background"
 PIXLR_BG_URL = "https://pixlr.com/remove-background/"
 GIMP_URL = "https://www.gimp.org/"
@@ -29,6 +30,15 @@ class BackgroundRemovalToolPanel(ToolPanel):
         online = ttk.LabelFrame(body, text=self._tr("tools_bg_online_title"))
         app.translated.append((online, "tools_bg_online_title", "text"))
         online.pack(fill=BOTH, expand=False, pady=(0, 4))
+        build_resource_card(
+            online,
+            app,
+            title_key="tools_bg_delphitools_title",
+            desc_key="tools_bg_delphitools_desc",
+            url=DELPHITOOLS_URL,
+            badge_key="tools_badge_online",
+            on_open=lambda: webbrowser.open(DELPHITOOLS_URL),
+        )
         build_resource_card(
             online,
             app,

@@ -26,7 +26,7 @@ from tkinter import BOTH, BOTTOM, END, HORIZONTAL, LEFT, RIGHT, TOP, TclError, V
 
 import psutil
 
-from app_paths import ROOT
+from app_paths import RESOURCE_ROOT, ROOT
 from app_config import (
     APP_DIR,
     PROBE_DIR,
@@ -378,7 +378,8 @@ TEXT = {
         "text_font_search": "Search fonts",
         "text_options": "Generation options",
         "text_font_browse": "Browse font file",
-        "text_font_refresh": "Refresh fonts",
+        "text_font_refresh": "Load all fonts",
+        "text_font_refresh_hint": "Scans every installed font; may take a minute.",
         "text_font_size": "Font size",
         "text_cell_size": "Trace cell size",
         "text_shape_mode": "Trace shape mode",
@@ -449,6 +450,8 @@ TEXT = {
         "text_done": "Text JSON ready ({layers} layers): {path}",
         "text_failed": "Text vinyl generation failed",
         "text_log_scanning_fonts": "Scanning installed fonts for all script tabs...",
+        "text_log_fonts_tier1": "Loaded starter fonts — Latin/Universal: {latin}, Japanese: {japanese}, Kaomoji: {kaomoji}, Korean: {korean}, Chinese: {chinese}. Use Load all fonts for the full list.",
+        "text_log_fonts_scanned_script": "Scanned {script} fonts ({count}).",
         "text_log_font_scan_failed": "Font scan failed: {error}",
         "text_log_char_library_failed": "Character library failed to load: {error}",
         "text_log_fonts_loaded": "Loaded fonts — Latin/Universal: {latin}, Japanese: {japanese}, Kaomoji: {kaomoji}, Korean: {korean}, Chinese: {chinese}.",
@@ -645,6 +648,12 @@ TEXT = {
         "tools_bg_remove_hint": "Reputable tools for quick image editing. Online tools are fastest for one-off exports. Desktop apps give you significantly more control over vinyl prep.",
         "tools_bg_online_title": "Online (quick export)",
         "tools_bg_desktop_title": "Desktop (more control)",
+        "tools_bg_delphitools_title": "delphitools",
+        "tools_bg_delphitools_desc": (
+            "Privacy-first browser tools at tools.rmv.fyi — no logins, no tracking, processing stays on your machine. "
+            "Background remover, palette extractor, pixel picker, image tracer, clipper, and more. "
+            "Handy for decal and vinyl prep before generating JSON."
+        ),
         "tools_bg_iloveimg_title": "iloveimg — Background Remover",
         "tools_bg_iloveimg_desc": "Free browser workflow: upload, remove background, download PNG. Good for quick decals and logos.",
         "tools_bg_pixlr_title": "Pixlr — Background Remover",
@@ -1110,7 +1119,8 @@ Notes
         "text_font_search": "搜索字体",
         "text_options": "生成选项",
         "text_font_browse": "浏览字体文件",
-        "text_font_refresh": "刷新字体列表",
+        "text_font_refresh": "加载全部字体",
+        "text_font_refresh_hint": "扫描所有已安装字体；可能需要一分钟。",
         "text_font_size": "字号",
         "text_cell_size": "栅格大小",
         "text_shape_mode": "描摹形状",
@@ -1181,6 +1191,8 @@ Notes
         "text_done": "文字 JSON 已就绪（{layers} 层）：{path}",
         "text_failed": "文字贴膜生成失败",
         "text_log_scanning_fonts": "正在扫描各文字体系标签页的已安装字体…",
+        "text_log_fonts_tier1": "已加载初始字体 — 拉丁/通用：{latin}，日文：{japanese}，颜文字：{kaomoji}，韩文：{korean}，中文：{chinese}。使用「加载全部字体」查看完整列表。",
+        "text_log_fonts_scanned_script": "已扫描 {script} 字体（{count} 个）。",
         "text_log_font_scan_failed": "字体扫描失败：{error}",
         "text_log_char_library_failed": "字库加载失败：{error}",
         "text_log_fonts_loaded": "已加载字体 — 拉丁/通用：{latin}，日文：{japanese}，颜文字：{kaomoji}，韩文：{korean}，中文：{chinese}。",
@@ -1391,6 +1403,11 @@ Notes
         "tools_bg_remove_hint": "多种去背景方式：在线工具适合快速导出；桌面软件适合精细贴膜准备。",
         "tools_bg_online_title": "在线（快速导出）",
         "tools_bg_desktop_title": "桌面（更多控制）",
+        "tools_bg_delphitools_title": "delphitools",
+        "tools_bg_delphitools_desc": (
+            "隐私优先的浏览器工具集（tools.rmv.fyi）：无需登录、无追踪，处理在本地完成。"
+            "含去背景、调色板提取、像素取色、图像描摹与裁剪等，适合生成 JSON 前的贴花与贴膜准备。"
+        ),
         "tools_bg_iloveimg_title": "iloveimg — 去背景",
         "tools_bg_iloveimg_desc": "免费浏览器流程：上传、去背景、下载 PNG。适合快速处理贴花与标志。",
         "tools_bg_pixlr_title": "Pixlr — 去背景",
@@ -1928,6 +1945,11 @@ Notes
         "tools_bg_remove_hint": "배경 제거 방법이 여러 가지입니다. 온라인 도구는 빠른보내기에, 데스크톱 앱은 비닐 준비에 더 세밀한 제어가 가능합니다.",
         "tools_bg_online_title": "온라인(빠른보내기)",
         "tools_bg_desktop_title": "데스크톱(세밀한 제어)",
+        "tools_bg_delphitools_title": "delphitools",
+        "tools_bg_delphitools_desc": (
+            "개인정보 우선 브라우저 도구 모음(tools.rmv.fyi) — 로그인·추적 없음, 처리는 기기에서만 진행됩니다. "
+            "배경 제거, 팔레트 추출, 픽셀 피커, 이미지 추적·클리핑 등. JSON 생성 전 데칼·비닐 준비에 유용합니다."
+        ),
         "tools_bg_iloveimg_title": "iloveimg — 배경 제거",
         "tools_bg_iloveimg_desc": "무료 브라우저 워크플로: 업로드, 배경 제거, PNG 다운로드. 데칼·로고에 적합합니다.",
         "tools_bg_pixlr_title": "Pixlr — 배경 제거",
@@ -2316,6 +2338,7 @@ TEXT = merge_korean_patch(TEXT)
 
 def ensure_dirs():
     PROBE_DIR.mkdir(parents=True, exist_ok=True)
+
 
 
 def tr(lang, key):
@@ -8590,6 +8613,9 @@ class App:
                 else:
                     fonts_by_script, merge, log = payload, True, True
                 self.text_vinyl.apply_fonts_by_script(fonts_by_script, merge=merge, log=log)
+            elif kind == "text_fonts_scan_done":
+                self.text_vinyl._fonts_scanning = False
+                self.text_vinyl._set_font_refresh_enabled(True)
             elif kind == "update_failed":
                 self._handle_update_failed(payload)
             elif kind == "update_current":

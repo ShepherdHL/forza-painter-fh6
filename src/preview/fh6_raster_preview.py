@@ -462,8 +462,60 @@ SCALED_TRACE_COORDINATE_MODELS = frozenset(
     {
         "endarz_pixel_grid_v1",
         "forza_painter_text_trace_v1",
+        "forza_painter_text_stroke_v1",
     }
 )
+
+FORZA_FONT_COORDINATE_MODEL = "forza_painter_forza_font_v1"
+
+
+def _forza_font_shape_pixels(item: dict) -> tuple[float, float, float, float, float]:
+    """Decode Forza in-game font type-code entries to layout pixel center and size."""
+    from pixel_art_geometry import POSITION_SCALE, SIZE_SCALE
+    from text_forza_fonts import FORZA_GLYPH_SCALE
+
+    cx = float(item["x"])
+    cy = float(item["y"])
+    sx = float(item["sx"])
+    sy = float(item["sy"])
+    rot = float(item.get("rotation", 0.0))
+    glyph_scale = SIZE_SCALE * FORZA_GLYPH_SCALE
+    px = cx / POSITION_SCALE
+    py = cy / POSITION_SCALE
+    width = max(1.0, sx / glyph_scale)
+    height = max(1.0, sy / glyph_scale)
+    return px, py, width, height, rot
+
+
+def _typecode_bounds(
+    shapes: list,
+    *,
+    coordinate_model: str | None = None,
+) -> tuple[float, float, float, float]:
+    model = str(coordinate_model or "").lower()
+    if model == FORZA_FONT_COORDINATE_MODEL:
+        min_x = min_y = float("inf")
+        max_x = max_y = float("-inf")
+        for item in shapes:
+            px, py, pw, ph, _rot = _forza_font_shape_pixels(item)
+            min_x = min(min_x, px - pw / 2.0)
+            max_x = max(max_x, px + pw / 2.0)
+            min_y = min(min_y, py - ph / 2.0)
+            max_y = max(max_y, py + ph / 2.0)
+        if min_x == float("inf"):
+            return 0.0, 0.0, 1.0, 1.0
+        return min_x, min_y, max_x, max_y
+    if model in SCALED_TRACE_COORDINATE_MODELS:
+        return _scaled_trace_bounds(shapes)
+    xs = [float(item["x"]) for item in shapes]
+    ys = [float(item["y"]) for item in shapes]
+    half_x = [max(1.0, float(item["sx"])) / 2.0 for item in shapes]
+    half_y = [max(1.0, float(item["sy"])) / 2.0 for item in shapes]
+    min_x = min(x - hx for x, hx in zip(xs, half_x))
+    max_x = max(x + hx for x, hx in zip(xs, half_x))
+    min_y = min(y - hy for y, hy in zip(ys, half_y))
+    max_y = max(y + hy for y, hy in zip(ys, half_y))
+    return min_x, min_y, max_x, max_y
 
 
 def _typecode_uses_scaled_trace_coordinates(path) -> bool:
@@ -478,6 +530,8 @@ def _typecode_uses_scaled_trace_coordinates(path) -> bool:
     if not isinstance(payload, dict):
         return False
     model = str(payload.get("coordinate_model", "")).lower()
+    if model == FORZA_FONT_COORDINATE_MODEL:
+        return False
     return model in SCALED_TRACE_COORDINATE_MODELS
 
 
@@ -541,6 +595,7 @@ def render_typecode_geometry_rgba(
     pad: float,
     render_scale: float,
     scaled_trace: bool,
+    coordinate_model: str | None = None,
 ) -> tuple["object", "object"] | None:
     """Rasterize FH6 type-code shapes onto a fixed canvas with alpha compositing."""
     try:
@@ -564,7 +619,13 @@ def render_typecode_geometry_rgba(
         r, g, b, a = color_vals[0], color_vals[1], color_vals[2], color_vals[3]
         code = int(item.get("type_code", 0))
         rot = float(item.get("rotation", 0.0))
-        if scaled_trace:
+        if coordinate_model == FORZA_FONT_COORDINATE_MODEL:
+            px, py, pw, ph, rot = _forza_font_shape_pixels(item)
+            cx = (px - min_x + pad) * render_scale
+            cy = (py - min_y + pad) * render_scale
+            sx_screen = pw * render_scale
+            sy_screen = ph * render_scale
+        elif scaled_trace:
             px, py, pw, ph, rot = _scaled_trace_shape_pixels(item)
             cx = (px - min_x + pad) * render_scale
             cy = (py - min_y + pad) * render_scale
@@ -584,7 +645,8 @@ def render_typecode_geometry_rgba(
                 rh, rw, cx, cy, sx_screen, sy_screen, rot, compensate=True
             )
         elif style == "square":
-            if scaled_trace and abs(rot) < 1e-6:
+            use_layout_rect = scaled_trace or coordinate_model == FORZA_FONT_COORDINATE_MODEL
+            if use_layout_rect and abs(rot) < 1e-6:
                 ys, xs, mask = _rasterize_rect_mask(
                     rh, rw, cx, cy, sx_screen, sy_screen
                 )
@@ -639,8 +701,20 @@ def render_typecode_geometry_preview(path, max_size=None, *, skipped_badge: bool
         if not shapes:
             return None
         scaled_trace = _typecode_uses_scaled_trace_coordinates(path)
-        if scaled_trace:
-            trace_min_x, trace_min_y, trace_max_x, trace_max_y = _scaled_trace_bounds(shapes)
+        coordinate_model = None
+        try:
+            from preview.geometry_preview_cache import read_json_cached
+
+            payload = read_json_cached(path)
+            if isinstance(payload, dict):
+                coordinate_model = str(payload.get("coordinate_model", "")).lower() or None
+        except (OSError, ValueError, json.JSONDecodeError, UnicodeDecodeError):
+            coordinate_model = None
+        if scaled_trace or coordinate_model == FORZA_FONT_COORDINATE_MODEL:
+            trace_min_x, trace_min_y, trace_max_x, trace_max_y = _typecode_bounds(
+                shapes,
+                coordinate_model=coordinate_model,
+            )
             min_x = trace_min_x
             min_y = trace_min_y
             max_x = trace_max_x
@@ -668,6 +742,7 @@ def render_typecode_geometry_preview(path, max_size=None, *, skipped_badge: bool
             pad=pad,
             render_scale=render_scale,
             scaled_trace=scaled_trace,
+            coordinate_model=coordinate_model,
         )
         if rendered is None:
             return None

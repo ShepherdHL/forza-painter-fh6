@@ -25,6 +25,7 @@ SHAPE_MODE_ELLIPSES = "ellipses"
 SHAPE_MODE_CIRCLES = "circles"
 SHAPE_MODE_TRIANGLES = "triangles"
 SHAPE_MODE_MIXED = "mixed"
+SHAPE_MODE_STROKES = "strokes"
 
 TEXT_SHAPE_MODES = (
     SHAPE_MODE_RECTANGLES,
@@ -33,6 +34,7 @@ TEXT_SHAPE_MODES = (
     SHAPE_MODE_CIRCLES,
     SHAPE_MODE_TRIANGLES,
     SHAPE_MODE_MIXED,
+    SHAPE_MODE_STROKES,
 )
 
 _SHAPE_MODE_ALIASES = {
@@ -52,6 +54,10 @@ _SHAPE_MODE_ALIASES = {
     "diamonds": SHAPE_MODE_TRIANGLES,
     "mixed": SHAPE_MODE_MIXED,
     "auto": SHAPE_MODE_MIXED,
+    "stroke": SHAPE_MODE_STROKES,
+    "strokes": SHAPE_MODE_STROKES,
+    "rotated_rectangle": SHAPE_MODE_STROKES,
+    "rotated_rectangles": SHAPE_MODE_STROKES,
 }
 
 
@@ -187,6 +193,11 @@ def build_typecode_payload_from_mask(
 
         shapes = build_curved_typecode_shapes(mask, color, cell_size=cell_size)
         coordinate_model = TEXT_TYPECODE_CURVED_COORDINATE_MODEL
+    elif normalize_text_shape_mode(shape_mode) == SHAPE_MODE_STROKES:
+        from text_stroke_trace import STROKE_COORDINATE_MODEL, build_stroke_typecode_shapes
+
+        shapes = build_stroke_typecode_shapes(mask, color)
+        coordinate_model = STROKE_COORDINATE_MODEL
     else:
         rectangles = decompose_mask_to_rectangles(mask, cell_size=cell_size)
         if not rectangles:
@@ -666,6 +677,10 @@ def count_trace_layers_from_mask(
         from text_curved_trace import count_curved_shapes_from_mask
 
         return count_curved_shapes_from_mask(mask, cell_size=cell_size)
+    if normalize_text_shape_mode(shape_mode) == SHAPE_MODE_STROKES:
+        from text_stroke_trace import count_stroke_layers_from_mask
+
+        return count_stroke_layers_from_mask(mask)
     rectangles = decompose_mask_to_rectangles(mask, cell_size=cell_size)
     if not rectangles:
         return 0

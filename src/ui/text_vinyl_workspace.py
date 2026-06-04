@@ -85,6 +85,8 @@ class TextVinylWorkspace:
         self._last_font_recommendation: FontRecommendation | None = None
         self._layer_estimate_signature: tuple | None = None
         self._fonts_deep_scanned: set[str] = set()
+        self._font_refresh_buttons: list[Button] = []
+        self._fonts_scanning = False
         self.text_panels = {
             script: {
                 "input": StringVar(),
@@ -211,7 +213,6 @@ class TextVinylWorkspace:
         )
         action_row = Frame(action_box)
         action_row.pack(fill="x", padx=10, pady=(0, 12))
-        app._button(action_row, "text_font_refresh", self.refresh_fonts).pack(side=LEFT)
         app._button(
             action_row,
             "text_generate_typed",
@@ -678,6 +679,18 @@ class TextVinylWorkspace:
         font_actions = Frame(typed)
         font_actions.pack(fill="x", padx=10, pady=(0, 10))
         app._button(font_actions, "text_font_browse", lambda s=script: self.browse_font(s)).pack(side=LEFT)
+        refresh_btn = app._button(
+            font_actions,
+            "text_font_refresh",
+            lambda: self.refresh_fonts(full_rescan=True),
+        )
+        refresh_btn.pack(side=LEFT, padx=(8, 0))
+        self._font_refresh_buttons.append(refresh_btn)
+        if script == SCRIPT_UNIVERSAL:
+            load_hint = app._label(font_actions, "text_font_refresh_hint", anchor="w", theme_role="muted")
+            load_hint.pack(side=LEFT, padx=(12, 0))
+            app._bind_wraplength(load_hint, font_actions, padding=8)
+            app.translated.append((load_hint, "text_font_refresh_hint", "text"))
 
         widgets["char_pickers"] = []
         if script == SCRIPT_UNIVERSAL:
@@ -960,23 +973,42 @@ class TextVinylWorkspace:
                 by_path[font.path] = font
         return tuple(sorted(by_path.values(), key=lambda item: (-item.score, item.display_name.lower())))
 
-    def refresh_fonts(self, *, full_rescan: bool = True) -> None:
+    def _set_font_refresh_enabled(self, enabled: bool) -> None:
+        state = "normal" if enabled else "disabled"
+        for button in self._font_refresh_buttons:
+            if self.app._widget_alive(button):
+                button.configure(state=state)
+
+    def refresh_fonts(self, *, full_rescan: bool = False) -> None:
         if full_rescan:
             clear_font_discovery_cache()
             self._fonts_deep_scanned.clear()
+            self._fonts_scanning = True
+            self._set_font_refresh_enabled(False)
         tier1 = {
             script: tuple(font for font in default_fonts_for_script(script) if font.path.exists())
             for script in TEXT_SCRIPT_IDS
         }
-        self.apply_fonts_by_script(tier1, merge=False)
-        self.app.log_line(self._tr("text_log_scanning_fonts"))
-        threading.Thread(
-            target=self._refresh_fonts_worker,
-            args=(self.active_script(), full_rescan),
-            daemon=True,
-        ).start()
+        self.apply_fonts_by_script(tier1, merge=not full_rescan, log=False)
+        if full_rescan:
+            self.app.log_line(self._tr("text_log_scanning_fonts"))
+            threading.Thread(
+                target=self._refresh_fonts_worker,
+                args=(self.active_script(),),
+                daemon=True,
+            ).start()
+        else:
+            self.app.log_line(
+                self._tr("text_log_fonts_tier1").format(
+                    latin=len(tier1.get(SCRIPT_UNIVERSAL, ())),
+                    japanese=len(tier1.get(SCRIPT_JAPANESE, ())),
+                    kaomoji=len(tier1.get(SCRIPT_KAOMOJI, ())),
+                    korean=len(tier1.get(SCRIPT_KOREAN, ())),
+                    chinese=len(tier1.get(SCRIPT_CHINESE, ())),
+                )
+            )
 
-    def _refresh_fonts_worker(self, priority_script: str, full_rescan: bool) -> None:
+    def _refresh_fonts_worker(self, priority_script: str) -> None:
         try:
             order = [priority_script] + [s for s in TEXT_SCRIPT_IDS if s != priority_script]
             fonts_by_script: dict[str, tuple[DiscoveredFont, ...]] = {}
@@ -989,27 +1021,20 @@ class TextVinylWorkspace:
                 fonts_by_script[script] = fonts
                 self._fonts_deep_scanned.add(script)
                 self.queue.put(("text_fonts_ready", ({script: fonts}, True, False)))
+                self.queue.put(
+                    (
+                        "log",
+                        self._tr("text_log_fonts_scanned_script").format(
+                            script=self._tr(self._script_tab_key(script)),
+                            count=len(fonts),
+                        ),
+                    )
+                )
             if fonts_by_script:
                 self.queue.put(("text_fonts_ready", (fonts_by_script, True, True)))
         except Exception as exc:
             self.queue.put(("log", self._tr("text_log_font_scan_failed").format(error=exc)))
-
-    def _schedule_font_scan_for_script(self, script: str) -> None:
-        if script in self._fonts_deep_scanned:
-            return
-        threading.Thread(target=self._scan_one_script_fonts_worker, args=(script,), daemon=True).start()
-
-    def _scan_one_script_fonts_worker(self, script: str) -> None:
-        try:
-            fonts = tuple(
-                font
-                for font in discover_fonts_for_script_cached(script, deep_scan=True)
-                if font.path.exists()
-            )
-            self._fonts_deep_scanned.add(script)
-            self.queue.put(("text_fonts_ready", ({script: fonts}, True, False)))
-        except Exception as exc:
-            self.queue.put(("log", self._tr("text_log_font_scan_failed").format(error=exc)))
+            self.queue.put(("text_fonts_scan_done", None))
 
     def _refresh_script_font_combo(self, script: str) -> None:
         panel = self._panel(script)
@@ -1055,6 +1080,9 @@ class TextVinylWorkspace:
                 )
             else:
                 self.app.log_line(self._tr("text_log_no_fonts"))
+        if log and self._fonts_scanning:
+            self._fonts_scanning = False
+            self._set_font_refresh_enabled(True)
         self._schedule_coverage_check()
 
     def browse_font(self, script: str | None = None) -> None:
@@ -1084,7 +1112,6 @@ class TextVinylWorkspace:
             self._schedule_layer_estimate()
 
     def _on_script_tab_changed(self) -> None:
-        self._schedule_font_scan_for_script(self.active_script())
         self._schedule_coverage_check()
         self._update_forza_controls_state()
         self._schedule_layer_estimate()

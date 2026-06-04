@@ -12,6 +12,16 @@ Release notes for Forza Painter FH6. The in-app update prompt reads from this fi
 
 ## Unreleased
 
+## v1.6.X-beta-3 / 2026-06-03
+
+**v.1.6.X Beta-3** — Text-vinyl stroke tracing, and tooling updates.
+
+- **Text vinyl:** New **Strokes** shape mode — rotated rectangle bars for fewer layers on Latin/CJK traced text.
+- **Preview:** Forza in-game font JSON previews use the correct coordinate decode and bounds.
+- **Tools:** [delphitools](https://tools.rmv.fyi/) added to Background Removal suggestions (privacy-first browser prep tools).
+
+Download `forza-painter-fh6-v1.6.X-beta-3.exe` from [Releases](https://github.com/ShepherdHL/forza-painter-fh6/releases).
+
 ## v1.6.X-beta-2 / 2026-06-03
 
 **v.1.6.X Beta-2** — import hotfix for FH6 layer-table safety checks and template capacity messaging.

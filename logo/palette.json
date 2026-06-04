@@ -1,8 +1,0 @@
-{
-  "name": "Forza Painter",
-  "colors": {
-    "orange": { "hex": "#FF6A00", "role": "fused FP letterforms, PAINTER text" },
-    "white": { "hex": "#FFFFFF", "role": "brush ferrule and bristles, FORZA text" },
-    "black": { "hex": "#000000", "role": "background and negative-space channels" }
-  }
-}

@@ -43,7 +43,6 @@ datas = [
     (str(ROOT / "shape library"), "shape library"),
     (str(SRC / "_build_profile.json"), "."),
 ]
-
 if VARIANT.get("embed_bin", True):
     datas.append((str(ROOT / "bin"), "bin"))
 
@@ -98,6 +97,7 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe_name = "forza-painter-fh6"
+exe_icon = None
 console = bool(VARIANT.get("console", False))
 debug = bool(VARIANT.get("debug", False))
 strip = bool(VARIANT.get("strip", False))
@@ -127,6 +127,7 @@ if _onefile:
         codesign_identity=None,
         entitlements_file=None,
         onefile=True,
+        icon=exe_icon,
     )
 else:
     exe = EXE(
@@ -147,6 +148,7 @@ else:
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
+        icon=exe_icon,
     )
     coll = COLLECT(
         exe,

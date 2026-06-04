@@ -750,9 +750,11 @@ def find_font_for_text(
         raise FileNotFoundError(f"Font not found: {path}")
 
     if script:
-        fonts = discover_fonts_for_script(script)
+        fonts = tuple(default_fonts_for_script(script))
+        if not fonts:
+            fonts = discover_fonts_for_script_cached(script, deep_scan=False)
     else:
-        fonts = discover_cjk_fonts()
+        fonts = discover_cjk_fonts(deep_scan=False)
     if text.strip() and fonts:
         recommendation = recommend_font_for_text(text, script=script)
         if recommendation.font is not None:
@@ -927,9 +929,12 @@ def _fonts_for_recommendation(
     if fonts:
         return tuple(fonts)
     target = script or SCRIPT_UNIVERSAL
+    starter = tuple(default_fonts_for_script(target))
+    if starter:
+        return starter
     if target == SCRIPT_KAOMOJI or (target == SCRIPT_UNIVERSAL and text_looks_like_kaomoji(text)):
-        return discover_fonts_for_script_cached(SCRIPT_KAOMOJI, deep_scan=True)
-    return discover_fonts_for_script_cached(target, deep_scan=True)
+        return discover_fonts_for_script_cached(SCRIPT_KAOMOJI, deep_scan=False)
+    return discover_fonts_for_script_cached(target, deep_scan=False)
 
 
 @dataclass(frozen=True)

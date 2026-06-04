@@ -296,6 +296,11 @@ TEXT_JA: dict[str, str] = {
     "tools_bg_remove_hint": "背景除去には複数の方法があります。オンラインツールは手早い書き出しに、デスクトップアプリはビニール準備の細かい制御に向いています。",
     "tools_bg_online_title": "オンライン（手早い書き出し）",
     "tools_bg_desktop_title": "デスクトップ（細かい制御）",
+    "tools_bg_delphitools_title": "delphitools",
+    "tools_bg_delphitools_desc": (
+        "プライバシー優先のブラウザーツール（tools.rmv.fyi）。ログイン・追跡なし、処理は端末内で完結。"
+        "背景除去、パレット抽出、ピクセルピッカー、画像トレース・クリップなど。JSON 生成前のデカール・ビニール準備に。"
+    ),
     "tools_bg_iloveimg_title": "iloveimg — 背景除去",
     "tools_bg_iloveimg_desc": "無料ブラウザー：アップロード、背景除去、PNG ダウンロード。デカールやロゴの即席処理に。",
     "tools_bg_pixlr_title": "Pixlr — 背景除去",
