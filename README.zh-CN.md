@@ -1,3 +1,18 @@
+> **⚠️ 实验性分支**
+>
+> 本 Forza Painter 分支为实验性质，用作向[原版](https://github.com/bvzrays/forza-painter-fh6)提交潜在更新的试验平台。
+>
+> 虽然本版本功能完整，但可能出现不可预测的结果。若出于任何原因使用此版本，请谨慎操作。
+>
+>
+> **官方 Forza Painter 工具**
+>
+> | 工具 | 链接 | 说明 |
+> | --- | --- | --- |
+> | **the_adawg 生成器** | [forza-painter](https://github.com/forza-painter/forza-painter) | 面向 Forza Horizon 4 与 5 的原始 Forza Painter。 |
+> | **Bvzray 生成器** | [forza-painter-fh6](https://github.com/bvzrays/forza-painter-fh6) | 本工具的官方版本。**推荐日常使用。** |
+> | **Kloudy 生成器** | [kloudys-forza-painter-suite](https://github.com/heyitshestia/kloudys-forza-painter-suite) · [NexusMods（备选）](https://www.nexusmods.com/forzahorizon6/mods/214) | 在 Forza Painter Discord 官方支持。包含完整贴膜编辑套件（类似游戏内编辑器）。 |
+
 <h1 align="center">forza-painter FH6</h1>
 
 <p align="center">

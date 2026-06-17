@@ -1,3 +1,18 @@
+> **⚠️ 実験的フォーク**
+>
+> この Forza Painter フォークは実験的なもので、[オリジナル版](https://github.com/bvzrays/forza-painter-fh6)への更新候補を試すためのテストベッドとして使われています。
+>
+> 本バージョンは完全に動作しますが、予測不能な結果を示す場合があります。この版を使用する場合は、十分に注意してください。
+>
+>
+> **公式 Forza Painter ツール**
+>
+> | ツール | リンク | 説明 |
+> | --- | --- | --- |
+> | **the_adawg's Generator** | [forza-painter](https://github.com/forza-painter/forza-painter) | Forza Horizon 4 & 5 向けに開発されたオリジナルの Forza Painter。 |
+> | **Bvzray's Generator** | [forza-painter-fh6](https://github.com/bvzrays/forza-painter-fh6) | 本ツールの公式版。**通常使用にはこちらを推奨。** |
+> | **Kloudy's Generator** | [kloudys-forza-painter-suite](https://github.com/heyitshestia/kloudys-forza-painter-suite) · [NexusMods（代替）](https://www.nexusmods.com/forzahorizon6/mods/214) | Forza Painter Discord で公式サポート。ゲーム内エディターに類似したビニール編集スイート付き。 |
+
 <h1 align="center">forza-painter FH6</h1>
 
 <p align="center">

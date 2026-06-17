@@ -1,3 +1,18 @@
+> **⚠️ 실험적 포크**
+>
+> 이 Forza Painter 포크는 실험용이며, [원본](https://github.com/bvzrays/forza-painter-fh6)에 대한 잠재적 업데이트를 시험하기 위한 테스트베드로 사용됩니다.
+>
+> 이 버전은 완전히 작동하지만 예측 불가능한 결과가 나타날 수 있습니다. 어떤 이유로든 이 버전을 사용하려면 주의하세요.
+>
+>
+> **공식 Forza Painter 도구**
+>
+> | 도구 | 링크 | 설명 |
+> | --- | --- | --- |
+> | **the_adawg's Generator** | [forza-painter](https://github.com/forza-painter/forza-painter) | Forza Horizon 4 & 5용으로 개발된 원본 Forza Painter. |
+> | **Bvzray's Generator** | [forza-painter-fh6](https://github.com/bvzrays/forza-painter-fh6) | 이 도구의 공식 버전. **일반 사용 시 권장.** |
+> | **Kloudy's Generator** | [kloudys-forza-painter-suite](https://github.com/heyitshestia/kloudys-forza-painter-suite) · [NexusMods (대체)](https://www.nexusmods.com/forzahorizon6/mods/214) | Forza Painter Discord에서 공식 지원. 게임 내 에디터와 유사한 비닐 편집 스위트 포함. |
+
 <h1 align="center">forza-painter FH6</h1>
 
 <p align="center">

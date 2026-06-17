@@ -1,3 +1,18 @@
+> **⚠️ Experimental fork**
+>
+> This fork of Forza Painter is experimental, and is used as a testbed for potential updates to the [original](https://github.com/bvzrays/forza-painter-fh6).
+>
+> While this version is fully functional, it may exhibit unpredictable results. If you wish to use this iteration for whatever reason, exercise caution.
+>
+>
+> **Official Forza Painter Tools**
+>
+> | Tool | Link | Notes |
+> | --- | --- | --- |
+> | **the_adawg's Generator** | [forza-painter](https://github.com/forza-painter/forza-painter) | The original Forza Painter developed for Forza Horizon 4 & 5. |
+> | **Bvzray's Generator** | [forza-painter-fh6](https://github.com/bvzrays/forza-painter-fh6) | The official version of this tool. **Recommended for normal use.** |
+> | **Kloudy's Generator** | [kloudys-forza-painter-suite](https://github.com/heyitshestia/kloudys-forza-painter-suite) · [NexusMods (Alt)](https://www.nexusmods.com/forzahorizon6/mods/214) | Officially supported in the Forza Painter Discord. Includes a full Vinyl Editing Suite (similar to the in-game editor). |
+
 <h1 align="center">forza-painter FH6</h1>
 
 <p align="center">
